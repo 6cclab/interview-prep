@@ -4,18 +4,27 @@ import { findCelebrity } from './solution'
 
 /**
  * Build a knows-matrix for a party of `n` where `celebrity` (or nobody, when
- * null) satisfies both celebrity properties. Non-celebrities know the
- * celebrity and a scattering of each other; everybody knows themselves.
+ * null) satisfies both celebrity properties. Both branches build a dense
+ * total order rather than a sparse one, and that density is deliberate:
+ * a naive candidate-by-candidate scan that bails out on the first
+ * disqualifying pair can't reject a candidate cheaply, because everyone
+ * below the candidate "knows" everyone above it — the scan only discovers
+ * the disqualifying pair once it works most of the way through that
+ * candidate's row/column. A sparse matrix would let such a scan reject
+ * every candidate in 1-2 calls and sneak under the call budget by
+ * accident, which would defeat the whole point of the drill: rejecting a
+ * correct-but-brute-force solution, not just a wrong one.
  *
  * The no-celebrity case uses a total order (a knows b whenever a < b) plus
- * one wraparound edge (n-1 knows 0). This is deliberate: a naive
- * candidate-by-candidate scan that bails out on the first disqualifying
- * pair can't reject candidate c cheaply, because everyone below c "knows"
- * everyone above c — the scan only discovers the disqualifying pair once it
- * reaches other = c + 1. A sparser matrix lets that scan reject every
- * candidate in ~2 calls and stay under budget by accident.
+ * one wraparound edge (n-1 knows 0). The celebrity case uses the same
+ * total-order backbone among the non-celebrities, plus every non-celebrity
+ * knowing the celebrity.
  */
 function party(n: number, celebrity: number | null): boolean[][] {
+  if (celebrity === null && n === 1) {
+    throw new Error('party(1, null) is impossible: a lone person is vacuously a celebrity')
+  }
+
   const m = Array.from({ length: n }, () => Array<boolean>(n).fill(false))
   for (let a = 0; a < n; a++) m[a]![a] = true
 
@@ -30,8 +39,7 @@ function party(n: number, celebrity: number | null): boolean[][] {
   for (let a = 0; a < n; a++) {
     if (a === celebrity) continue
     m[a]![celebrity] = true
-    const other: number = (a + 1) % n
-    if (other !== celebrity && other !== a) m[a]![other] = true
+    for (let b: number = a + 1; b < n; b++) if (b !== celebrity) m[a]![b] = true
   }
   return m
 }
@@ -87,6 +95,10 @@ describe('findCelebrity — correctness', () => {
 })
 
 describe('findCelebrity — budget', () => {
+  // The canonical two-pass solution costs 3n - 3 knows() calls (n - 1 to
+  // find a candidate, up to 2(n - 1) to verify it), so the 3n bound below
+  // is tight by design — it leaves just enough slack for the reference
+  // algorithm while still rejecting an O(n^2) brute force.
   it('stays within 3n knows() calls on a large party', () => {
     const n = 500
     const knows = oracleFor(party(n, 317))
