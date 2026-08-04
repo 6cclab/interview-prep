@@ -14,6 +14,8 @@ budget-enforcing tests, and rationed hints.
 | Coding | `problems/`, `solutions/` | `/drill` | live |
 | System design | `system-design/` | `/design` | live |
 | Behavioral | `behavioral/`, `local/stories.md` | `/mock` | live |
+| Debugging | `debugging/` | `/debug` | live |
+| Feature build | `feature/` | `/feature` | live |
 | Company prep | `local/companies/` | `/prep` | live |
 
 ## Layout
@@ -61,6 +63,20 @@ problem hands the solver an expensive operation:
 When authoring a new problem, prove the suite three ways before committing: it
 must fail a wrong solution, fail a brute-force solution, and pass the reference.
 A suite a brute-force answer passes is broken, whatever the reference does.
+
+The other tracks use the same idea with a different discriminator:
+
+- **Debugging** — `repro.test.ts` reproduces the reported symptom and a symptom
+  patch turns it green; `invariant.test.ts` covers a second path with the same
+  defect and only a root-cause fix turns it green. Prove it by applying the most
+  tempting local patch and confirming `invariant` stays red.
+- **Feature** — `regression.test.ts` ships green and guards existing behaviour;
+  `feature.test.ts` ships red and defines done. Prove the regression suite has
+  teeth by making a careless change and confirming it is caught.
+
+Note what "ships red" means per track: coding and feature stubs throw
+`not implemented`; debugging exercises fail on assertions, because the bug is
+real code doing the wrong thing.
 
 ## job-search link
 

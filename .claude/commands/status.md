@@ -15,6 +15,7 @@ worthless.
 - `problems/*/` — which patterns have a problem authored yet
 - `local/drill-log.md` — attempts, hints, dates
 - `local/designs/` and `local/stories.md` — if they exist yet
+- `debugging/*/` and `feature/*/` — exercises authored
 - `local/companies/` — companies prepped
 
 ## Report
@@ -30,6 +31,13 @@ hasn't landed.
 
 **Behavioral.** Competencies with at least one story in `local/stories.md`, and
 which have none. Skip with one line if phase 4 hasn't landed.
+
+**Debugging.** Exercises attempted out of those authored, and for each whether the
+first attempt reached the root cause or stopped at a symptom patch. The
+symptom-patch rate is the number worth watching — it does not improve by itself.
+
+**Feature build.** Exercises attempted, whether `regression.test.ts` stayed green
+each time, and the rubric dimension scoring weakest across attempts.
 
 **Company prep.** Companies with a file in `local/companies/`, and any gap notes
 still open.
