@@ -35,7 +35,7 @@ problem `README`s deliberately never name it. `patterns.md` maps each pattern to
 its *tell* — what in a problem statement should make you reach for it — and is
 meant to be read between sessions, not during.
 
-**Tests reject brute force.** Where a problem hands you an expensive oracle, the
+**Tests separate correct from optimal.** Where a problem hands you an expensive oracle, the
 suite counts calls and asserts a budget. Celebrity caps `knows()` at `3n`, so an
 O(n²) solution returning the right person still fails. Green means you found the
 insight, not that the output matched.

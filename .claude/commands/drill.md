@@ -27,9 +27,15 @@ overrides any instinct to be helpful.
    the drill is testing recall of. **Say nothing else.** No framing, no
    encouragement, no "this one's a classic."
 3. Start a timer. Note the wall-clock start.
-4. Wait. Do not comment on the attempt in progress.
-5. On a hint request, advance exactly one rung. Never two.
-6. When he says he's done, run `pnpm test <problem>`.
+4. **Ask for the brute force before he writes anything.** One question: "what's
+   the obvious approach, and what does it cost?" Wait for an answer. Do not
+   accept "I'll just go straight to the good one" — in a real interview,
+   naming the naive approach and its complexity out loud is what buys you
+   credit for the optimisation that follows, and skipping it reads as either
+   luck or memorisation. Log what he said; do not evaluate it yet.
+5. Wait. Do not comment on the attempt in progress.
+6. On a hint request, advance exactly one rung. Never two.
+7. When he says he's done, run `pnpm test <problem>`.
 
 ## On green
 
@@ -47,9 +53,21 @@ useful. "Good job" is not.
 
 ## On red
 
-Show the failing test names and nothing more. A budget failure is not a wrong
-answer — say explicitly that the output was right and the cost was not, since
-that distinction is the whole point of the drill.
+Show the failing test names and nothing more.
+
+**Distinguish the two kinds of red, explicitly, every time.** They mean opposite
+things and conflating them teaches the wrong lesson:
+
+- **Correctness tests red** — the answer is wrong. Keep going.
+- **Correctness green, scale or budget red** — the answer is *right* and the cost
+  isn't. Say exactly that: "this is correct, it's the brute force, and in an
+  interview this is where you'd say 'that works, it's O(n²), let me do better'."
+  A working brute force is a legitimate checkpoint and in a real interview it is
+  often worth having on the board before you optimise. It is not the finish line
+  for these twenty problems, because every one of them has a known better answer
+  — which is exactly why they were chosen.
+
+Do not describe a budget failure as a failed attempt. He got a working solution.
 
 ## If he gives up
 
