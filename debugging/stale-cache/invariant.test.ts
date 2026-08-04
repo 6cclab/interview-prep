@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { Session } from './src/session'
 import { DataClient, type ResourceRecord } from './src/dataClient'
 import { ResourceCache, type Clock } from './src/cache'
-import { renderDashboardWidget } from './src/dashboardWidget'
 import { renderProfilePanel } from './src/profilePanel'
 
 const FIXED_TIME = 1_700_000_000_000
@@ -20,9 +19,8 @@ describe('profile panel after an account switch made from the global nav', () =>
     const session = new Session({ accountId: 'acct-alpha', userId: 'user-1' })
     const cache = new ResourceCache<ResourceRecord>({ ttlMs: 300_000, clock: fixedClock(FIXED_TIME) })
 
-    // The user browses the dashboard for a bit before switching accounts,
-    // same as they would in the field.
-    await renderDashboardWidget(session, cache, dataClient, 'res-9')
+    // The user views the profile panel before switching accounts.
+    await renderProfilePanel(session, cache, dataClient, 'res-9')
 
     // The account switch happens through the global nav switcher this time,
     // not the dashboard's own control.
