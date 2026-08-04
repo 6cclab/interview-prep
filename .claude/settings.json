@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm test:*)",
+      "Bash(pnpm reset:*)",
+      "Bash(pnpm bootstrap)",
+      "Bash(pnpm typecheck)",
+      "Bash(pnpm install)"
+    ]
+  }
+}
