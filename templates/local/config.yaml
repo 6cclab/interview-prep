@@ -1,0 +1,7 @@
+# Optional link back to the job-search repo.
+#
+# When set, /prep can read master-resume.md to write its gap note against your
+# real record, and /mock can critique behavioral answers against
+# communication-style.md. When unset or wrong, those steps are skipped with a
+# note — nothing errors.
+job_search_path: ~/job-search

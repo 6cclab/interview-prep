@@ -1,0 +1,9 @@
+pattern: elimination
+title: Find the Celebrity
+difficulty: medium
+budget: 3n calls to knows()
+companies:
+  - name: toast
+    confidence: high
+    source: asked of Andre directly in a prior interview conversation
+    date: "pre-2026-08"
