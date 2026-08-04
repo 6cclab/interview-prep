@@ -67,6 +67,11 @@ describe('maxArea — scale', () => {
 
     const expected = SPIKE * (j0 - i0)
 
-    expect(maxArea(heights)).toBe(expected)
+    const t0 = performance.now()
+    const result = maxArea(heights)
+    const elapsed = performance.now() - t0
+
+    expect(result).toBe(expected)
+    expect(elapsed).toBeLessThan(5000)
   })
 })

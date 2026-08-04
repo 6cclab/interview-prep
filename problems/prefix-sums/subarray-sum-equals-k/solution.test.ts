@@ -78,6 +78,11 @@ describe('subarraySum — scale', () => {
     const rand = mulberry32(SEED)
     const nums = Array.from({ length: N }, () => Math.floor(rand() * (2 * RANGE + 1)) - RANGE)
 
-    expect(subarraySum(nums, K)).toBe(1_534_884)
+    const t0 = performance.now()
+    const result = subarraySum(nums, K)
+    const elapsed = performance.now() - t0
+
+    expect(result).toBe(1_534_884)
+    expect(elapsed).toBeLessThan(5000)
   })
 })

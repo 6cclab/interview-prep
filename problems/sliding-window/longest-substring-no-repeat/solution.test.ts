@@ -64,6 +64,11 @@ describe('lengthOfLongestSubstring — scale', () => {
     const chars = Array.from({ length: n }, (_, i) => String.fromCodePoint(0x100 + i))
     const s = shuffled(chars, rng).join('')
 
-    expect(lengthOfLongestSubstring(s)).toBe(n)
+    const t0 = performance.now()
+    const result = lengthOfLongestSubstring(s)
+    const elapsed = performance.now() - t0
+
+    expect(result).toBe(n)
+    expect(elapsed).toBeLessThan(5000)
   })
 })

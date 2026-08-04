@@ -138,8 +138,11 @@ describe('mergeIntervals — scale', () => {
     const chain: Interval[] = Array.from({ length: N }, (_, i) => [i, i + 2])
     const input = shuffled(chain, mulberry32(SEED))
 
+    const t0 = performance.now()
     const result = mergeIntervals(input)
+    const elapsed = performance.now() - t0
 
     expect(result).toEqual([[0, N + 1]])
+    expect(elapsed).toBeLessThan(5000)
   })
 })
