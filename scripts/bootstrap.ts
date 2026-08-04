@@ -25,7 +25,7 @@ export function seedLocal(templatesDir: string, destDir: string): string[] {
   return created
 }
 
-const isCli = process.argv[1]?.endsWith('setup.ts')
+const isCli = process.argv[1]?.endsWith('bootstrap.ts')
 if (isCli) {
   const created = seedLocal(TEMPLATES, DEST)
   if (created.length === 0) {
