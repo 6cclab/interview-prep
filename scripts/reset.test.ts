@@ -52,6 +52,11 @@ describe('resetProblem', () => {
     expect(() => resetProblem('does-not-exist', root)).toThrow(/no problem named "does-not-exist"/i)
   })
 
+  it('resolves a qualified pattern/problem form', () => {
+    const dir = seedProblem('elimination', 'celebrity', 'STUB', 'MY ANSWER')
+    expect(resetProblem('elimination/celebrity', root)).toBe(dir)
+  })
+
   it('throws when the same problem name exists under two patterns', () => {
     seedProblem('elimination', 'duplicate', 'A', 'A')
     seedProblem('intervals', 'duplicate', 'B', 'B')

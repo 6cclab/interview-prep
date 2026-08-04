@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 const DEFAULT_ROOT = 'problems'
 
@@ -25,7 +25,7 @@ function problemDirs(root: string): string[] {
  */
 export function resetProblem(name: string, root: string = DEFAULT_ROOT): string {
   const matches = problemDirs(root).filter(
-    (dir) => dir.split('/').at(-1) === name,
+    (dir) => basename(dir) === name || dir === join(root, name),
   )
 
   if (matches.length === 0) {
