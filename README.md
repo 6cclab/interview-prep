@@ -53,4 +53,6 @@ a solve at rung 3 and a cold solve are different facts.
 | `patterns.md` | pattern → tell → insight |
 | `system-design/` | prompts, rubrics, and worked references |
 | `behavioral/` | competency map and question bank |
+| `debugging/` | planted-bug exercises; find the root cause, not the symptom |
+| `feature/` | build a ticket in an existing service without breaking it |
 | `local/` | gitignored: your log, designs, stories, company research |
