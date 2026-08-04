@@ -2,10 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(pnpm test:*)",
+      "Bash(pnpm test:watch)",
       "Bash(pnpm reset:*)",
       "Bash(pnpm bootstrap)",
       "Bash(pnpm typecheck)",
       "Bash(pnpm install)"
+    ],
+    "ask": [
+      "Read(./solutions/**)",
+      "Read(./patterns.md)"
     ]
   }
 }

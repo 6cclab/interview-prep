@@ -10,7 +10,8 @@ worthless.
 
 ## Read
 
-- `patterns.md` — the full pattern list (the denominator)
+- `patterns.md` — count the rows for the denominator only. Do not read the
+  insight column — it is a spoiler for every problem in the repo.
 - `problems/*/` — which patterns have a problem authored yet
 - `local/drill-log.md` — attempts, hints, dates
 - `local/designs/` and `local/stories.md` — if they exist yet
@@ -19,9 +20,9 @@ worthless.
 ## Report
 
 **Coding.** Patterns with a problem authored, out of 20. Of those, how many
-solved cold (rung 0–1), how many needed rung 3+, how many never attempted.
-Name the three rustiest specifically — a pattern solved once six weeks ago at
-rung 3 is rust, not coverage.
+solved cold (rung 0), how many solved with a nudge (rung 1), how many needed
+rung 3+, how many never attempted. Name the three rustiest specifically — a
+pattern solved once six weeks ago at rung 3 is rust, not coverage.
 
 **System design.** Prompts attempted out of those authored, and the rubric
 dimensions scoring weakest across attempts. Skip with one line if phase 3

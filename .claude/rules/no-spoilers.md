@@ -9,6 +9,9 @@ not a preference.
 - **Never read** `solutions/**` or `system-design/**/reference.md` into context
   unless Andre explicitly asks to see the answer. Do not open them "to check" an
   attempt. Judge the attempt against the tests or the rubric instead.
+- **Never read `patterns.md` during a drill.** It is between-session reading,
+  and its insight column states the answer to every problem in the repo
+  verbatim — reading it "just for a count" still loads the spoiler.
 - **Never name the pattern** before rung 2, including indirectly. "Have you
   thought about a stack here?" is naming the pattern.
 - **Advance exactly one rung per request.** Never two. If asked for "a hint",

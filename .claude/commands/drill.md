@@ -22,7 +22,9 @@ overrides any instinct to be helpful.
 1. Reset if the working file already holds a past answer and he wants a clean
    attempt: `pnpm reset <problem>`. Ask first — re-reading his own old solution
    is legitimate spaced review.
-2. Print the problem's `README.md`. **Say nothing else.** No framing, no
+2. Paste the contents of the problem's `README.md`. **Do not display its file
+   path** — the path contains the pattern name, which is the answer to what
+   the drill is testing recall of. **Say nothing else.** No framing, no
    encouragement, no "this one's a classic."
 3. Start a timer. Note the wall-clock start.
 4. Wait. Do not comment on the attempt in progress.
