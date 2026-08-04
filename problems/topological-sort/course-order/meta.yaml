@@ -1,0 +1,8 @@
+pattern: topological-sort
+title: Course Order
+difficulty: medium
+companies:
+  - name: amazon
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 210); not tied to a specific conversation of Andre's
+    date: "general"
