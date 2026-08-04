@@ -4,34 +4,40 @@ import { findCelebrity } from './solution'
 
 /**
  * Build a knows-matrix for a party of `n` where `celebrity` (or nobody, when
- * null) satisfies both celebrity properties. Both branches build a dense
- * total order rather than a sparse one: `a knows b` whenever `a < b`
- * (celebrity aside), so every candidate has many disqualifying witnesses
- * rather than one or two.
- *
- * Density alone does not close the budget against every brute force,
- * though. It only makes a fixed probe order expensive when that order
- * runs against the grain of the total order (e.g. an inner scan from 0
- * upward has to walk through most of a candidate's row before hitting a
- * witness). A probe order that runs the other way — starting from the
- * high end, or wrapping around — finds a disqualifying witness in one or
- * two calls on this same matrix, because the witnesses for "a knows b"
- * all sit on the low side of a. Reversing the order's direction (see
- * `reverseOrientation` below) relabels which indices are "high" and which
- * are "low", which flips which probe orders are cheap and which are
- * expensive. So no single fixed probe order can be cheap on both a
- * matrix and its reverse — that is what actually rejects every O(n^2)
- * brute force, and it's why the budget tests below assert on both
- * orientations. A sparse matrix would let a lucky probe order reject
- * every candidate in 1-2 calls regardless of orientation and sneak under
- * the budget by accident, which would defeat the whole point of the
- * drill: rejecting a correct-but-brute-force solution, not just a wrong
- * one.
+ * null) satisfies both celebrity properties.
  *
  * The no-celebrity case uses a total order (a knows b whenever a < b) plus
  * one wraparound edge (n-1 knows 0). The celebrity case uses the same
  * total-order backbone among the non-celebrities, plus every non-celebrity
  * knowing the celebrity.
+ *
+ * Both branches are dense rather than sparse, and that is deliberate. In a
+ * sparse matrix almost every candidate has a single disqualifying witness
+ * sitting in a predictable place, so a brute force that happens to probe
+ * that place first rejects each candidate in one or two calls and sneaks
+ * under an O(n) budget while doing O(n^2) work. Here every candidate `a`
+ * has a whole block of witnesses — every index above `a` in the order —
+ * so there is no globally cheap "just check this one person" shortcut.
+ *
+ * Density alone is still not enough, because the layout of those witnesses
+ * is itself structured: they all sit on one side of the candidate. Any
+ * fixed probe order that runs with the grain of the order (from the high
+ * end, or wrapping around) finds a witness in a call or two, and any order
+ * that runs against it pays O(n) per candidate. Which orders are cheap is
+ * therefore an artifact of the labelling, not of the algorithm.
+ *
+ * So the budget is not asserted on a handful of hand-picked fixtures. It is
+ * asserted across many parties built by `permutedParty`, each of which
+ * applies a fresh random relabelling on top of this builder. Relabelling
+ * preserves the celebrity properties exactly while scattering each
+ * candidate's witnesses to uniformly random positions, so a fixed probe
+ * order has no better strategy than sampling at random: it expects to burn
+ * ~n/(witnesses+1) probes per candidate, and candidates late in the order
+ * have very few witnesses. No fixed probe order can be cheap on every
+ * relabelling, so every correct-but-brute-force solution blows the budget
+ * on at least one trial, while the reference two-pass elimination stays at
+ * 3n-3 calls on all of them. The randomness is seeded (see `SEED`), so the
+ * suite is fully deterministic and reproducible.
  */
 function party(n: number, celebrity: number | null): boolean[][] {
   if (celebrity === null && n === 1) {
@@ -57,12 +63,50 @@ function party(n: number, celebrity: number | null): boolean[][] {
   return m
 }
 
-/** Relabel a party so index i becomes n-1-i, reversing the total order's direction. */
-function reverseOrientation(m: boolean[][]): boolean[][] {
-  const n = m.length
-  return Array.from({ length: n }, (_, a) =>
-    Array.from({ length: n }, (_, b) => m[n - 1 - a]![n - 1 - b]!),
+/** Fixed seed: the budget tests are randomised but fully reproducible. */
+const SEED = 0x5eed_1234
+
+/** mulberry32 — a small self-contained PRNG so the suite never uses Math.random(). */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/**
+ * Build a party via `party` and relabel it by a random permutation.
+ *
+ * `labels[newIndex]` is the original index that now sits at `newIndex`, so
+ * `out[a]![b]` is `m[labels[a]]![labels[b]]`. Relabelling is an isomorphism
+ * of the knows-relation: the celebrity properties, and the absence of a
+ * celebrity, survive untouched — only the positions move.
+ */
+function permutedParty(
+  n: number,
+  celebrity: number | null,
+  rand: () => number,
+): { m: boolean[][]; celebrity: number } {
+  const m = party(n, celebrity)
+
+  const labels = Array.from({ length: n }, (_, i) => i)
+  for (let i = n - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1))
+    ;[labels[i], labels[j]] = [labels[j]!, labels[i]!]
+  }
+
+  const permuted = Array.from({ length: n }, (_, a) =>
+    Array.from({ length: n }, (_, b) => m[labels[a]!]![labels[b]!]!),
   )
+
+  return {
+    m: permuted,
+    celebrity: celebrity === null ? -1 : labels.indexOf(celebrity),
+  }
 }
 
 function oracleFor(m: boolean[][]) {
@@ -120,35 +164,44 @@ describe('findCelebrity — budget', () => {
   // find a candidate, up to 2(n - 1) to verify it), so the 3n bound below
   // is tight by design — it leaves just enough slack for the reference
   // algorithm while still rejecting an O(n^2) brute force.
+  //
+  // Both tests below run TRIALS randomly relabelled parties and assert the
+  // budget on every one of them. A fixed probe order that gets lucky on one
+  // labelling will not get lucky on twenty; see the comment on `party`.
+  const TRIALS = 20
+
   it('stays within 3n knows() calls on a large party', () => {
     const n = 500
-    const knows = oracleFor(party(n, 317))
-    expect(findCelebrity(n, knows.fn)).toBe(317)
-    assertWithinBudget(knows.calls, 3 * n, 'knows()')
+    const rand = mulberry32(SEED)
+
+    for (let trial = 1; trial <= TRIALS; trial++) {
+      const celebrity = Math.floor(rand() * n)
+      const p = permutedParty(n, celebrity, rand)
+      const knows = oracleFor(p.m)
+
+      expect(findCelebrity(n, knows.fn)).toBe(p.celebrity)
+      assertWithinBudget(
+        knows.calls,
+        3 * n,
+        `knows() [trial ${trial}/${TRIALS}, seed 0x${SEED.toString(16)}]`,
+      )
+    }
   })
 
   it('stays within 3n knows() calls when there is no celebrity', () => {
     const n = 500
-    const knows = oracleFor(party(n, null))
-    expect(findCelebrity(n, knows.fn)).toBe(-1)
-    assertWithinBudget(knows.calls, 3 * n, 'knows()')
-  })
+    const rand = mulberry32(SEED)
 
-  // No single fixed probe order is cheap on both a total order and its
-  // reverse (see the comment on `party` above), so these two fixtures
-  // close off the brute forces that slip under the budget on the forward
-  // orientation alone.
-  it('stays within 3n knows() calls on a reverse-orientation party', () => {
-    const n = 500
-    const knows = oracleFor(reverseOrientation(party(n, 317)))
-    expect(findCelebrity(n, knows.fn)).toBe(n - 1 - 317)
-    assertWithinBudget(knows.calls, 3 * n, 'knows()')
-  })
+    for (let trial = 1; trial <= TRIALS; trial++) {
+      const p = permutedParty(n, null, rand)
+      const knows = oracleFor(p.m)
 
-  it('stays within 3n knows() calls on a reverse-orientation party with no celebrity', () => {
-    const n = 500
-    const knows = oracleFor(reverseOrientation(party(n, null)))
-    expect(findCelebrity(n, knows.fn)).toBe(-1)
-    assertWithinBudget(knows.calls, 3 * n, 'knows()')
+      expect(findCelebrity(n, knows.fn)).toBe(-1)
+      assertWithinBudget(
+        knows.calls,
+        3 * n,
+        `knows() [trial ${trial}/${TRIALS}, seed 0x${SEED.toString(16)}]`,
+      )
+    }
   })
 })
