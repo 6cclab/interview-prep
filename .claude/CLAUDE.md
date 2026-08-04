@@ -12,8 +12,8 @@ budget-enforcing tests, and rationed hints.
 | Track | Location | Command | Status |
 |---|---|---|---|
 | Coding | `problems/`, `solutions/` | `/drill` | live |
-| System design | `system-design/` | `/design` | phase 3 |
-| Behavioral | `behavioral/`, `local/stories.md` | `/mock` | phase 4 |
+| System design | `system-design/` | `/design` | live |
+| Behavioral | `behavioral/`, `local/stories.md` | `/mock` | live |
 | Company prep | `local/companies/` | `/prep` | live |
 
 ## Layout

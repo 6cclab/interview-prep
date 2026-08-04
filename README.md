@@ -51,6 +51,6 @@ a solve at rung 3 and a cold solve are different facts.
 | `problems/<pattern>/<problem>/` | prompt, stub, your working file, tests |
 | `solutions/` | worked answers — spoilers, read deliberately |
 | `patterns.md` | pattern → tell → insight |
-| `system-design/` | prompts and rubrics (phase 3) |
-| `behavioral/` | competency map and question bank (phase 4) |
+| `system-design/` | prompts, rubrics, and worked references |
+| `behavioral/` | competency map and question bank |
 | `local/` | gitignored: your log, designs, stories, company research |

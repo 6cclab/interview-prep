@@ -10,7 +10,7 @@ problem name.
 | two-pointers | Sorted input, or a pair/triple summing to a target | Moving the wrong end can only make things worse, so move the other | `container-with-most-water` |
 | fast-slow-pointers | Linked structure, cycles, or "the middle" | Two speeds meet inside a cycle and split a list in one pass | `cycle-start` |
 | sliding-window | Contiguous subarray or substring, with a constraint | Grow right, shrink left only while the constraint is violated | `longest-substring-no-repeat` |
-| hashmap-counting | Anagrams, frequencies, "seen before" | Trade space for a lookup that removes an inner loop | — |
+| hashmap-counting | Anagrams, frequencies, "seen before" | Trade space for a lookup that removes an inner loop | `group-anagrams` |
 | prefix-sums | Repeated range sums or subarrays summing to k | Precompute cumulative totals; a range is one subtraction | `subarray-sum-equals-k` |
 | in-place-array | "Without extra space", or removing/rotating elements | A write pointer trailing a read pointer | `sort-colors` |
 | binary-search-answer | "Minimum capacity/speed such that…", monotone feasibility | Binary search the answer space, not the array | `min-eating-speed` |
