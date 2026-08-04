@@ -1,0 +1,8 @@
+pattern: heap-top-k
+title: Kth Largest Element in a Stream
+difficulty: easy
+companies:
+  - name: amazon
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 703); not tied to a specific conversation of Andre's
+    date: "general"
