@@ -128,13 +128,12 @@ describe('findOrder — scale', () => {
    * one whose prerequisites are already satisfied frees exactly one course
    * per full scan on a long dependency chain — the worst possible shape for
    * that approach. With N courses chained 0 <- 1 <- 2 <- ... <- (N-1), that's
-   * roughly N + (N-1) + ... + 1 course-checks, i.e. O(N^2). A solution that
-   * processes each edge a bounded number of times finishes in O(N) instead.
+   * roughly N + (N-1) + ... + 1 course-checks, i.e. O(N^2).
    *
    * At N = 20,000 the rescan approach does on the order of 2*10^8
    * course-checks — orders of magnitude too slow to finish inside the
-   * budget asserted below, while a linear approach finishes in well under a
-   * second. Vitest's `testTimeout` does not reliably preempt a synchronous
+   * budget asserted below, while the reference approach finishes in well
+   * under a second. Vitest's `testTimeout` does not reliably preempt a synchronous
    * CPU-bound loop, so elapsed time is measured explicitly instead of
    * relying on the runner to cut it off.
    *

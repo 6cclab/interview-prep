@@ -76,8 +76,8 @@ describe('shortestClearPath — scale', () => {
   /**
    * A brute force that enumerates all simple paths from corner to corner —
    * whether via unbounded DFS over all routes, or via repeatedly re-relaxing
-   * distances instead of stopping at the first frontier that reaches a
-   * cell — degenerates badly on an open grid. An open grid is the
+   * distances rather than settling each cell once — degenerates badly on
+   * an open grid. An open grid is the
    * adversarial case for path enumeration: with (almost) every cell clear,
    * the branching factor at each step is close to 8, and the number of
    * simple paths between two corners grows exponentially with n. A sparse

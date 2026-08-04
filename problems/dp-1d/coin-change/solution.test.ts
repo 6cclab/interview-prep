@@ -46,8 +46,7 @@ describe('coinChange — scale', () => {
    * grows exponentially with `amount` (empirically, roughly a 13-14x
    * blowup for every +5 added to the amount with coins [1, 2, 5]). At
    * amount = 2,000 that's a search space no machine finishes in this
-   * lifetime. A solution that reuses work across amounts does a bounded
-   * amount of work per amount and finishes in well under a second.
+   * lifetime. The reference approach finishes in well under a second.
    *
    * `expected` isn't computed by any coin-change algorithm — it's a bound
    * argument: no coin here is worth more than 5, so any valid combination

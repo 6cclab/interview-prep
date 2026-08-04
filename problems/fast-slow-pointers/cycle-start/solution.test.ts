@@ -94,7 +94,7 @@ describe('detectCycleStart — scale', () => {
    * check whether that node was already visited does O(1) + O(2) + ... +
    * O(N) work before it can find the first repeat — O(N^2) node
    * comparisons. At N = 200,000 that's ~2 * 10^10 comparisons: far too slow
-   * to clear the budget below, while a single-pass approach finishes in
+   * to clear the budget below, while the reference approach finishes in
    * single-digit milliseconds. That gap is what this test is for.
    *
    * The list is built with a known answer baked in: N distinct nodes

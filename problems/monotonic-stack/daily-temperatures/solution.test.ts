@@ -17,7 +17,7 @@ describe('dailyTemperatures — correctness', () => {
   })
 
   it('handles all-equal readings — ties never count as warmer', () => {
-    // Catches solutions that pop/compare with >= instead of >: a tie must
+    // Catches solutions that compare with >= instead of >: a tie must
     // leave both days waiting, not resolve either one.
     expect(dailyTemperatures([50, 50, 50, 50])).toEqual([0, 0, 0, 0])
   })
@@ -38,8 +38,8 @@ describe('dailyTemperatures — correctness', () => {
 describe('dailyTemperatures — scale', () => {
   // No expensive oracle exists here (unlike celebrity's knows()), so the
   // discriminator is wall-clock: an input large enough that a per-day
-  // forward scan cannot finish inside Vitest's 10s timeout, while a linear
-  // solution finishes in well under a second.
+  // forward scan cannot finish inside Vitest's 10s timeout, while the
+  // reference approach finishes in well under a second.
   //
   // Random data defeats this: a forward scan from day i usually hits a
   // warmer day within a few steps, so the naive solution behaves close to

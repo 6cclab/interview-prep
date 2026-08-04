@@ -13,12 +13,10 @@ import { sortColors } from './solution'
  * The second number is the one that matters here. A solution that reads the
  * whole collection before writing anything racks up `getsBeforeFirstSet`
  * equal to (or very close to) `n`, no matter how the read phase itself is
- * written or how cheap each individual read is. A solution that writes as
- * it goes keeps that number small and roughly constant, because on a
- * uniformly random fixture the first item that needs moving shows up within
- * the first handful of positions almost always. See
- * `solutions/in-place-array/sort-colors.md` (spoiler) for the measured
- * numbers behind the budgets below.
+ * written or how cheap each individual read is. The budgets below are set
+ * tight enough to reject that shape while leaving room for approaches that
+ * don't have it. See `solutions/in-place-array/sort-colors.md` (spoiler)
+ * for the measured numbers behind the budgets below.
  */
 function oracleFor(arr: number[]) {
   let getCount = 0

@@ -129,14 +129,10 @@ describe('diameterOfBinaryTree — scale', () => {
    * end to end and no branching, so that's its only path and its diameter.
    *
    * The chain length is chosen to sit safely inside the JS engine's
-   * recursion limit — a single top-to-bottom traversal of this chain
-   * (which any correct O(n) solution here performs, and which the O(n^2)
-   * solution's height() also performs, repeatedly) does not overflow the
-   * call stack — while still being long enough that the O(n^2) solution's
-   * *repeated* traversals take on the order of hundreds of milliseconds,
-   * against a fraction of a millisecond for a single O(n) traversal: three
-   * or more orders of magnitude apart, comfortably outside measurement
-   * noise.
+   * recursion limit — a single top-to-bottom traversal of this chain does
+   * not overflow the call stack — while still being long enough that the
+   * O(n^2) solution's *repeated* traversals take on the order of hundreds
+   * of milliseconds, comfortably outside measurement noise.
    */
   it('finishes well within budget on a long skewed chain', () => {
     const N = 6000

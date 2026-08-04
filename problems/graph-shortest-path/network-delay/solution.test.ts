@@ -91,10 +91,8 @@ describe('networkDelayTime — scale', () => {
    * N * D noise edges plus N chain edges puts total edges around 1.45M and
    * nodes at 8,000. A brute force that re-relaxes every edge once per node
    * (O(V*E)) does roughly 8,000 * 1,450,000 ≈ 1.16*10^10 relaxations —
-   * far too slow to finish in 5s. A proper single-pass approach with a
-   * priority structure does O(E log V) ≈ 1.45*10^6 * ~13 ≈ 1.9*10^7 work,
-   * which finishes in well under a second — two-plus orders of magnitude
-   * of margin.
+   * far too slow to finish in 5s. The reference approach finishes in well
+   * under a second — two-plus orders of magnitude of margin.
    *
    * Vitest's `testTimeout` does not reliably preempt a synchronous
    * CPU-bound loop, so elapsed time is measured explicitly below instead of

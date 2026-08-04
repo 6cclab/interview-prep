@@ -59,8 +59,8 @@ describe('subarraySum — scale', () => {
   //
   // The array is generated deterministically with mulberry32 rather than
   // Math.random() so the suite is reproducible. The expected count was NOT
-  // computed by re-running the discriminator method (a prefix-sum + count
-  // map) inside this test — that would just be asserting the reference
+  // computed by re-running the reference approach inside this test — that
+  // would just be asserting the reference
   // agrees with itself. It was computed once, offline, with that same
   // reference algorithm, cross-checked against a brute-force O(n^2) scan
   // over the identical generated array, and the two agreed exactly. The

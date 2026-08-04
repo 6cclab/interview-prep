@@ -36,8 +36,8 @@ describe('maxArea — scale', () => {
   /**
    * A brute force that checks every pair is O(n^2). At n = 200,000 that's
    * 4*10^10 pair evaluations — orders of magnitude too slow to finish inside
-   * Vitest's 10s timeout, while a linear pass finishes in well under a
-   * second. That gap is what this test is for; it is not a performance
+   * Vitest's 10s timeout, while the reference approach finishes in well
+   * under a second. That gap is what this test is for; it is not a performance
    * micro-benchmark.
    *
    * The array can't just be n random numbers, though — with no way to

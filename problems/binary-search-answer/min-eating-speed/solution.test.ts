@@ -52,9 +52,8 @@ describe('minEatingSpeed — scale', () => {
   // h == piles.length, every pile must finish in its own single hour, so
   // the minimum speed is exactly the largest pile. A linear scan upward
   // from 1 then has to walk essentially the whole 1..max(piles) range
-  // before it lands on a working speed, while checking feasibility of
-  // that many candidates is still cheap for a solution that doesn't
-  // re-derive the range from scratch each time.
+  // before it lands on a working speed, while the reference approach stays
+  // cheap regardless.
   const PILE_SIZE = 6_000_000_000
   const PILE_COUNT = 5
 

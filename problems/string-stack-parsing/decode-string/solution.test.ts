@@ -52,8 +52,8 @@ describe('decodeString — scale', () => {
    * nesting, that is one pass per level of depth, and the string being
    * rebuilt on every single one of those passes is already close to its
    * final decoded size. That makes the total work proportional to
-   * depth * decoded-length — quadratic in the depth — while a single
-   * left-to-right pass is linear in the input length.
+   * depth * decoded-length — quadratic in the depth — while the reference
+   * approach is linear in the input length.
    *
    * The input below is `D` layers of `1[...]` wrapped around a flat block of
    * `F` letters, with `D = F = 65000`. Every wrapping layer uses a repeat
@@ -61,7 +61,7 @@ describe('decodeString — scale', () => {
    * force) without multiplying the decoded output — the decoded string is
    * just the `F`-letter block, unchanged. That keeps the answer small and
    * exactly known: it's `F` copies of "x", nothing else. Measured locally,
-   * the single-pass reference finishes in single-digit milliseconds here,
+   * the reference approach finishes in single-digit milliseconds here,
    * while the pass-per-bracket brute force takes several seconds — comfortably
    * more than the two orders of magnitude of margin these scale tests are
    * built for.

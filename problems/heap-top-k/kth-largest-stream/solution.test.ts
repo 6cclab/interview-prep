@@ -70,13 +70,13 @@ describe('KthLargest — scale', () => {
    * an initial history of INITIAL_SIZE and ADDS further calls, the history
    * grows past 100,000 entries and there are 100,000 more sorts to do —
    * on the order of 10^11 comparisons in total. That cannot finish inside
-   * Vitest's 10s timeout, let alone the 5s budget asserted below, while a
-   * solution that does O(log k) work per `add` finishes in a small
-   * fraction of a second: several orders of magnitude of margin.
+   * Vitest's 10s timeout, let alone the 5s budget asserted below, while the
+   * reference approach finishes in a small fraction of a second: several
+   * orders of magnitude of margin.
    *
    * The stream is generated deterministically via `mulberry32` so the
    * suite is reproducible. Expected values are NOT computed by re-running
-   * the intended incremental approach — that would just be testing the
+   * the reference approach — that would just be testing the
    * implementation against itself. Instead, at a handful of checkpoints
    * scattered through the run, the full history collected so far (kept in
    * a plain array alongside the class under test) is independently sorted

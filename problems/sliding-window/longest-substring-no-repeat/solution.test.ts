@@ -53,8 +53,9 @@ describe('lengthOfLongestSubstring — scale', () => {
    * shuffled — deterministically, via `mulberry32` — purely so the fixture
    * doesn't look like a suspiciously tidy sequential run.
    *
-   * At this size a linear pass finishes in low single-digit milliseconds; a
-   * genuinely quadratic scan takes on the order of ten seconds or more —
+   * At this size the reference approach finishes in low single-digit
+   * milliseconds; a genuinely quadratic scan takes on the order of ten
+   * seconds or more —
    * comfortably past Vitest's 10s test timeout, with several orders of
    * magnitude of margin between the two.
    */

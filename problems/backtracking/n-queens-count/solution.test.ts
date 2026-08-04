@@ -38,8 +38,8 @@ describe('countNQueens — scale', () => {
    * once each placement is complete has to walk n^n candidates before it
    * can rule any of them out. At n = 12 that's 12^12 (~8.9 * 10^12)
    * candidates, each needing a pairwise check across all queens on top —
-   * nowhere close to finishing inside Vitest's timeout, while this drill's
-   * intended solution finishes the same board in well under a second.
+   * nowhere close to finishing inside Vitest's timeout, while the reference
+   * approach finishes the same board in well under a second.
    *
    * Vitest's `testTimeout` does not reliably preempt a synchronous
    * CPU-bound loop, so the budget below is measured explicitly with

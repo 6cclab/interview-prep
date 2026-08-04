@@ -91,16 +91,13 @@ describe('WordDictionary — scale', () => {
    * common prefix, so a naive per-word comparison can't cheaply bail out
    * after one or two characters; it has to walk deep into the string for
    * nearly every stored word before it can tell a match from a near-miss.
-   * The reference approach only pays for the characters the query itself
-   * specifies, so it isn't affected by how much the stored words resemble
-   * each other.
    *
-   * All-dots queries are deliberately kept RARE in this fixture. Even the
-   * intended approach has to explore broadly for a query with no fixed
-   * characters at all — that's an inherent worst case, not a brute-force
-   * artifact — so making all-dots queries the majority would blur the very
-   * gap this test exists to measure. Mostly-exact / low-dot-density queries
-   * are where the intended approach wins biggest, so they dominate here.
+   * All-dots queries are deliberately kept RARE in this fixture. A query
+   * with no fixed characters at all is an inherent worst case for any
+   * approach — not a brute-force-specific artifact — so making all-dots
+   * queries the majority would blur the very gap this test exists to
+   * measure. Mostly-exact / low-dot-density queries are where the gap is
+   * widest, so they dominate here.
    */
   const SEED = 0x5ca1ab1e
   const rand = mulberry32(SEED)
@@ -173,10 +170,10 @@ describe('WordDictionary — scale', () => {
 
   // Rare all-dots queries. One length has stored words (matches by
   // construction); one length was never inserted (fails by construction).
-  // Kept to a small handful on purpose: even the intended approach cannot
-  // avoid exploring broadly for a query with no fixed characters, so a large
-  // batch of these would dominate total runtime and defeat the point of this
-  // fixture, which is to show where the intended approach wins big.
+  // Kept to a small handful on purpose: a query with no fixed characters is
+  // inherently expensive to resolve for any approach, so a large batch of
+  // these would dominate total runtime and defeat the point of this
+  // fixture, which is to show where the gap is widest.
   const insertedLength = SHARED_PREFIX.length + SUFFIX_LEN
   const neverInsertedLength = insertedLength + 3
   for (let i = 0; i < 20; i++) {
