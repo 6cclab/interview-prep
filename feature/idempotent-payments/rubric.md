@@ -19,9 +19,6 @@ not sufficient — this rubric covers what `pnpm test` can't see.
   raw `Map` reached into directly from the service instead of behind any boundary.
 - **Absent**: New code reads like it was dropped in from a different codebase —
   callbacks, exceptions for expected outcomes, or a totally different naming style.
-- **Commonly missed**: matching the *shape* of an error (tagged union with `type`)
-  while forgetting to actually extend the existing `PaymentError` union type rather
-  than inventing a parallel, incompatible error type for the new path.
 
 ## 2. Error handling
 
@@ -35,9 +32,6 @@ not sufficient — this rubric covers what `pnpm test` can't see.
   instead of a tagged error the caller can pattern-match on.
 - **Absent**: Conflict throws an exception that the existing code never throws for
   an expected, client-triggerable condition.
-- **Commonly missed**: swallowing the inner service's own error (e.g. a declined
-  charge, or an order-not-found) instead of passing it through unchanged on a
-  first attempt for a given key.
 
 ## 3. Data modelling
 
@@ -54,10 +48,6 @@ not sufficient — this rubric covers what `pnpm test` can't see.
   later call — any body reuses the cached response.
 - **Absent**: Stores only `key → true` or similar, with no request or result data
   at all.
-- **Commonly missed** (the single most common shortcut for this codebase): keying
-  the store only on `idempotencyKey` without storing anything to compare the body
-  against, so rule 2 (conflict on a different body) silently can't be implemented
-  and gets skipped, papered over, or "handled" by ignoring the body entirely.
 
 ## 4. Correctness of the conflict rule
 
@@ -72,12 +62,6 @@ not sufficient — this rubric covers what `pnpm test` can't see.
   work because the test fixtures reuse the same object.
 - **Absent**: No body comparison at all — any request with a matching key is
   treated as the same request, silently violating rule 2.
-- **Commonly missed**: naive `JSON.stringify(request) !== JSON.stringify(other)`
-  without controlling key order is a real bug (two requests with the same fields
-  in different insertion order would wrongly conflict) — candidates who don't
-  think about this either get lucky because object literals happen to have stable
-  key order in this exercise, or write a comparison that's actually broken in a
-  way the fixed tests don't happen to expose.
 
 ## 5. Test quality
 
@@ -91,10 +75,6 @@ not sufficient — this rubric covers what `pnpm test` can't see.
 - **Thin**: Adds a test that asserts on internal state (e.g. reaches into a private
   field, or checks `console.log` output) instead of observable behavior.
 - **Absent**: No new tests written.
-- **Commonly missed**: a test for the "declined charge is also replayed, not just a
-  successful one" case — it's easy to build idempotency that only caches success
-  and never considers that a definitive decline is also a terminal, replayable
-  outcome.
 
 ## 6. Scope discipline
 
@@ -108,8 +88,6 @@ not sufficient — this rubric covers what `pnpm test` can't see.
   comfortably, beyond what idempotency actually requires.
 - **Absent**: Rewrites large parts of the existing service "while in there,"
   changing behavior the regression suite doesn't happen to cover.
-- **Commonly missed**: reaching into `PaymentCaptureService` to add an
-  `idempotencyKey` parameter directly on `capture()` instead of composing around
-  it — technically works, but abandons the existing service/wrapper boundary the
-  stub file's shape was pointing at, and makes the "existing behavior" harder to
-  reason about as unchanged.
+
+The specific traps candidates commonly fall into on this exercise are listed
+in `solutions/feature/idempotent-payments.md` under "Common mistakes."

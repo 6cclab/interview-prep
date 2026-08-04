@@ -18,12 +18,6 @@ rating, pointing at the actual diff.
 - **Thin**: Recognizable as "trying to match the style" but does something
   clearly foreign — a `Result<T, E>` return type, a different error class
   hierarchy, or console logging where the rest of the codebase never logs.
-- **Commonly tempting for this codebase**: deriving the min/max bounds from the
-  `rule` field with a switch statement instead of using
-  `minSelections`/`maxSelections` directly — it "feels" more aligned with how
-  `rule` reads, but ignores data the ticket explicitly gave the group and breaks
-  for any group whose rule and bounds aren't the "obvious" pairing (e.g. a
-  required `any_number` group).
 
 ## 2. Error handling
 
@@ -38,12 +32,6 @@ rating, pointing at the actual diff.
 - **Thin**: Introduces a second error-handling idiom — a boolean return, a
   custom exception type, or reusing `NotFoundError` for problems that are
   actually about a malformed request rather than a missing record.
-- **Commonly tempting for this codebase**: throwing `NotFoundError` for an
-  unknown group or option id because it "wasn't found" — but `NotFoundError` in
-  this codebase means "a repository lookup by id came back empty"
-  (`MenuService.getItem`), not "the request referenced something that doesn't
-  exist." An unknown option id is a validation problem with the request, and
-  belongs in the same aggregated `issues` array as everything else.
 
 ## 3. Data modelling
 
@@ -59,12 +47,6 @@ rating, pointing at the actual diff.
 - **Thin**: Reworks `MenuItem` or the repository to store modifier groups
   directly, or adds a new repository/persistence layer for groups that the
   ticket never asked for.
-- **Commonly tempting for this codebase**: bolting `modifierGroups` onto
-  `MenuItem` (or building a `ModifierGroupRepository`) so an item "carries" its
-  own groups — plausible-sounding, and how a real system might eventually look,
-  but it's an unscoped schema change this ticket doesn't call for, and it drags
-  `types.ts` and `menu-repository.ts` into a ticket that's actually just about
-  pricing logic.
 
 ## 4. Test quality
 
@@ -95,9 +77,6 @@ rating, pointing at the actual diff.
   `regression.test.ts` was written to specifically forbid by name, but which
   is exactly the kind of scope creep this ticket doesn't ask for and a real
   reviewer would push back on.
-- **Commonly tempting for this codebase**: "while I'm here" fixes to
-  `validation.ts` or `menu-service.ts` (e.g. tightening the price check, adding
-  a category to the `Category` union) that have nothing to do with modifier
-  groups — these are the kind of changes `regression.test.ts` is specifically
-  there to catch if they break something, but even when they don't break a
-  test, they're still out of scope for this ticket.
+
+The specific traps candidates commonly fall into on this exercise are listed
+in `solutions/feature/menu-modifiers.md` under "Common mistakes."

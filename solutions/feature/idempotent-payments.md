@@ -139,3 +139,37 @@ produce `gateway.callCount === 1` in the real solution and `2` in this one.
   through `PaymentCaptureService`** instead of composing a wrapper around it — works,
   but abandons the service/wrapper seam the stub was pointing at and touches a file
   the ticket didn't ask you to change.
+
+## Common mistakes
+
+Traps that commonly tempt candidates on this exercise, moved out of the rubric
+so they aren't visible while solving.
+
+- **Convention match**: matching the *shape* of an error (tagged union with
+  `type`) while forgetting to actually extend the existing `PaymentError` union
+  type rather than inventing a parallel, incompatible error type for the new
+  path.
+- **Error handling**: swallowing the inner service's own error (e.g. a declined
+  charge, or an order-not-found) instead of passing it through unchanged on a
+  first attempt for a given key.
+- **Data modelling** (the single most common shortcut for this codebase):
+  keying the store only on `idempotencyKey` without storing anything to
+  compare the body against, so rule 2 (conflict on a different body) silently
+  can't be implemented and gets skipped, papered over, or "handled" by
+  ignoring the body entirely.
+- **Correctness of the conflict rule**: naive
+  `JSON.stringify(request) !== JSON.stringify(other)` without controlling key
+  order is a real bug (two requests with the same fields in different
+  insertion order would wrongly conflict) — candidates who don't think about
+  this either get lucky because object literals happen to have stable key
+  order in this exercise, or write a comparison that's actually broken in a
+  way the fixed tests don't happen to expose.
+- **Test quality**: a test for the "declined charge is also replayed, not just
+  a successful one" case — it's easy to build idempotency that only caches
+  success and never considers that a definitive decline is also a terminal,
+  replayable outcome.
+- **Scope discipline**: reaching into `PaymentCaptureService` to add an
+  `idempotencyKey` parameter directly on `capture()` instead of composing
+  around it — technically works, but abandons the existing service/wrapper
+  boundary the stub file's shape was pointing at, and makes the "existing
+  behavior" harder to reason about as unchanged.

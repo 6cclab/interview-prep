@@ -11,8 +11,7 @@ describe('canUseFeature', () => {
   })
 
   it('denies access when the customer entitlements cannot be resolved', async () => {
-    // cust_48213 (Northwind Traders) has no row in the entitlements DB —
-    // the lookup-that-never-resolved scenario from the bug report.
+    // cust_48213 (Northwind Traders) — the scenario from the bug report.
     await expect(canUseFeature('cust_48213', 'premium-analytics')).resolves.toBe(false)
   })
 })

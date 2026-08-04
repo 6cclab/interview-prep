@@ -32,11 +32,9 @@ resends on every retry of that same attempt). The rules:
    gateway must still be charged exactly once. This is not an edge case to
    handle "if there's time" — it's the actual failure mode idempotency keys
    exist to prevent, and it will be exercised directly: a test starts a
-   second capture for the same key *before awaiting* the first one, so your
-   implementation will see two calls for the same key with the first one
-   still in flight. Whatever you use to detect "already in progress" has to
-   be visible synchronously, before either call has had a chance to await
-   anything.
+   second capture for the same key *before awaiting* the first one, so two
+   overlapping captures for the same key must still result in exactly one
+   charge.
 
 ### What counts as "the same request body"
 

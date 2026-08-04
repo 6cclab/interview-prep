@@ -30,8 +30,10 @@ toward it — you are running the exercise, not solving it.
 
 1. Pick the exercise, or take the one he names. If he doesn't name one, pick from
    `local/drill-log.md` favouring never-attempted.
-2. Reset first if he's attempted it before: `git checkout -- debugging/<exercise>` — ask
-   first, since re-reading his own past fix is legitimate review.
+2. Reset first if he's attempted it before:
+   `git checkout -- debugging/<exercise> && git clean -fd debugging/<exercise>` — ask
+   first, since this discards any changes AND any new files he added in that
+   directory, and re-reading his own past fix is legitimate review.
 3. Paste the contents of the `README.md` — it's a bug report. **Do not display its file
    path** — the path contains the exercise name, which is the answer. **Say nothing
    else.** No orientation, no "have a look at the resolver."

@@ -33,7 +33,9 @@ standard, and a different-but-idiomatic implementation is a pass.
 ## Running
 
 1. Pick the exercise, or take the one he names.
-2. Reset if he's attempted it before: `git checkout -- feature/<exercise>` — ask first.
+2. Reset if he's attempted it before:
+   `git checkout -- feature/<exercise> && git clean -fd feature/<exercise>` — ask first;
+   this discards any changes AND any new files he added in that directory.
 3. Print the `README.md` — it's a ticket. **Say nothing else.** Do not orient him in the
    codebase; finding your way around unfamiliar code is the exercise.
 4. Start a timer. 45 minutes unless he says otherwise.

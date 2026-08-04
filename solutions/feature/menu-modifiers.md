@@ -196,3 +196,32 @@ With the implementation above in place:
 
 `pnpm typecheck` stayed silent throughout. The stub was then reverted to `throw
 new Error('not implemented')` for shipping.
+
+## Common mistakes
+
+Traps that commonly tempt candidates on this exercise, moved out of the rubric
+so they aren't visible while solving.
+
+- **Convention match**: deriving the min/max bounds from the `rule` field with a
+  switch statement instead of using `minSelections`/`maxSelections` directly —
+  it "feels" more aligned with how `rule` reads, but ignores data the ticket
+  explicitly gave the group and breaks for any group whose rule and bounds
+  aren't the "obvious" pairing (e.g. a required `any_number` group).
+- **Error handling**: throwing `NotFoundError` for an unknown group or option id
+  because it "wasn't found" — but `NotFoundError` in this codebase means "a
+  repository lookup by id came back empty" (`MenuService.getItem`), not "the
+  request referenced something that doesn't exist." An unknown option id is a
+  validation problem with the request, and belongs in the same aggregated
+  `issues` array as everything else.
+- **Data modelling**: bolting `modifierGroups` onto `MenuItem` (or building a
+  `ModifierGroupRepository`) so an item "carries" its own groups —
+  plausible-sounding, and how a real system might eventually look, but it's an
+  unscoped schema change this ticket doesn't call for, and it drags `types.ts`
+  and `menu-repository.ts` into a ticket that's actually just about pricing
+  logic.
+- **Scope discipline**: "while I'm here" fixes to `validation.ts` or
+  `menu-service.ts` (e.g. tightening the price check, adding a category to the
+  `Category` union) that have nothing to do with modifier groups — these are
+  the kind of changes `regression.test.ts` is specifically there to catch if
+  they break something, but even when they don't break a test, they're still
+  out of scope for this ticket.

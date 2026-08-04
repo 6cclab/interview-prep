@@ -11,8 +11,7 @@ describe('shouldShowUpsell', () => {
   })
 
   it('does not pitch a feature when entitlements cannot be resolved', async () => {
-    // Same unresolved-lookup scenario as cust_48213 in repro.test.ts, hit
-    // through the upsell path instead of the feature gate.
+    // Same scenario as repro.test.ts, reached through the upsell path.
     await expect(shouldShowUpsell('cust_48213', 'premium-analytics')).resolves.toBe(false)
   })
 })
