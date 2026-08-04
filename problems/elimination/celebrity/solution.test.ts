@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { assertWithinBudget, countCalls } from '../../../test-utils/oracle'
+import { seededTrials } from '../../../test-utils/random'
 import { findCelebrity } from './solution'
 
 /**
@@ -62,18 +63,6 @@ function party(n: number, celebrity: number | null): boolean[][] {
 
 /** Fixed seed: the budget tests are randomised but fully reproducible. */
 const SEED = 0x5eed_1234
-
-/** mulberry32 — a small self-contained PRNG so the suite never uses Math.random(). */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let t = a
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
 
 /**
  * Build a party via `party` and relabel it by a random permutation.
@@ -168,9 +157,8 @@ describe('findCelebrity — budget', () => {
 
   it('stays within 3n knows() calls on a large party', () => {
     const n = 500
-    const rand = mulberry32(SEED)
 
-    for (let trial = 1; trial <= TRIALS; trial++) {
+    seededTrials(SEED, TRIALS, (rand, trial) => {
       const celebrity = Math.floor(rand() * n)
       const p = permutedParty(n, celebrity, rand)
       const knows = oracleFor(p.m)
@@ -181,14 +169,13 @@ describe('findCelebrity — budget', () => {
         3 * n,
         `knows() [trial ${trial}/${TRIALS}, seed 0x${SEED.toString(16)}]`,
       )
-    }
+    })
   })
 
   it('stays within 3n knows() calls when there is no celebrity', () => {
     const n = 500
-    const rand = mulberry32(SEED)
 
-    for (let trial = 1; trial <= TRIALS; trial++) {
+    seededTrials(SEED, TRIALS, (rand, trial) => {
       const p = permutedParty(n, null, rand)
       const knows = oracleFor(p.m)
 
@@ -198,6 +185,6 @@ describe('findCelebrity — budget', () => {
         3 * n,
         `knows() [trial ${trial}/${TRIALS}, seed 0x${SEED.toString(16)}]`,
       )
-    }
+    })
   })
 })
