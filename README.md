@@ -23,12 +23,14 @@ pnpm test               # everything, as a regression check
 
 **A fresh clone starts with a mostly-red suite, on purpose.** Every drill ships
 unsolved and every debugging exercise ships broken — that is the product, not a
-failed install. Right now `pnpm test` reports 65 passing and 200 failing, made up
+failed install. Right now `pnpm test` reports 65 passing and 211 failing, made up
 of:
 
-- coding drills and feature stubs throwing `not implemented`
-- debugging exercises failing on assertions, because the planted bug is real code
-  doing the wrong thing
+- 177 coding-drill failures and 14 feature-stub failures, all throwing
+  `not implemented`
+- 20 assertion failures — 9 in the debugging exercises, where the planted bug is
+  real code doing the wrong thing, and 11 in the feature exercises, where the
+  behaviour is unbuilt rather than unimplemented
 - the only suites that ship **green** are the harness tests and each feature
   exercise's `regression.test.ts` — if either of those goes red, something is
   genuinely wrong

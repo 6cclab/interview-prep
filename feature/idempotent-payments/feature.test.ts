@@ -101,6 +101,15 @@ describe('IdempotentPaymentCaptureService', () => {
     const secondPromise = service.capture(REQUEST, 'key-concurrent')
     await flushMicrotasks()
 
+    // Both promises are awaited at the end of this test, but if an
+    // assertion below fails first that never happens — and a rejected,
+    // never-awaited promise surfaces as an unhandled rejection that Vitest
+    // reports separately from the failing test. These no-op branches keep
+    // the failure output limited to the assertion that actually failed;
+    // the awaits below still see the original rejection.
+    void firstPromise.catch(() => {})
+    void secondPromise.catch(() => {})
+
     // Only one gateway attempt should have been made even though two
     // captures are in flight for the same key.
     expect(gateway.callCount).toBe(1)
