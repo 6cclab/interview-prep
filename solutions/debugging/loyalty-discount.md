@@ -1,7 +1,7 @@
 # Partial write — worked solution
 
 **Spoilers.** Don't open this until you've either found the bug in
-`debugging/partial-write/` or given up on it for the session.
+`debugging/loyalty-discount/` or given up on it for the session.
 
 ## The root cause
 

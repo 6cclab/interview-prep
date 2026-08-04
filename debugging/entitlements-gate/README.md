@@ -33,7 +33,7 @@ denied access to it, full stop — migrated account or not.
 ## Running the tests
 
 ```bash
-pnpm test empty-means-allowed
+pnpm test entitlements-gate
 ```
 
 Two files ship here:

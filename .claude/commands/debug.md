@@ -32,8 +32,9 @@ toward it — you are running the exercise, not solving it.
    `local/drill-log.md` favouring never-attempted.
 2. Reset first if he's attempted it before: `git checkout -- debugging/<exercise>` — ask
    first, since re-reading his own past fix is legitimate review.
-3. Print the `README.md` — it's a bug report. **Say nothing else.** No orientation, no
-   "have a look at the resolver."
+3. Paste the contents of the `README.md` — it's a bug report. **Do not display its file
+   path** — the path contains the exercise name, which is the answer. **Say nothing
+   else.** No orientation, no "have a look at the resolver."
 4. Start a timer.
 5. **Before he changes any code, ask for a hypothesis.** One question: "what do you think
    is happening, and what would prove it?" This is the actual interview behaviour —

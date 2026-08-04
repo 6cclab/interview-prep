@@ -46,7 +46,7 @@ stopped again," with no pattern support can pin down.
 ## Reproduction
 
 ```
-pnpm test partial-write
+pnpm test loyalty-discount
 ```
 
 This runs two files:

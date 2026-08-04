@@ -1,8 +1,8 @@
-# Solution: stale-cache
+# Solution: account-switcher
 
 ## Root cause
 
-`cacheKeyForResource` in `debugging/stale-cache/src/cache.ts` builds the
+`cacheKeyForResource` in `debugging/account-switcher/src/cache.ts` builds the
 cache key from `resourceId` alone:
 
 ```ts

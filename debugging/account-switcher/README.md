@@ -47,7 +47,7 @@ account the session has already moved away from.
 ## Running the tests
 
 ```
-pnpm test stale-cache
+pnpm test account-switcher
 ```
 
 Both `repro.test.ts` and `invariant.test.ts` are included and currently
