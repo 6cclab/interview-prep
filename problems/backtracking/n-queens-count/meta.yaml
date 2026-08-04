@@ -1,0 +1,8 @@
+pattern: backtracking
+title: N-Queens — Count
+difficulty: hard
+companies:
+  - name: amazon
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 51/52); not tied to a specific conversation of Andre's
+    date: "general"
