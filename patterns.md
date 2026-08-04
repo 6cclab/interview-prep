@@ -7,15 +7,15 @@ problem name.
 | Pattern | The tell | The insight | Problem |
 |---|---|---|---|
 | elimination | An expensive comparison; one result disqualifies somebody for good | Linear pass to a candidate, then a separate verification pass | `celebrity` |
-| two-pointers | Sorted input, or a pair/triple summing to a target | Moving the wrong end can only make things worse, so move the other | — |
+| two-pointers | Sorted input, or a pair/triple summing to a target | Moving the wrong end can only make things worse, so move the other | `container-with-most-water` |
 | fast-slow-pointers | Linked structure, cycles, or "the middle" | Two speeds meet inside a cycle and split a list in one pass | — |
-| sliding-window | Contiguous subarray or substring, with a constraint | Grow right, shrink left only while the constraint is violated | — |
+| sliding-window | Contiguous subarray or substring, with a constraint | Grow right, shrink left only while the constraint is violated | `longest-substring-no-repeat` |
 | hashmap-counting | Anagrams, frequencies, "seen before" | Trade space for a lookup that removes an inner loop | — |
-| prefix-sums | Repeated range sums or subarrays summing to k | Precompute cumulative totals; a range is one subtraction | — |
+| prefix-sums | Repeated range sums or subarrays summing to k | Precompute cumulative totals; a range is one subtraction | `subarray-sum-equals-k` |
 | in-place-array | "Without extra space", or removing/rotating elements | A write pointer trailing a read pointer | — |
-| binary-search-answer | "Minimum capacity/speed such that…", monotone feasibility | Binary search the answer space, not the array | — |
-| intervals | Meetings, merges, overlaps, calendars | Sort by start; then only the previous end matters | — |
-| monotonic-stack | Next greater/smaller element, spans, histograms | Keep the stack sorted; popping resolves an earlier element's answer | — |
+| binary-search-answer | "Minimum capacity/speed such that…", monotone feasibility | Binary search the answer space, not the array | `min-eating-speed` |
+| intervals | Meetings, merges, overlaps, calendars | Sort by start; then only the previous end matters | `merge-intervals` |
+| monotonic-stack | Next greater/smaller element, spans, histograms | Keep the stack sorted; popping resolves an earlier element's answer | `daily-temperatures` |
 | heap-top-k | Top/bottom k, streaming median, merging sorted inputs | A size-k heap beats a full sort when k is small | — |
 | binary-tree-recursion | Depth, path sums, validation, LCA | Define what the call returns for a subtree, then trust recursion | — |
 | bfs-dfs-grid | Islands, regions, shortest path in a maze | BFS for fewest steps, DFS for reachability; mark visited on enqueue | — |
