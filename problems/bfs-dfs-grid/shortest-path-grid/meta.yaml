@@ -1,0 +1,8 @@
+pattern: bfs-dfs-grid
+title: Shortest Path in a Binary Grid
+difficulty: medium
+companies:
+  - name: amazon
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 1091); not tied to a specific conversation of Andre's
+    date: "general"
