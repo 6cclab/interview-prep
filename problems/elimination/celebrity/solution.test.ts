@@ -5,15 +5,28 @@ import { findCelebrity } from './solution'
 /**
  * Build a knows-matrix for a party of `n` where `celebrity` (or nobody, when
  * null) satisfies both celebrity properties. Both branches build a dense
- * total order rather than a sparse one, and that density is deliberate:
- * a naive candidate-by-candidate scan that bails out on the first
- * disqualifying pair can't reject a candidate cheaply, because everyone
- * below the candidate "knows" everyone above it — the scan only discovers
- * the disqualifying pair once it works most of the way through that
- * candidate's row/column. A sparse matrix would let such a scan reject
- * every candidate in 1-2 calls and sneak under the call budget by
- * accident, which would defeat the whole point of the drill: rejecting a
- * correct-but-brute-force solution, not just a wrong one.
+ * total order rather than a sparse one: `a knows b` whenever `a < b`
+ * (celebrity aside), so every candidate has many disqualifying witnesses
+ * rather than one or two.
+ *
+ * Density alone does not close the budget against every brute force,
+ * though. It only makes a fixed probe order expensive when that order
+ * runs against the grain of the total order (e.g. an inner scan from 0
+ * upward has to walk through most of a candidate's row before hitting a
+ * witness). A probe order that runs the other way — starting from the
+ * high end, or wrapping around — finds a disqualifying witness in one or
+ * two calls on this same matrix, because the witnesses for "a knows b"
+ * all sit on the low side of a. Reversing the order's direction (see
+ * `reverseOrientation` below) relabels which indices are "high" and which
+ * are "low", which flips which probe orders are cheap and which are
+ * expensive. So no single fixed probe order can be cheap on both a
+ * matrix and its reverse — that is what actually rejects every O(n^2)
+ * brute force, and it's why the budget tests below assert on both
+ * orientations. A sparse matrix would let a lucky probe order reject
+ * every candidate in 1-2 calls regardless of orientation and sneak under
+ * the budget by accident, which would defeat the whole point of the
+ * drill: rejecting a correct-but-brute-force solution, not just a wrong
+ * one.
  *
  * The no-celebrity case uses a total order (a knows b whenever a < b) plus
  * one wraparound edge (n-1 knows 0). The celebrity case uses the same
@@ -39,9 +52,17 @@ function party(n: number, celebrity: number | null): boolean[][] {
   for (let a = 0; a < n; a++) {
     if (a === celebrity) continue
     m[a]![celebrity] = true
-    for (let b: number = a + 1; b < n; b++) if (b !== celebrity) m[a]![b] = true
+    for (let b: number = a + 1; b < n; b++) if (b !== celebrity) m[a]![b] = true // : number is load-bearing — plain `let b` here trips TS7022; do not "tidy" to match line 33
   }
   return m
+}
+
+/** Relabel a party so index i becomes n-1-i, reversing the total order's direction. */
+function reverseOrientation(m: boolean[][]): boolean[][] {
+  const n = m.length
+  return Array.from({ length: n }, (_, a) =>
+    Array.from({ length: n }, (_, b) => m[n - 1 - a]![n - 1 - b]!),
+  )
 }
 
 function oracleFor(m: boolean[][]) {
@@ -109,6 +130,24 @@ describe('findCelebrity — budget', () => {
   it('stays within 3n knows() calls when there is no celebrity', () => {
     const n = 500
     const knows = oracleFor(party(n, null))
+    expect(findCelebrity(n, knows.fn)).toBe(-1)
+    assertWithinBudget(knows.calls, 3 * n, 'knows()')
+  })
+
+  // No single fixed probe order is cheap on both a total order and its
+  // reverse (see the comment on `party` above), so these two fixtures
+  // close off the brute forces that slip under the budget on the forward
+  // orientation alone.
+  it('stays within 3n knows() calls on a reverse-orientation party', () => {
+    const n = 500
+    const knows = oracleFor(reverseOrientation(party(n, 317)))
+    expect(findCelebrity(n, knows.fn)).toBe(n - 1 - 317)
+    assertWithinBudget(knows.calls, 3 * n, 'knows()')
+  })
+
+  it('stays within 3n knows() calls on a reverse-orientation party with no celebrity', () => {
+    const n = 500
+    const knows = oracleFor(reverseOrientation(party(n, null)))
     expect(findCelebrity(n, knows.fn)).toBe(-1)
     assertWithinBudget(knows.calls, 3 * n, 'knows()')
   })
