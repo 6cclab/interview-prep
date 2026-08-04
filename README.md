@@ -21,8 +21,20 @@ pnpm reset celebrity    # start over from a clean stub
 pnpm test               # everything, as a regression check
 ```
 
-`solution.ts` ships as an unimplemented stub, so `pnpm test` starts at 21
-passing and 10 failing. The 10 reds are the drill, not a broken install.
+**A fresh clone starts with a mostly-red suite, on purpose.** Every drill ships
+unsolved and every debugging exercise ships broken — that is the product, not a
+failed install. Right now `pnpm test` reports 65 passing and 200 failing, made up
+of:
+
+- coding drills and feature stubs throwing `not implemented`
+- debugging exercises failing on assertions, because the planted bug is real code
+  doing the wrong thing
+- the only suites that ship **green** are the harness tests and each feature
+  exercise's `regression.test.ts` — if either of those goes red, something is
+  genuinely wrong
+
+Run `pnpm test <exercise>` to work on one at a time; the full run is a status
+check, not a health check.
 
 Or open Claude Code here and run `/drill` — it picks by what's rustiest,
 presents the problem cold, and rations hints one rung at a time. `/status` says
