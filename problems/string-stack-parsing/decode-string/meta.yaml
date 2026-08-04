@@ -1,0 +1,12 @@
+pattern: string-stack-parsing
+title: Decode String
+difficulty: medium
+companies:
+  - name: google
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 394); not tied to a specific conversation of Andre's
+    date: "general"
+  - name: amazon
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 394); not tied to a specific conversation of Andre's
+    date: "general"

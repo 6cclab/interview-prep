@@ -1,0 +1,8 @@
+pattern: dp-1d
+title: Coin Change
+difficulty: medium
+companies:
+  - name: amazon
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 322); not tied to a specific conversation of Andre's
+    date: "general"

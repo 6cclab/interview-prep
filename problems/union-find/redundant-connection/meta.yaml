@@ -1,0 +1,8 @@
+pattern: union-find
+title: Redundant Connection
+difficulty: medium
+companies:
+  - name: google
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 684); not tied to a specific conversation of Andre's
+    date: "general"

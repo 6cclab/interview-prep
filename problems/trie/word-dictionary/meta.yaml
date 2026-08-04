@@ -1,0 +1,8 @@
+pattern: trie
+title: Word Dictionary
+difficulty: medium
+companies:
+  - name: google
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 211); not tied to a specific conversation of Andre's
+    date: "general"

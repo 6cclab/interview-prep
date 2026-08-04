@@ -12,8 +12,8 @@ budget-enforcing tests, and rationed hints.
 | Track | Location | Command | Status |
 |---|---|---|---|
 | Coding | `problems/`, `solutions/` | `/drill` | live |
-| System design | `system-design/` | `/design` | phase 3 |
-| Behavioral | `behavioral/`, `local/stories.md` | `/mock` | phase 4 |
+| System design | `system-design/` | `/design` | live |
+| Behavioral | `behavioral/`, `local/stories.md` | `/mock` | live |
 | Company prep | `local/companies/` | `/prep` | live |
 
 ## Layout
@@ -40,9 +40,23 @@ pnpm typecheck
 ## Tests encode the insight
 
 A drill is only worth doing if a **correct but brute-force** solution fails it.
-Where a problem exposes an expensive oracle, wrap it with `countCalls` from
-`test-utils/oracle.ts` and assert a budget with `assertWithinBudget`. Where no
-oracle exists, use a large-N case under the 10s timeout.
+Two mechanisms do that, and picking the right one depends on whether the
+problem hands the solver an expensive operation:
+
+- **Oracle budget** — the problem exposes an expensive operation (like
+  `knows()` in the celebrity problem). Wrap it with `countCalls` from
+  `test-utils/oracle.ts` and assert a budget with `assertWithinBudget`.
+  Randomise the fixture geometry with `seededTrials` from
+  `test-utils/random.ts` so no fixed probe order can exploit a lucky pattern
+  in a hand-picked fixture — see the comments in
+  `problems/elimination/celebrity/solution.test.ts` for why this matters and
+  how it's built.
+- **Scale test** — no oracle exists, so use an input large enough that the
+  brute force cannot finish inside Vitest's 10s timeout while the reference
+  finishes in well under a second. Require at least two orders of magnitude
+  of margin between the two. Generate the input deterministically with
+  `mulberry32`/`seededTrials` from `test-utils/random.ts` rather than
+  `Math.random()`, so the suite stays reproducible.
 
 When authoring a new problem, prove the suite three ways before committing: it
 must fail a wrong solution, fail a brute-force solution, and pass the reference.

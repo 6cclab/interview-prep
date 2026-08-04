@@ -1,0 +1,9 @@
+pattern: binary-search-answer
+title: Minimum Eating Speed
+difficulty: medium
+budget: scale test — 5 piles of 6e9 bananas must finish well under 10s
+companies:
+  - name: unknown
+    confidence: low
+    source: canonical pattern problem, not yet confirmed against a specific interview
+    date: "pre-2026-08"

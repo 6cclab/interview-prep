@@ -1,0 +1,9 @@
+pattern: monotonic-stack
+title: Daily Temperatures
+difficulty: medium
+budget: scale test — 100000-day mostly-decreasing input must finish well under 10s
+companies:
+  - name: unknown
+    confidence: low
+    source: canonical pattern problem, not yet confirmed against a specific interview
+    date: "pre-2026-08"
