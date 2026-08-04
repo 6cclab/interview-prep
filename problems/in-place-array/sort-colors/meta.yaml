@@ -1,0 +1,9 @@
+pattern: in-place-array
+title: Sort Colors
+difficulty: medium
+budget: oracle — at most 50 get() calls before the first set() call, and at most 3000 total get()/set() calls, on n=500 randomized trials
+companies:
+  - name: unknown
+    confidence: low
+    source: canonical pattern problem (LeetCode 75), not yet confirmed against a specific interview
+    date: "pre-2026-08"
