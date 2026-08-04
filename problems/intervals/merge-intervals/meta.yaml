@@ -1,8 +1,9 @@
 pattern: intervals
 title: Merge Intervals
 difficulty: medium
+budget: scale test — merging a shuffled chain of 150,000 overlapping intervals must finish well under 5s
 companies:
   - name: google
     confidence: low
-    source: widely reported as a frequently asked public interview problem (LeetCode 56); not tied to a specific conversation of Andre's
+    source: widely reported as a frequently asked public interview problem (LeetCode 56); no company-specific report
     date: "general"

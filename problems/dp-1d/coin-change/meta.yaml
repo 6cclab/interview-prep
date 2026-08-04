@@ -1,8 +1,9 @@
 pattern: dp-1d
 title: Coin Change
 difficulty: medium
+budget: scale test — amount = 2000 against 5 coin denominations must finish well under 5s
 companies:
   - name: amazon
     confidence: low
-    source: widely reported as a frequently asked public interview problem (LeetCode 322); not tied to a specific conversation of Andre's
+    source: widely reported as a frequently asked public interview problem (LeetCode 322); no company-specific report
     date: "general"

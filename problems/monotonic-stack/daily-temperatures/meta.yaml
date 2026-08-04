@@ -1,7 +1,7 @@
 pattern: monotonic-stack
 title: Daily Temperatures
 difficulty: medium
-budget: scale test — 100000-day mostly-decreasing input must finish well under 10s
+budget: scale test — 300000-day strictly-decreasing input must finish well under 5s
 companies:
   - name: unknown
     confidence: low

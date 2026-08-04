@@ -1,8 +1,9 @@
 pattern: heap-top-k
 title: Kth Largest Element in a Stream
 difficulty: easy
+budget: scale test — 100,000 add() calls against a history starting at 2,000 entries must finish well under 5s
 companies:
   - name: amazon
     confidence: low
-    source: widely reported as a frequently asked public interview problem (LeetCode 703); not tied to a specific conversation of Andre's
+    source: widely reported as a frequently asked public interview problem (LeetCode 703); no company-specific report
     date: "general"

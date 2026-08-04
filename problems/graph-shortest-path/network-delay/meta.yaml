@@ -1,9 +1,9 @@
 pattern: graph-shortest-path
 title: Network Delay Time
 difficulty: medium
-budget: scale test — a 6000-node graph with ~1.25M edges must finish well under 5s; this rejects O(V*E) repeated full-edge relaxation
+budget: scale test — an 8000-node graph with ~1.45M edges must finish well under 5s; this rejects O(V*E) repeated full-edge relaxation
 companies:
   - name: amazon
     confidence: low
-    source: widely reported as a frequently asked public interview problem (LeetCode 743); not tied to a specific conversation of Andre's
+    source: widely reported as a frequently asked public interview problem (LeetCode 743); no company-specific report
     date: "general"

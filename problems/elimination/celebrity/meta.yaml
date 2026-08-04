@@ -1,9 +1,9 @@
 pattern: elimination
 title: Find the Celebrity
 difficulty: medium
-budget: 3n calls to knows()
+budget: oracle — at most 3n calls to knows() across the permuted-party trials
 companies:
-  - name: toast
+  - name: undisclosed
     confidence: high
-    source: asked of Andre directly in a prior interview conversation
+    source: direct interview report
     date: "pre-2026-08"

@@ -1,8 +1,9 @@
 pattern: trie
 title: Word Dictionary
 difficulty: medium
+budget: scale test — ~30,000 stored words with mostly-exact queries must finish well under 2s
 companies:
   - name: google
     confidence: low
-    source: widely reported as a frequently asked public interview problem (LeetCode 211); not tied to a specific conversation of Andre's
+    source: widely reported as a frequently asked public interview problem (LeetCode 211); no company-specific report
     date: "general"

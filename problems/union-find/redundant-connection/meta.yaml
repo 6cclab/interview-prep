@@ -1,8 +1,9 @@
 pattern: union-find
 title: Redundant Connection
 difficulty: medium
+budget: scale test — a 25,000-node chain-shaped graph must finish well under 250ms
 companies:
   - name: google
     confidence: low
-    source: widely reported as a frequently asked public interview problem (LeetCode 684); not tied to a specific conversation of Andre's
+    source: widely reported as a frequently asked public interview problem (LeetCode 684); no company-specific report
     date: "general"

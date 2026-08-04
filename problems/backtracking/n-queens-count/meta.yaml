@@ -1,8 +1,9 @@
 pattern: backtracking
 title: N-Queens — Count
 difficulty: hard
+budget: scale test — counting solutions on a 12x12 board must finish well under 5s
 companies:
   - name: amazon
     confidence: low
-    source: widely reported as a frequently asked public interview problem (LeetCode 51/52); not tied to a specific conversation of Andre's
+    source: widely reported as a frequently asked public interview problem (LeetCode 51/52); no company-specific report
     date: "general"

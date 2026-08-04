@@ -1,8 +1,9 @@
 pattern: bfs-dfs-grid
 title: Shortest Path in a Binary Grid
 difficulty: medium
+budget: scale test — a 500x500 mostly-open grid must finish well under 5s
 companies:
   - name: amazon
     confidence: low
-    source: widely reported as a frequently asked public interview problem (LeetCode 1091); not tied to a specific conversation of Andre's
+    source: widely reported as a frequently asked public interview problem (LeetCode 1091); no company-specific report
     date: "general"

@@ -1,3 +1,5 @@
 pattern: sliding-window
 title: Longest Substring Without Repeating Characters
 difficulty: medium
+budget: scale test — a 30,000-character all-distinct string must finish well under 5s
+companies: []

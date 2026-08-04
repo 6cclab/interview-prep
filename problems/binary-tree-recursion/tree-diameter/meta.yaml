@@ -1,8 +1,9 @@
 pattern: binary-tree-recursion
 title: Tree Diameter
 difficulty: medium
+budget: scale test — a 6000-node left-skewed chain must finish well under 100ms
 companies:
   - name: amazon
     confidence: low
-    source: widely reported as a frequently asked public interview problem (LeetCode 543); not tied to a specific conversation of Andre's
+    source: widely reported as a frequently asked public interview problem (LeetCode 543); no company-specific report
     date: "general"

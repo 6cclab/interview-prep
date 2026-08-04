@@ -4,8 +4,8 @@ Score each dimension **strong / adequate / thin / absent**. One sentence of
 evidence per rating, quoting the attempt's own words. No score without a
 quote.
 
-Calibration note: this maps closely to a design question reported from an
-actual Toast interview ("design an API related to managing a restaurant").
+Calibration note: this maps closely to a design question reported from a
+real interview ("design an API related to managing a restaurant").
 Grade concreteness hard — checks, items, modifiers, seats, tenders should
 appear by name, not as generic "records" or "objects." An answer that never
 touches payment capture under partial connectivity is not a passing answer
