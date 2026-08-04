@@ -23,13 +23,6 @@ import { findCelebrity } from './solution'
  * shortcut is the random relabelling described below, which scatters where
  * that "topmost" index ends up from one party to the next.
  *
- * Density alone is still not enough, because the layout of those witnesses
- * is itself structured: they all sit on one side of the candidate. Any
- * fixed probe order that runs with the grain of the order (from the high
- * end, or wrapping around) finds a witness in a call or two, and any order
- * that runs against it pays O(n) per candidate. Which orders are cheap is
- * therefore an artifact of the labelling, not of the algorithm.
- *
  * So the budget is not asserted on a handful of hand-picked fixtures. It is
  * asserted across many parties built by `permutedParty`, each of which
  * applies a fresh random relabelling on top of this builder. Relabelling

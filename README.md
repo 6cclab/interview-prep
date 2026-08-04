@@ -21,6 +21,9 @@ pnpm reset celebrity    # start over from a clean stub
 pnpm test               # everything, as a regression check
 ```
 
+`solution.ts` ships as an unimplemented stub, so `pnpm test` starts at 21
+passing and 10 failing. The 10 reds are the drill, not a broken install.
+
 Or open Claude Code here and run `/drill` — it picks by what's rustiest,
 presents the problem cold, and rations hints one rung at a time. `/status` says
 where you stand.
