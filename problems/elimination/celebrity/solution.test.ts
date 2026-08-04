@@ -16,8 +16,12 @@ import { findCelebrity } from './solution'
  * sitting in a predictable place, so a brute force that happens to probe
  * that place first rejects each candidate in one or two calls and sneaks
  * under an O(n) budget while doing O(n^2) work. Here every candidate `a`
- * has a whole block of witnesses — every index above `a` in the order —
- * so there is no globally cheap "just check this one person" shortcut.
+ * has a whole block of witnesses — every index above `a` in the order.
+ * Density alone does not close off the shortcut, though: in this unpermuted
+ * order the topmost index has fewer witnesses than anyone else, so probing
+ * it first is still a cheap, predictable win. What actually removes the
+ * shortcut is the random relabelling described below, which scatters where
+ * that "topmost" index ends up from one party to the next.
  *
  * Density alone is still not enough, because the layout of those witnesses
  * is itself structured: they all sit on one side of the candidate. Any
@@ -33,11 +37,11 @@ import { findCelebrity } from './solution'
  * candidate's witnesses to uniformly random positions, so a fixed probe
  * order has no better strategy than sampling at random: it expects to burn
  * ~n/(witnesses+1) probes per candidate, and candidates late in the order
- * have very few witnesses. No fixed probe order can be cheap on every
- * relabelling, so every correct-but-brute-force solution blows the budget
- * on at least one trial, while the reference two-pass elimination stays at
- * 3n-3 calls on all of them. The randomness is seeded (see `SEED`), so the
- * suite is fully deterministic and reproducible.
+ * have very few witnesses. Across a wide sweep of brute-force variants and
+ * multiple seeds, no fixed probe order has stayed under the budget on every
+ * relabelling — see solutions/elimination/celebrity.md (spoiler) for why a
+ * correct solution comfortably fits under it. The randomness is seeded (see
+ * `SEED`), so the suite is fully deterministic and reproducible.
  */
 function party(n: number, celebrity: number | null): boolean[][] {
   if (celebrity === null && n === 1) {
@@ -58,7 +62,7 @@ function party(n: number, celebrity: number | null): boolean[][] {
   for (let a = 0; a < n; a++) {
     if (a === celebrity) continue
     m[a]![celebrity] = true
-    for (let b: number = a + 1; b < n; b++) if (b !== celebrity) m[a]![b] = true // : number is load-bearing — plain `let b` here trips TS7022; do not "tidy" to match line 33
+    for (let b: number = a + 1; b < n; b++) if (b !== celebrity) m[a]![b] = true // : number is load-bearing — plain `let b` here trips TS7022. The similar loop above doesn't need this annotation; removing it here breaks pnpm typecheck.
   }
   return m
 }
@@ -160,10 +164,9 @@ describe('findCelebrity — correctness', () => {
 })
 
 describe('findCelebrity — budget', () => {
-  // The canonical two-pass solution costs 3n - 3 knows() calls (n - 1 to
-  // find a candidate, up to 2(n - 1) to verify it), so the 3n bound below
-  // is tight by design — it leaves just enough slack for the reference
-  // algorithm while still rejecting an O(n^2) brute force.
+  // The 3n bound below is tight by design — see
+  // solutions/elimination/celebrity.md (spoiler) for why a correct solution
+  // comfortably fits under it while an O(n^2) brute force does not.
   //
   // Both tests below run TRIALS randomly relabelled parties and assert the
   // budget on every one of them. A fixed probe order that gets lucky on one
