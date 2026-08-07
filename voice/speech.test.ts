@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { parseWhisperOutput } from './speech'
+import { describe, expect, it, vi } from 'vitest'
+import { isWhisperLogLine, parseWhisperOutput } from './speech'
 
 describe('parseWhisperOutput', () => {
   it('joins timestamped segments into one utterance', () => {
@@ -27,5 +27,45 @@ describe('parseWhisperOutput', () => {
 
   it('returns empty text for a silent recording', () => {
     expect(parseWhisperOutput('').text).toBe('')
+  })
+
+  it('does not warn when input is only segments and whisper log lines', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stdout = [
+      'whisper_init_from_file_with_params_no_state: loading model',
+      'whisper_model_load: n_vocab = 51866',
+      '[00:00:00.000 --> 00:00:01.000]   Read latency.',
+      'system_info: n_threads = 4',
+      '[00:00:01.000 --> 00:00:02.000]   Write latency.',
+    ].join('\n')
+    expect(parseWhisperOutput(stdout).text).toBe('Read latency. Write latency.')
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('warns once, naming the line, on unrecognised non-empty content, but keeps recognised segments', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stdout = [
+      '[00:00:00.000 --> 00:00:01.000]   Read latency.',
+      'a line whisper never emits',
+      '[00:00:01.000 --> 00:00:02.000]   Write latency.',
+    ].join('\n')
+    expect(parseWhisperOutput(stdout).text).toBe('Read latency. Write latency.')
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]?.join(' ')).toContain('a line whisper never emits')
+    warn.mockRestore()
+  })
+})
+
+describe('isWhisperLogLine', () => {
+  it('recognises whisper.cpp startup log lines and empty strings', () => {
+    expect(isWhisperLogLine('whisper_init_from_file_with_params_no_state: loading model')).toBe(true)
+    expect(isWhisperLogLine('whisper_model_load: n_vocab = 51866')).toBe(true)
+    expect(isWhisperLogLine('system_info: n_threads = 4')).toBe(true)
+    expect(isWhisperLogLine('')).toBe(true)
+  })
+
+  it('does not recognise plain transcribed prose', () => {
+    expect(isWhisperLogLine('So the first thing I want to pin down is the ratio.')).toBe(false)
   })
 })
