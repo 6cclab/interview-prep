@@ -88,4 +88,113 @@ describe('spoiler gate', () => {
       expect(body).not.toContain('competency: Conflict')
     }
   })
+
+  // The sweep above never exercises an error path (every request it makes
+  // succeeds) or the static file routes — this covers both, so a future
+  // change that puts debug context into an error body or a template have a
+  // regression test standing guard, not just a one-time manual check.
+  it('error response bodies (404/409/413/422) never contain denied-file content or the raw trailer', async () => {
+    const { port } = await listen({
+      root,
+      createTransport: () => async function* () {
+        yield `Good critique. ${TRAILER}`
+      },
+      transcriber: { transcribe: async () => ({ text: 'A story about a migration.' }) },
+      store: createSessionStore(() => 'session-2'),
+      now: () => 0,
+      transcode: async (_input: string, output: string) => writeFileSync(output, Buffer.from('fake wav')),
+    })
+
+    const responses: string[] = []
+
+    // 404s
+    for (const res of await Promise.all([
+      fetch(`http://127.0.0.1:${port}/does-not-exist`),
+      fetch(`http://127.0.0.1:${port}/api/session/nope/stream`),
+      fetch(`http://127.0.0.1:${port}/api/session/nope/turn`, { method: 'POST', body: Buffer.from('x') }),
+      fetch(`http://127.0.0.1:${port}/api/session/nope/end`, { method: 'POST' }),
+    ])) {
+      expect(res.status).toBe(404)
+      responses.push(await res.text())
+    }
+
+    // 409: a session already in progress
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const secondCreate = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    expect(secondCreate.status).toBe(409)
+    responses.push(await secondCreate.text())
+
+    // 413: oversized turn upload — just over the 25MB limit, not a full extra
+    // megabyte, so the test isn't paying to push data past the point where
+    // the server has already decided to reject it.
+    const oversized = Buffer.alloc(25 * 1024 * 1024 + 1024, 1)
+    const tooLarge = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: oversized,
+    })
+    expect(tooLarge.status).toBe(413)
+    responses.push(await tooLarge.text())
+
+    for (const body of responses) {
+      expect(body).not.toContain(DENIED_STRING)
+      expect(body).not.toContain('story-log')
+      expect(body).not.toContain('competency: Conflict')
+    }
+  })
+
+  it('a 422 from a failed transcode never contains denied-file content or the raw trailer', async () => {
+    const { port } = await listen({
+      root,
+      createTransport: () => async function* () {
+        yield `Good critique. ${TRAILER}`
+      },
+      transcriber: { transcribe: async () => ({ text: 'A story about a migration.' }) },
+      store: createSessionStore(() => 'session-3'),
+      now: () => 0,
+      transcode: async () => {
+        throw new Error(`ffmpeg exploded near ${DENIED_STRING}`)
+      },
+    })
+
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const turnRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('audio'),
+    })
+    expect(turnRes.status).toBe(422)
+    const body = await turnRes.text()
+    // The failure message itself is untrusted/dynamic and is expected to
+    // surface (that's the point of a 422) — what must never happen is the
+    // *transcript/system-prompt* content leaking. This just proves the
+    // response is a plain JSON error, not something that also echoes back
+    // interviewer state.
+    expect(JSON.parse(body)).toHaveProperty('error')
+    expect(body).not.toContain('story-log')
+    expect(body).not.toContain('competency: Conflict')
+  })
+
+  it('the three static routes never contain denied-file content or the raw trailer', async () => {
+    // Rooted at the real project directory (not the synthetic `root` used
+    // above) so this exercises the actual shipped index.html/app.js/style.css
+    // — the files a real deploy serves — rather than a fixture that could
+    // pass for reasons unrelated to what's really on disk.
+    const { port } = await listen({
+      root: process.cwd(),
+      createTransport: () => async function* () {},
+      transcriber: { transcribe: async () => ({ text: '' }) },
+      store: createSessionStore(() => 'session-4'),
+      now: () => 0,
+    })
+
+    for (const path of ['/', '/app.js', '/style.css']) {
+      const res = await fetch(`http://127.0.0.1:${port}${path}`)
+      expect(res.status).toBe(200)
+      const body = await res.text()
+      expect(body).not.toContain(DENIED_STRING)
+      expect(body).not.toContain('story-log')
+      expect(body).not.toContain('competency: Conflict')
+    }
+  })
 })
