@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-import { runSession, type SessionDeps } from './session'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { runSession, type SessionDeps, type SessionOutcome } from './session'
 import type { Interviewer } from './interviewer'
 
 function fakeInterviewer(replies: string[]): Interviewer {
@@ -39,9 +39,17 @@ describe('runSession', () => {
   })
 
   it('speaks every sentence the interviewer produces', async () => {
-    const speak = vi.fn(async () => {})
-    await runSession(deps({ speaker: { speak } }))
-    expect(speak).toHaveBeenCalledWith('What are we optimising for?')
+    const speak = vi.fn(async (_sentence: string) => {})
+    await runSession(
+      deps({
+        speaker: { speak },
+        interviewer: fakeInterviewer(['One.|Two.|Three.']),
+        // End right after the first (multi-sentence) turn, so the spy only
+        // ever sees the sentences from the turn under test.
+        nextTurn: async () => 'end',
+      }),
+    )
+    expect(speak.mock.calls.map((call) => call[0])).toEqual(['One.', 'Two.', 'Three.'])
   })
 
   it('stops recording before transcribing', async () => {
@@ -73,7 +81,50 @@ describe('runSession', () => {
   })
 
   it('stamps each entry with elapsed time', async () => {
-    const entries = await runSession(deps())
-    expect(entries.every((e) => typeof e.at === 'number')).toBe(true)
+    // A dedicated, deterministic clock: proves the stamps actually advance
+    // across entries rather than tolerating an implementation that hardcodes
+    // `at: 0`. No wall-clock/sleeping involved, so this can't flake.
+    let clock = 0
+    const entries = await runSession(deps({ now: () => (clock += 500) }))
+    expect(entries.map((e) => e.at)).toEqual([500, 1000, 1500])
+  })
+
+  describe('when a turn fails mid-session', () => {
+    let errorSpy: ReturnType<typeof vi.spyOn>
+
+    beforeEach(() => {
+      errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+      errorSpy.mockRestore()
+    })
+
+    it('keeps the entries already collected and signals the early end', async () => {
+      let calls = 0
+      const flaky: Interviewer = {
+        async *turn() {
+          calls++
+          if (calls === 1) {
+            yield 'First reply.'
+            return
+          }
+          throw new Error('stream failed')
+        },
+        lastRaw: () => '',
+      }
+
+      const entries = (await runSession(deps({ interviewer: flaky }))) as SessionOutcome
+
+      // The completed turns survive by the normal return path...
+      expect(entries.map((e) => e.speaker)).toEqual(['interviewer', 'andre', 'interviewer'])
+      expect(entries[0]!.text).toBe('First reply.')
+      expect(entries[1]!.text).toBe('Read latency.')
+
+      // ...and the early end is visible, not a silent or normal-looking stop.
+      expect(entries[2]!.text).toMatch(/ended early/i)
+      expect(entries.endedEarly).toBeTruthy()
+      expect(errorSpy).toHaveBeenCalled()
+    })
   })
 })
