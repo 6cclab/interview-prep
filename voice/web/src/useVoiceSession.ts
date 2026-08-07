@@ -7,6 +7,16 @@ export interface VoiceSession {
   entries: Entry[]
   /** Seconds since the current recording started. Display only — see `record`. */
   elapsedSeconds: number
+  /** True while the interviewer's reply is actively streaming in as sentences. Display only. */
+  interviewerSpeaking: boolean
+  /**
+   * Sentences of the interviewer's in-progress reply, joined so far. Cleared
+   * the moment the matching `entry` event lands with the full, final text —
+   * this exists purely so the transcript can show the reply arriving
+   * progressively rather than popping in all at once. Never a source of
+   * truth: `entries` (built only from `entry` events) is.
+   */
+  interimInterviewerText: string
   /** True when this browser cannot offer microphone access at all (see `mediaDevicesUnsupported`). */
   micUnsupported: boolean
   /** True after a 409 from POST /api/session — an existing session is stuck. */
@@ -41,6 +51,8 @@ export function useVoiceSession(): VoiceSession {
   const [status, setStatus] = useState('Idle.')
   const [entries, setEntries] = useState<Entry[]>([])
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [interviewerSpeaking, setInterviewerSpeaking] = useState(false)
+  const [interimInterviewerText, setInterimInterviewerText] = useState('')
   const [sessionConflict, setSessionConflict] = useState(false)
   const [micUnsupported] = useState(mediaDevicesUnsupported)
 
@@ -67,6 +79,12 @@ export function useVoiceSession(): VoiceSession {
     es.addEventListener('sentence', (event) => {
       const { text } = JSON.parse((event as MessageEvent<string>).data) as { text: string }
       setStatus('Interviewer speaking…')
+      setInterviewerSpeaking(true)
+      // Accumulates for the *current* reply only — cleared below the moment
+      // the matching `entry` lands. Display only, same spoiler boundary as
+      // `entries`: this text originates from the same `sentence` payload the
+      // server already sends, nothing new is exposed.
+      setInterimInterviewerText((prev) => (prev ? `${prev} ${text}` : text))
       void speak(text)
     })
 
@@ -78,11 +96,15 @@ export function useVoiceSession(): VoiceSession {
     es.addEventListener('entry', (event) => {
       const entry = JSON.parse((event as MessageEvent<string>).data) as Entry
       setEntries((prev) => [...prev, entry])
+      setInterviewerSpeaking(false)
+      setInterimInterviewerText('')
     })
 
     es.addEventListener('ended', (event) => {
       const { endedEarly } = JSON.parse((event as MessageEvent<string>).data) as { endedEarly: string | null }
       setStatus(endedEarly ? `Session ended early: ${endedEarly}` : 'Session ended.')
+      setInterviewerSpeaking(false)
+      setInterimInterviewerText('')
       es.close()
       setMode('ended')
     })
@@ -101,6 +123,8 @@ export function useVoiceSession(): VoiceSession {
       const { id } = (await res.json()) as { id: string }
       sessionIdRef.current = id
       setEntries([])
+      setInterviewerSpeaking(false)
+      setInterimInterviewerText('')
       connectStream(id)
       setMode('listening-to-interviewer')
     })()
@@ -222,6 +246,8 @@ export function useVoiceSession(): VoiceSession {
     status,
     entries,
     elapsedSeconds,
+    interviewerSpeaking,
+    interimInterviewerText,
     micUnsupported,
     sessionConflict,
     start,
