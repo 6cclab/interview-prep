@@ -42,3 +42,17 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     notFound(res)
   })
 }
+
+/**
+ * Owns the bind decision. A drill holds a live microphone and reads Andre's
+ * private story bank, so the host is fixed at `127.0.0.1` here and is not a
+ * parameter — a caller-supplied host would let someone bind `0.0.0.0` and
+ * expose both to the network. `port` defaults to `0` (an OS-assigned port)
+ * so tests can request an ephemeral one; it carries no security weight.
+ */
+export function startVoiceServer(deps: VoiceServerDeps, port = 0): Promise<Server> {
+  const server = createVoiceServer(deps)
+  return new Promise((resolve) => {
+    server.listen(port, '127.0.0.1', () => resolve(server))
+  })
+}
