@@ -10,9 +10,36 @@ export interface ClaudeCliOptions {
   /** Defaults to `claude`. Overridable so tests can substitute a stand-in binary. */
   binary?: string
   model?: string
+  /**
+   * Overridable so tests don't have to wait out the real deadline. See
+   * `DEFAULT_TIMEOUT_MS` for the reasoning behind the default.
+   */
+  timeoutMs?: number
 }
 
 const DEFAULT_MODEL = 'claude-opus-5'
+
+/**
+ * A real interviewer turn can run past a minute of speech alone, and model
+ * thinking time is on top of that — so anything close to a minute risks
+ * killing a legitimate slow turn. Five minutes is comfortably beyond any
+ * realistic turn while still bounding the "hung forever" case (stalled
+ * network, an interactive auth prompt the CLI is silently waiting on) to
+ * something a user will notice and can retry.
+ */
+const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
+
+/** Thrown when the subprocess produces no output before `timeoutMs` elapses. Distinct from a spawn failure and from a non-zero exit so the caller can tell "it hung" from "it failed". */
+export class ClaudeCliTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(
+      `claude CLI produced no output for ${timeoutMs}ms and was killed. This usually ` +
+        'means a stalled network connection or an expired login sitting on an ' +
+        'interactive auth prompt — check `claude` can still authenticate, then retry.',
+    )
+    this.name = 'ClaudeCliTimeoutError'
+  }
+}
 
 /**
  * This repo's `.claude/CLAUDE.md` names where the spoiler files
@@ -223,10 +250,12 @@ function stderrSuffix(tail: string): string {
 export function claudeCliStream(opts: ClaudeCliOptions = {}): StreamFn {
   const binary = opts.binary ?? 'claude'
   const model = opts.model ?? DEFAULT_MODEL
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
 
   return async function* (system, messages) {
     const cwd = mkdtempSync(join(tmpdir(), 'claude-cli-transport-'))
     assertSafeSpawnCwd(cwd)
+    let timer: NodeJS.Timeout | undefined
     try {
       const prompt = formatPrompt(messages)
       const child = spawn(binary, claudeCliArgs(prompt, system, model), {
@@ -247,9 +276,19 @@ export function claudeCliStream(opts: ClaudeCliOptions = {}): StreamFn {
         child.stdout?.destroy()
       })
 
+      // A hung subprocess (stalled network, an interactive auth prompt)
+      // would otherwise await forever with no feedback. Killing it lets the
+      // 'close' handler below resolve `exitPromise` and end the stdout
+      // iteration on its own, same as any other exit.
+      let timedOut = false
+      timer = setTimeout(() => {
+        timedOut = true
+        child.kill('SIGKILL')
+      }, timeoutMs)
+
       const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-        (resolve) => {
-          child.once('close', (code, signal) => resolve({ code, signal }))
+        (resolvePromise) => {
+          child.once('close', (code, signal) => resolvePromise({ code, signal }))
         },
       )
 
@@ -292,11 +331,13 @@ export function claudeCliStream(opts: ClaudeCliOptions = {}): StreamFn {
       const { code, signal } = await exitPromise
 
       if (spawnError) throw spawnError
+      if (timedOut) throw new ClaudeCliTimeoutError(timeoutMs)
       if (resultError) throw new Error(`claude CLI reported an error: ${resultError}`)
       if (code !== 0) {
         throw new Error(`claude CLI exited with code ${code} (signal ${signal})${stderrSuffix(stderrTail)}`)
       }
     } finally {
+      clearTimeout(timer)
       rmSync(cwd, { recursive: true, force: true })
     }
   }

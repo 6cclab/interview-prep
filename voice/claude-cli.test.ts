@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   assertSafeSpawnCwd,
+  ClaudeCliTimeoutError,
   claudeCliArgs,
   claudeCliStream,
   extractErrorResult,
@@ -257,6 +258,30 @@ exit 0`)
   it('throws when the binary cannot be spawned', async () => {
     const stream = claudeCliStream({ binary: join(scratch, 'does-not-exist') })
     await expect(collect(stream('SYSTEM', []))).rejects.toThrow(/spawn|enoent/i)
+  })
+
+  it('kills a hung subprocess and throws a distinct timeout error', async () => {
+    const bin = stubBinary('hang.sh', `sleep 5`)
+    const stream = claudeCliStream({ binary: bin, timeoutMs: 50 })
+    let caught: unknown
+    try {
+      await collect(stream('SYSTEM', []))
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(ClaudeCliTimeoutError)
+    const message = (caught as Error).message
+    expect(message).not.toMatch(/exited with code/i)
+    expect(message).not.toMatch(/failed to spawn/i)
+  })
+
+  it('does not time out a subprocess that finishes well within the deadline', async () => {
+    const bin = stubBinary('fast.sh', `cat <<'EOF'
+${delta('quick')}
+EOF
+exit 0`)
+    const stream = claudeCliStream({ binary: bin, timeoutMs: 5000 })
+    expect(await collect(stream('SYSTEM', []))).toEqual(['quick'])
   })
 
   it('does not crash on an unparsable line, and does not silently drop later output', async () => {
