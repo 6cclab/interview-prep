@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runSession, type SessionDeps, type SessionOutcome } from './session'
 import type { Interviewer } from './interviewer'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createSession, finishSession } from './session'
 
 function fakeInterviewer(replies: string[]): Interviewer {
   let index = 0
@@ -89,6 +93,32 @@ describe('runSession', () => {
     expect(entries.map((e) => e.at)).toEqual([500, 1000, 1500])
   })
 
+  it('stamps Andre at the moment recording stopped, not after transcription latency', async () => {
+    // A clock that only moves when told to. It stays at 0 through recording
+    // and only jumps forward inside `transcribe`, standing in for the real
+    // seconds whisper.cpp spends on a long answer. A stub that "transcribes"
+    // instantly can't distinguish "stamped before transcription" from
+    // "stamped after" — this one can, because the two produce different
+    // numbers.
+    let clock = 0
+    const entries = await runSession(
+      deps({
+        now: () => clock,
+        transcriber: {
+          transcribe: async () => {
+            clock += 5000 // simulated whisper.cpp latency
+            return { text: 'Read latency.' }
+          },
+        },
+      }),
+    )
+    const andre = entries.find((e) => e.speaker === 'andre')!
+    // Stamped when the user actually stopped speaking (before transcription
+    // ran the clock forward), not once transcription finished.
+    expect(andre.at).toBe(0)
+    expect(andre.at).toBeLessThan(5000)
+  })
+
   describe('when a turn fails mid-session', () => {
     let errorSpy: ReturnType<typeof vi.spyOn>
 
@@ -170,5 +200,155 @@ describe('runSession', () => {
       // successfully, so this confirms it wasn't left running either.
       expect(stop).toHaveBeenCalledTimes(1)
     })
+
+    it('stamps the early-end marker when transcription fails at the moment recording stopped, not after transcription latency', async () => {
+      // Same technique as the successful-turn case: a clock that only moves
+      // when told to, and jumps forward inside the failing operation. If the
+      // marker re-samples the clock after `transcribe` returns (rather than
+      // reusing the pre-transcribe timestamp), this catches it — a bare
+      // `typeof at === 'number'` assertion would not.
+      let clock = 0
+      const entries = (await runSession(
+        deps({
+          now: () => clock,
+          transcriber: {
+            transcribe: async () => {
+              clock += 5000 // simulated whisper.cpp latency before the failure surfaces
+              throw new Error('whisper-cli: model not found')
+            },
+          },
+        }),
+      )) as SessionOutcome
+
+      const marker = entries.find((e) => /ended early/i.test(e.text))!
+      expect(marker.at).toBe(0)
+      expect(marker.at).toBeLessThan(5000)
+    })
+  })
+})
+
+describe('createSession', () => {
+  function fakeInterviewer(replies: string[]): Interviewer {
+    let index = 0
+    return {
+      async *turn() {
+        for (const sentence of (replies[index] ?? '').split('|')) yield sentence
+        index++
+      },
+      lastRaw: () => replies[index - 1] ?? '',
+    }
+  }
+
+  it('begin() yields the opening reply and records no Andre entry', async () => {
+    const session = createSession({ interviewer: fakeInterviewer(['Ready when you are.']), now: () => 0 })
+    const sentences: string[] = []
+    for await (const s of session.begin()) sentences.push(s)
+    expect(sentences).toEqual(['Ready when you are.'])
+    expect(session.entries()).toEqual([{ speaker: 'interviewer', text: 'Ready when you are.', at: 0 }])
+  })
+
+  it('submitTurn() records the Andre entry immediately, before the reply arrives', async () => {
+    let ticks = 0
+    const session = createSession({ interviewer: fakeInterviewer(['Go on.']), now: () => (ticks += 100) })
+    const iter = session.submitTurn('Ready latency.', 100)
+    const first = await iter[Symbol.asyncIterator]().next()
+    expect(first.value).toBe('Go on.')
+    expect(session.entries()[0]).toEqual({ speaker: 'andre', text: 'Ready latency.', at: 100 })
+  })
+
+  it('endedEarly() is unset after a normal turn', async () => {
+    const session = createSession({ interviewer: fakeInterviewer(['Fine.']), now: () => 0 })
+    for await (const _ of session.begin()) void _
+    expect(session.endedEarly()).toBeUndefined()
+  })
+
+  it('a failing interviewer turn ends the session and leaves a synthetic entry', async () => {
+    const failing: Interviewer = {
+      async *turn() {
+        throw new Error('stream exploded')
+      },
+      lastRaw: () => '',
+    }
+    const session = createSession({ interviewer: failing, now: () => 42 })
+    const sentences: string[] = []
+    for await (const s of session.begin()) sentences.push(s)
+    expect(sentences).toEqual([])
+    expect(session.endedEarly()).toBe('stream exploded')
+    expect(session.entries()[0]!.text).toMatch(/ended early.*stream exploded/i)
+  })
+
+  it('stamps the early-end marker at turn-start, not after the failing stream runs', async () => {
+    // Same technique as `runSession`'s transcription case: a clock that only
+    // advances inside the failing operation. If the marker re-samples the
+    // clock after the stream throws (rather than reusing the timestamp
+    // captured at the top of the turn), this catches it.
+    let clock = 0
+    const flaky: Interviewer = {
+      async *turn() {
+        clock += 5000 // simulated slow stream before it throws
+        throw new Error('stream failed')
+      },
+      lastRaw: () => '',
+    }
+    const session = createSession({ interviewer: flaky, now: () => clock })
+    for await (const _ of session.begin()) void _
+    expect(session.entries()[0]!.at).toBe(0)
+    expect(session.entries()[0]!.at).toBeLessThan(5000)
+  })
+
+  it('reportFailure() marks the session ended without needing a turn', () => {
+    const session = createSession({ interviewer: fakeInterviewer([]), now: () => 7 })
+    session.reportFailure('transcode failed', 7)
+    expect(session.endedEarly()).toBe('transcode failed')
+    expect(session.entries()).toEqual([
+      { speaker: 'interviewer', text: '[Session ended early — transcode failed]', at: 7 },
+    ])
+  })
+})
+
+describe('finishSession', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'voice-finish-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('writes the transcript to local/mock-<date>.md', () => {
+    const session = createSession({ interviewer: { turn: async function* () {}, lastRaw: () => '' }, now: () => 0 })
+    session.submitTurn('Ready latency.', 0)
+    const startedAt = new Date('2026-08-07T10:00:00.000Z')
+    const { relPath } = finishSession(session, { turn: async function* () {}, lastRaw: () => '' }, {
+      root,
+      track: 'mock',
+      startedAt,
+    })
+    expect(relPath).toBe('local/mock-2026-08-07.md')
+    expect(readFileSync(join(root, relPath), 'utf8')).toContain('Ready latency.')
+  })
+
+  it('appends the story log when the interviewer emitted a trailer', () => {
+    const session = createSession({ interviewer: { turn: async function* () {}, lastRaw: () => '' }, now: () => 0 })
+    const raw = '```story-log\ncompetency: Conflict\nstory: The migration\nworked: Owned the timeline\nfix: Name the tradeoff sooner\n```'
+    const { storyLogWritten } = finishSession(session, { turn: async function* () {}, lastRaw: () => raw }, {
+      root,
+      track: 'mock',
+      startedAt: new Date('2026-08-07T10:00:00.000Z'),
+    })
+    expect(storyLogWritten).toBe(true)
+    expect(readFileSync(join(root, 'local/stories.md'), 'utf8')).toContain('## Conflict')
+  })
+
+  it('does not write a story log when the interviewer emitted no trailer', () => {
+    const session = createSession({ interviewer: { turn: async function* () {}, lastRaw: () => '' }, now: () => 0 })
+    const { storyLogWritten } = finishSession(session, { turn: async function* () {}, lastRaw: () => 'No trailer here.' }, {
+      root,
+      track: 'mock',
+      startedAt: new Date('2026-08-07T10:00:00.000Z'),
+    })
+    expect(storyLogWritten).toBe(false)
   })
 })

@@ -10,6 +10,7 @@
     "reset": "tsx scripts/reset.ts",
     "typecheck": "tsc --noEmit",
     "mock:voice": "tsx voice/cli.ts mock",
+    "mock:web": "tsx voice/http-server.ts",
     "design:voice": "tsx voice/cli.ts design",
     "voice:devices": "tsx voice/cli.ts devices"
   },
