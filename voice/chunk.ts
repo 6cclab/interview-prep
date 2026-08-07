@@ -1,4 +1,4 @@
-const ABBREVIATIONS = ['e.g.', 'i.e.', 'etc.', 'vs.', 'approx.', 'Dr.', 'Mr.', 'Ms.']
+const ABBREVIATIONS = ['e.g.', 'i.e.', 'etc.', 'vs.', 'approx.', 'Dr.', 'Mr.', 'Ms.', 'U.S.']
 
 function endsSentence(text: string, index: number): boolean {
   const char = text[index]
@@ -13,10 +13,14 @@ function endsSentence(text: string, index: number): boolean {
     if (ABBREVIATIONS.some((abbrev) => head.endsWith(abbrev))) return false
   }
 
-  // A terminator only ends a sentence at end-of-buffer or before whitespace,
-  // so "reads.The" mid-token is left alone until more deltas arrive.
+  // A terminator only ends a sentence when whitespace follows it. At the end
+  // of the buffer there is no way yet to know whether more text is coming
+  // (a digit that turns a period into a decimal, more dots, an abbreviation
+  // letter, ...), so hold it back; push() will emit it once a later delta
+  // confirms it with whitespace, and flush() resolves it once the stream is
+  // genuinely over.
   const next = text[index + 1]
-  return next === undefined || /\s/.test(next)
+  return next !== undefined && /\s/.test(next)
 }
 
 /**
