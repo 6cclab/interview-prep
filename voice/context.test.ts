@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { allowedPaths, assertNoSpoilers, buildSystemPrompt, competencyCoverage } from './context'
+import { splitTrailer } from './transcript'
 
 let root: string
 
@@ -124,5 +125,33 @@ describe('buildSystemPrompt', () => {
     expect(() => buildSystemPrompt(root, 'design', 'no-such-problem')).toThrow(
       /no-such-problem/,
     )
+  })
+
+  it('redirects the mock story-log step and names every field it expects back', () => {
+    const prompt = buildSystemPrompt(root, 'mock')
+    expect(prompt).toContain('story-log')
+    for (const field of ['competency', 'story', 'worked', 'fix']) {
+      expect(prompt).toContain(`${field}:`)
+    }
+  })
+
+  it('never mentions story-log for a design drill — only mock ends in a trailer', () => {
+    const prompt = buildSystemPrompt(root, 'design', 'rate-limiter')
+    expect(prompt).not.toContain('story-log')
+  })
+
+  it('emits a trailer example that the real splitTrailer parses into a full StoryLog (producer/consumer contract)', () => {
+    // This closes the loop: it does not just grep for the string "story-log",
+    // it runs the prompt's own example fence through the real parser. If the
+    // prompt's fence marker, field names, or key: value shape ever drifts
+    // from what splitTrailer expects, this fails — even though each half
+    // still looks fine read on its own.
+    const prompt = buildSystemPrompt(root, 'mock')
+    const { log } = splitTrailer(prompt)
+    expect(log).not.toBeNull()
+    expect(log!.competency.length).toBeGreaterThan(0)
+    expect(log!.story.length).toBeGreaterThan(0)
+    expect(log!.worked.length).toBeGreaterThan(0)
+    expect(log!.fix.length).toBeGreaterThan(0)
   })
 })

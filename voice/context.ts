@@ -93,19 +93,38 @@ export function buildSystemPrompt(root: string, track: Track, problem?: string):
     sections.push(`<competency-coverage>\n${lines.join('\n')}\n</competency-coverage>`)
   }
 
-  sections.push(
-    [
-      '<voice-mode>',
-      'This interview is spoken aloud. Your text is read by a speech synthesiser',
-      'and heard, not seen. Write plain prose only: no markdown, no bullet lists,',
-      'no code blocks, no headings. Numbers and symbols must be spelled the way',
-      'you would say them.',
+  const voiceMode = [
+    '<voice-mode>',
+    'This interview is spoken aloud. Your text is read by a speech synthesiser',
+    'and heard, not seen. Write plain prose only: no markdown, no bullet lists,',
+    'no code blocks, no headings. Numbers and symbols must be spelled the way',
+    'you would say them.',
+    '',
+    'You have no tools and no file access. Everything you are permitted to know',
+    'is above. Do not ask for a file and do not claim to have read one.',
+  ]
+
+  if (track === 'mock') {
+    voiceMode.push(
       '',
-      'You have no tools and no file access. Everything you are permitted to know',
-      'is above. Do not ask for a file and do not claim to have read one.',
-      '</voice-mode>',
-    ].join('\n'),
-  )
+      'Step 6 above tells you to append to local/stories.md. You cannot write',
+      'files, so replace that step: after you critique a behavioral answer, end',
+      'your turn with this block, exactly as shown, in place of the file write:',
+      '',
+      '```story-log',
+      'competency: <the competency>',
+      'story: <the story he used>',
+      'worked: <what worked>',
+      'fix: <the one thing to fix>',
+      '```',
+      '',
+      'This is the one exception to no code blocks. It is stripped before your',
+      'words reach him — do not speak it, name it, or introduce it.',
+    )
+  }
+
+  voiceMode.push('</voice-mode>')
+  sections.push(voiceMode.join('\n'))
 
   return sections.join('\n\n')
 }
