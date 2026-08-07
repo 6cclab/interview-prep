@@ -37,10 +37,13 @@ pnpm test <problem>     # run one drill
 pnpm test               # everything, as a regression check
 pnpm reset <problem>    # restore stub.ts over solution.ts
 pnpm mock:voice         # spoken behavioral drill
-pnpm mock:web           # browser client for the same drill (127.0.0.1)
+pnpm mock:web           # React browser client for the same drill (127.0.0.1) — builds, then serves
+pnpm build:web          # build the React client only (voice/web -> voice/dist)
+pnpm dev:web            # Vite dev server with HMR for voice/web (proxies /api)
+pnpm dev:web:api        # the node:http API/session server alone, for use alongside dev:web
 pnpm design:voice <p>   # spoken live design drill
 pnpm voice:devices      # list microphones and speakers for local/voice.json
-pnpm typecheck
+pnpm typecheck          # covers voice/ and voice/web/ separately (different tsconfig)
 ```
 
 ## Tests encode the insight
