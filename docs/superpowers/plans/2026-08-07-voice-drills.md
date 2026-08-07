@@ -988,7 +988,324 @@ git commit -m "feat(voice): continuous microphone capture via ffmpeg"
 
 ---
 
-### Task 6: Interviewer loop
+### Task 6: Device discovery and selection
+
+Andre must be able to pick which microphone records him and which speakers the
+interviewer comes out of. Device indices are machine-specific and shift when a
+headset is plugged in, so they belong in gitignored local config, not in a
+committed default.
+
+The plan's `:0` default is known to be **wrong on this machine** — verified with
+`ffmpeg -f avfoundation -list_devices true -i ""`, audio index `0` is
+`CalDigit USB-C HDMI Audio` and the built-in microphone is index `3`. Recording
+against the default would have captured silence.
+
+**Files:**
+- Create: `voice/devices.ts`
+- Create: `voice/devices.test.ts`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces:
+  - `interface Device { id: string; name: string }`
+  - `parseInputDevices(stderr: string): Device[]`
+  - `parseOutputDevices(stdout: string): Device[]`
+  - `listInputDevices(): Promise<Device[]>`
+  - `listOutputDevices(): Promise<Device[]>`
+  - `interface DeviceConfig { input?: string; output?: string }`
+  - `readDeviceConfig(root: string): DeviceConfig`
+
+**Real output to parse.** Both were captured on this machine; use them as the
+test fixtures verbatim rather than inventing a format.
+
+`ffmpeg -f avfoundation -list_devices true -i ""` writes to **stderr**, and the
+audio section follows the video section — the parser must ignore the video
+devices entirely or it will offer cameras as microphones:
+
+```
+[AVFoundation indev @ 0x72d068000] AVFoundation video devices:
+[AVFoundation indev @ 0x72d068000] [0] MacBook Pro Camera
+[AVFoundation indev @ 0x72d068000] [1] HD Pro Webcam C920
+[AVFoundation indev @ 0x72d068000] AVFoundation audio devices:
+[AVFoundation indev @ 0x72d068000] [0] CalDigit USB-C HDMI Audio
+[AVFoundation indev @ 0x72d068000] [1] HD Pro Webcam C920
+[AVFoundation indev @ 0x72d068000] [2] Andre's iPhone Microphone
+[AVFoundation indev @ 0x72d068000] [3] MacBook Pro Microphone
+```
+
+Note the trap: `HD Pro Webcam C920` appears in *both* sections at index `1`.
+A parser that greps for `[N] Name` without tracking which section it is in will
+return the wrong device list.
+
+`say -a '?'` writes to **stdout**, with right-aligned numeric ids:
+
+```
+  108 CalDigit USB-C HDMI Audio
+   75 MacBook Pro Speakers
+```
+
+`say -a` is real but undocumented — it does not appear in `say --help`. Do not
+"correct" it to a documented flag.
+
+**Config file.** `local/voice.json`, gitignored like everything under `local/`:
+
+```json
+{ "input": ":3", "output": "75" }
+```
+
+JSON rather than YAML because the repo has no YAML dependency and this is not
+worth adding one for. Missing file, missing key, and malformed JSON all yield an
+empty config rather than throwing — a bad config file must not stop a drill from
+starting, it should fall through to the defaults.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `voice/devices.test.ts`:
+
+```ts
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { parseInputDevices, parseOutputDevices, readDeviceConfig } from './devices'
+
+const FFMPEG_STDERR = [
+  '[AVFoundation indev @ 0x72d068000] AVFoundation video devices:',
+  '[AVFoundation indev @ 0x72d068000] [0] MacBook Pro Camera',
+  '[AVFoundation indev @ 0x72d068000] [1] HD Pro Webcam C920',
+  '[AVFoundation indev @ 0x72d068000] AVFoundation audio devices:',
+  '[AVFoundation indev @ 0x72d068000] [0] CalDigit USB-C HDMI Audio',
+  '[AVFoundation indev @ 0x72d068000] [1] HD Pro Webcam C920',
+  '[AVFoundation indev @ 0x72d068000] [3] MacBook Pro Microphone',
+].join('\n')
+
+const SAY_STDOUT = ['  108 CalDigit USB-C HDMI Audio', '   75 MacBook Pro Speakers'].join('\n')
+
+let root: string
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'voice-devices-'))
+})
+
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+describe('parseInputDevices', () => {
+  it('returns only audio devices, never video ones', () => {
+    expect(parseInputDevices(FFMPEG_STDERR).map((d) => d.name)).toEqual([
+      'CalDigit USB-C HDMI Audio',
+      'HD Pro Webcam C920',
+      'MacBook Pro Microphone',
+    ])
+  })
+
+  it('formats ids as the avfoundation input string', () => {
+    expect(parseInputDevices(FFMPEG_STDERR)[2]).toEqual({
+      id: ':3',
+      name: 'MacBook Pro Microphone',
+    })
+  })
+
+  it('does not confuse the camera sharing an index with an audio device', () => {
+    const ids = parseInputDevices(FFMPEG_STDERR).map((d) => d.id)
+    expect(ids).not.toContain(':0/video')
+    expect(parseInputDevices(FFMPEG_STDERR).map((d) => d.name)).not.toContain(
+      'MacBook Pro Camera',
+    )
+  })
+
+  it('returns an empty list when there is no audio section', () => {
+    expect(parseInputDevices('[AVFoundation indev @ 0x1] AVFoundation video devices:')).toEqual(
+      [],
+    )
+  })
+})
+
+describe('parseOutputDevices', () => {
+  it('parses right-aligned ids and names', () => {
+    expect(parseOutputDevices(SAY_STDOUT)).toEqual([
+      { id: '108', name: 'CalDigit USB-C HDMI Audio' },
+      { id: '75', name: 'MacBook Pro Speakers' },
+    ])
+  })
+
+  it('ignores blank lines', () => {
+    expect(parseOutputDevices(`\n${SAY_STDOUT}\n\n`)).toHaveLength(2)
+  })
+})
+
+describe('readDeviceConfig', () => {
+  function writeConfig(body: string) {
+    mkdirSync(join(root, 'local'), { recursive: true })
+    writeFileSync(join(root, 'local/voice.json'), body)
+  }
+
+  it('reads both devices', () => {
+    writeConfig('{ "input": ":3", "output": "75" }')
+    expect(readDeviceConfig(root)).toEqual({ input: ':3', output: '75' })
+  })
+
+  it('returns an empty config when the file is absent', () => {
+    expect(readDeviceConfig(root)).toEqual({})
+  })
+
+  it('returns an empty config rather than throwing on malformed JSON', () => {
+    writeConfig('{ not json')
+    expect(readDeviceConfig(root)).toEqual({})
+  })
+
+  it('ignores non-string values rather than passing them to a subprocess', () => {
+    writeConfig('{ "input": 3, "output": null }')
+    expect(readDeviceConfig(root)).toEqual({})
+  })
+})
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm vitest run voice/devices.test.ts`
+Expected: FAIL — `Failed to resolve import "./devices"`
+
+- [ ] **Step 3: Write the implementation**
+
+Create `voice/devices.ts`:
+
+```ts
+import { execFile } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { promisify } from 'node:util'
+
+const run = promisify(execFile)
+
+export interface Device {
+  id: string
+  name: string
+}
+
+const AUDIO_HEADER = /AVFoundation audio devices:/
+const VIDEO_HEADER = /AVFoundation video devices:/
+const DEVICE_LINE = /\[(\d+)\]\s+(.*)$/
+
+/**
+ * Parse `ffmpeg -f avfoundation -list_devices true -i ""`, which writes to
+ * stderr and lists video devices before audio ones. Indices restart per
+ * section and names can repeat across them, so the section must be tracked —
+ * grepping for `[N] Name` alone would offer cameras as microphones.
+ */
+export function parseInputDevices(stderr: string): Device[] {
+  const devices: Device[] = []
+  let inAudio = false
+  for (const line of stderr.split('\n')) {
+    if (VIDEO_HEADER.test(line)) {
+      inAudio = false
+      continue
+    }
+    if (AUDIO_HEADER.test(line)) {
+      inAudio = true
+      continue
+    }
+    if (!inAudio) continue
+    const match = DEVICE_LINE.exec(line)
+    if (match) devices.push({ id: `:${match[1]}`, name: match[2]!.trim() })
+  }
+  return devices
+}
+
+/** Parse `say -a '?'` — right-aligned numeric id, then the device name. */
+export function parseOutputDevices(stdout: string): Device[] {
+  const devices: Device[] = []
+  for (const line of stdout.split('\n')) {
+    const match = /^\s*(\d+)\s+(.*)$/.exec(line)
+    if (match) devices.push({ id: match[1]!, name: match[2]!.trim() })
+  }
+  return devices
+}
+
+export async function listInputDevices(): Promise<Device[]> {
+  // This invocation always exits non-zero — it lists devices, then fails to
+  // open the empty input. The device list is on stderr either way.
+  try {
+    const { stderr } = await run('ffmpeg', [
+      '-hide_banner',
+      '-f', 'avfoundation',
+      '-list_devices', 'true',
+      '-i', '',
+    ])
+    return parseInputDevices(stderr)
+  } catch (error) {
+    return parseInputDevices(String((error as { stderr?: string }).stderr ?? ''))
+  }
+}
+
+export async function listOutputDevices(): Promise<Device[]> {
+  const { stdout } = await run('say', ['-a', '?'])
+  return parseOutputDevices(stdout)
+}
+
+export interface DeviceConfig {
+  input?: string
+  output?: string
+}
+
+/**
+ * Read `local/voice.json`. Device ids are machine-specific and shift when a
+ * headset is plugged in, so they live in gitignored local config rather than a
+ * committed default. Any problem reading it yields an empty config — a bad
+ * config file must not stop a drill from starting.
+ */
+export function readDeviceConfig(root: string): DeviceConfig {
+  const path = join(root, 'local/voice.json')
+  if (!existsSync(path)) return {}
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+    if (typeof parsed !== 'object' || parsed === null) return {}
+    const { input, output } = parsed as Record<string, unknown>
+    const config: DeviceConfig = {}
+    if (typeof input === 'string') config.input = input
+    if (typeof output === 'string') config.output = output
+    return config
+  } catch {
+    return {}
+  }
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `pnpm vitest run voice/devices.test.ts`
+Expected: PASS, 10 tests
+
+- [ ] **Step 5: Verify against the real machine**
+
+Run: `pnpm tsx -e "import('./voice/devices.ts').then(async m => console.log(await m.listInputDevices(), await m.listOutputDevices()))"`
+Expected: the input list includes `{ id: ':3', name: 'MacBook Pro Microphone' }` and
+no camera entries; the output list includes `{ id: '75', name: 'MacBook Pro Speakers' }`.
+
+- [ ] **Step 6: Add the output-device option to `saySpeaker`**
+
+`voice/speech.ts`'s `saySpeaker` currently accepts `voice` and `rate`. Add an
+`audioDevice` option that maps to `say -a <id>`, so the interviewer can be routed
+to a chosen output. Keep it optional — omitted means the system default.
+
+Add a test to `voice/speech.test.ts` only if `saySpeaker`'s argument construction
+is extracted into a pure function; if it is still inline in the closure, do not
+add a mock-based subprocess test — that scope line was set deliberately in Task 4.
+Extracting a `sayArgs(text, opts)` pure function and testing that is the better
+option, and is what this step asks for.
+
+- [ ] **Step 7: Typecheck and commit**
+
+```bash
+pnpm typecheck
+git add voice/devices.ts voice/devices.test.ts voice/speech.ts voice/speech.test.ts
+git commit -m "feat(voice): audio input and output device discovery and selection"
+```
+
+---
+
+### Task 7: Interviewer loop
 
 The API call, behind an injectable stream function so the conversation logic is testable with no key and no network.
 
@@ -1207,7 +1524,7 @@ git commit -m "feat(voice): streaming interviewer loop with injectable transport
 
 ---
 
-### Task 7: CLI wiring and the full session
+### Task 8: CLI wiring and the full session
 
 Ties it together and proves the loop with stubbed speech.
 
@@ -1215,11 +1532,11 @@ Ties it together and proves the loop with stubbed speech.
 - Create: `voice/session.ts`
 - Create: `voice/session.test.ts`
 - Create: `voice/cli.ts`
-- Modify: `package.json` (add `mock:voice` and `design:voice` scripts)
+- Modify: `package.json` (add `mock:voice`, `design:voice` and `voice:devices` scripts)
 - Modify: `.claude/CLAUDE.md` (document the two commands)
 
 **Interfaces:**
-- Consumes: everything from Tasks 1–6.
+- Consumes: everything from Tasks 1–7.
 - Produces:
   - `interface SessionDeps { transcriber: Transcriber; speaker: Speaker; interviewer: Interviewer; startRecording(): Recorder; nextTurn(): Promise<'speak' | 'end'>; now(): number }`
   - `runSession(deps: SessionDeps): Promise<Entry[]>`
@@ -1385,6 +1702,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { record } from './audio'
 import { buildSystemPrompt, type Track } from './context'
+import { listInputDevices, listOutputDevices, readDeviceConfig } from './devices'
 import { anthropicStream, createInterviewer } from './interviewer'
 import { runSession } from './session'
 import { saySpeaker, whisperTranscriber } from './speech'
@@ -1398,14 +1716,42 @@ import {
 
 const WHISPER_BINARY = process.env.WHISPER_BINARY ?? 'whisper-cli'
 const WHISPER_MODEL = process.env.WHISPER_MODEL ?? 'models/ggml-large-v3-turbo.bin'
-const MIC_DEVICE = process.env.MIC_DEVICE ?? ':0'
+
+/**
+ * Device resolution order: env var, then `local/voice.json`, then the system
+ * default. There is deliberately no hardcoded index fallback — on this machine
+ * avfoundation audio `:0` is an HDMI input, so a wrong default records silence,
+ * which looks identical to a broken microphone.
+ */
+function resolveDevices(root: string): { input?: string; output?: string } {
+  const configured = readDeviceConfig(root)
+  return {
+    input: process.env.MIC_DEVICE ?? configured.input,
+    output: process.env.SAY_DEVICE ?? configured.output,
+  }
+}
+
+async function printDevices(): Promise<void> {
+  const [inputs, outputs] = await Promise.all([listInputDevices(), listOutputDevices()])
+  console.log('Inputs (microphones):')
+  for (const d of inputs) console.log(`  ${d.id}  ${d.name}`)
+  console.log('\nOutputs (speakers):')
+  for (const d of outputs) console.log(`  ${d.id}  ${d.name}`)
+  console.log('\nWrite the ones you want to local/voice.json, e.g.:')
+  console.log('  { "input": ":3", "output": "75" }')
+}
 
 async function main(): Promise<void> {
-  const track = process.argv[2] as Track | undefined
+  const track = process.argv[2] as Track | 'devices' | undefined
   const problem = process.argv[3]
 
+  if (track === 'devices') {
+    await printDevices()
+    return
+  }
+
   if (track !== 'mock' && track !== 'design') {
-    console.error('Usage: pnpm mock:voice | pnpm design:voice <problem>')
+    console.error('Usage: pnpm mock:voice | pnpm design:voice <problem> | pnpm voice:devices')
     process.exit(1)
   }
   if (track === 'design' && !problem) {
@@ -1415,6 +1761,7 @@ async function main(): Promise<void> {
 
   const root = process.cwd()
   const scratch = mkdtempSync(join(tmpdir(), 'voice-drill-'))
+  const devices = resolveDevices(root)
   const rl = createInterface({ input: process.stdin, output: process.stdout })
   const startedAt = new Date()
   const started = Date.now()
@@ -1424,14 +1771,22 @@ async function main(): Promise<void> {
     anthropicStream(new Anthropic()),
   )
 
+  if (!devices.input) {
+    // Silently defaulting here is the trap: an unconfigured index can point at
+    // an HDMI input, and a silent recording is indistinguishable from a broken
+    // microphone until the transcript comes back empty.
+    console.log('No input device configured — using the avfoundation default.')
+    console.log('If nothing is transcribed, run `pnpm voice:devices` and set local/voice.json.\n')
+  }
+
   console.log('Recording. Press Enter to hand the turn back. Type "end" to finish.\n')
 
   try {
     const entries = await runSession({
       transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
-      speaker: saySpeaker({ voice: process.env.SAY_VOICE }),
+      speaker: saySpeaker({ voice: process.env.SAY_VOICE, audioDevice: devices.output }),
       interviewer,
-      startRecording: () => record(scratch, MIC_DEVICE),
+      startRecording: () => record(scratch, devices.input),
       nextTurn: async () => ((await rl.question('')).trim() === 'end' ? 'end' : 'speak'),
       now: () => Date.now() - started,
     })
@@ -1464,6 +1819,7 @@ In `package.json`, add these two entries to `scripts`, after `"reset"`:
 ```json
     "mock:voice": "tsx voice/cli.ts mock",
     "design:voice": "tsx voice/cli.ts design",
+    "voice:devices": "tsx voice/cli.ts devices",
 ```
 
 - [ ] **Step 7: Run the voice suites and typecheck**
@@ -1507,6 +1863,7 @@ In `.claude/CLAUDE.md`, add these two lines to the Commands code block, after th
 ```
 pnpm mock:voice         # spoken behavioral drill
 pnpm design:voice <p>   # spoken live design drill
+pnpm voice:devices      # list microphones and speakers for local/voice.json
 ```
 
 - [ ] **Step 10: Commit**
