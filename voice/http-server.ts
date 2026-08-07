@@ -3,11 +3,13 @@ import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
 import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import Anthropic from '@anthropic-ai/sdk'
 import { buildSystemPrompt } from './context'
-import { createInterviewer, type StreamFn } from './interviewer'
+import { createInterviewer, anthropicStream, type StreamFn } from './interviewer'
+import { claudeCliStream } from './claude-cli'
 import { createSession, finishSession } from './session'
 import { createSessionStore, type SessionStore } from './session-store'
-import type { Transcriber } from './speech'
+import { whisperTranscriber, type Transcriber } from './speech'
 import { transcodeToWav } from './transcode'
 
 export interface VoiceServerDeps {
@@ -280,4 +282,32 @@ export function startVoiceServer(deps: VoiceServerDeps, port = 0): Promise<Serve
   return new Promise((resolve) => {
     server.listen(port, '127.0.0.1', () => resolve(server))
   })
+}
+
+const WHISPER_BINARY = process.env.WHISPER_BINARY ?? 'whisper-cli'
+const WHISPER_MODEL = process.env.WHISPER_MODEL ?? 'models/ggml-large-v3-turbo.bin'
+
+function chooseTransport(): StreamFn {
+  if (process.env.ANTHROPIC_API_KEY) {
+    console.log('Transport: Anthropic Messages API (spending Console credits)')
+    return anthropicStream(new Anthropic())
+  }
+  console.log('Transport: claude CLI (spending Claude subscription quota)')
+  return claudeCliStream()
+}
+
+function main(): void {
+  const port = process.env.PORT ? Number(process.env.PORT) : 4173
+  const server = createVoiceServer({
+    root: process.cwd(),
+    createTransport: chooseTransport,
+    transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
+  })
+  server.listen(port, '127.0.0.1', () => {
+    console.log(`Voice mock drill: http://127.0.0.1:${port}/`)
+  })
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main()
 }

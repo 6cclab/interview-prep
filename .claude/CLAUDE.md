@@ -37,6 +37,7 @@ pnpm test <problem>     # run one drill
 pnpm test               # everything, as a regression check
 pnpm reset <problem>    # restore stub.ts over solution.ts
 pnpm mock:voice         # spoken behavioral drill
+pnpm mock:web           # browser client for the same drill (127.0.0.1)
 pnpm design:voice <p>   # spoken live design drill
 pnpm voice:devices      # list microphones and speakers for local/voice.json
 pnpm typecheck
