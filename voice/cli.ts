@@ -4,9 +4,10 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { record } from './audio'
+import { claudeCliStream } from './claude-cli'
 import { buildSystemPrompt, type Track } from './context'
 import { listInputDevices, listOutputDevices, readDeviceConfig } from './devices'
-import { anthropicStream, createInterviewer } from './interviewer'
+import { anthropicStream, createInterviewer, type StreamFn } from './interviewer'
 import { runSession } from './session'
 import { saySpeaker, whisperTranscriber } from './speech'
 import {
@@ -32,6 +33,21 @@ function resolveDevices(root: string): { input?: string; output?: string } {
     input: process.env.MIC_DEVICE ?? configured.input,
     output: process.env.SAY_DEVICE ?? configured.output,
   }
+}
+
+/**
+ * The API key is the signal: set it and the drill spends Console credits
+ * through the Messages API; leave it unset and it spends Claude subscription
+ * quota through the already-authenticated `claude` CLI instead. Printed at
+ * startup so a drill never silently spends the wrong one.
+ */
+function chooseTransport(): StreamFn {
+  if (process.env.ANTHROPIC_API_KEY) {
+    console.log('Transport: Anthropic Messages API (spending Console credits)')
+    return anthropicStream(new Anthropic())
+  }
+  console.log('Transport: claude CLI (spending Claude subscription quota)')
+  return claudeCliStream()
 }
 
 async function printDevices(): Promise<void> {
@@ -69,10 +85,7 @@ async function main(): Promise<void> {
   const startedAt = new Date()
   const started = Date.now()
 
-  const interviewer = createInterviewer(
-    buildSystemPrompt(root, track, problem),
-    anthropicStream(new Anthropic()),
-  )
+  const interviewer = createInterviewer(buildSystemPrompt(root, track, problem), chooseTransport())
 
   if (!devices.input) {
     // Silently defaulting here is the trap: an unconfigured index can point at
