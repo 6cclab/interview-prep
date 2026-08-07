@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
+import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildSystemPrompt } from './context'
@@ -7,6 +8,7 @@ import { createInterviewer, type StreamFn } from './interviewer'
 import { createSession, finishSession } from './session'
 import { createSessionStore, type SessionStore } from './session-store'
 import type { Transcriber } from './speech'
+import { transcodeToWav } from './transcode'
 
 export interface VoiceServerDeps {
   root: string
@@ -17,7 +19,14 @@ export interface VoiceServerDeps {
   now?(): number
   /** Milliseconds of inactivity before an orphaned session is reaped. Defaults to 5 minutes. */
   idleMs?: number
+  /** Injectable so tests never spawn a real ffmpeg process. */
+  transcode?(inputPath: string, outputPath: string): Promise<void>
 }
+
+// A recorded interview turn is at most a few minutes of audio; 25MB is a wide
+// margin over that even at a generous bitrate. Reading an unbounded body
+// straight into memory is a trivial way for a single request to exhaust it.
+const MAX_TURN_AUDIO_BYTES = 25 * 1024 * 1024
 
 const STATIC_FILES: Record<string, { file: string; contentType: string }> = {
   '/': { file: 'index.html', contentType: 'text/html; charset=utf-8' },
@@ -72,8 +81,13 @@ function endAndPersist(deps: VoiceServerDeps, store: SessionStore, id: string): 
 export function createVoiceServer(deps: VoiceServerDeps): Server {
   const store = deps.store ?? createSessionStore()
   const now = deps.now ?? Date.now
+  const transcode = deps.transcode ?? transcodeToWav
 
-  return createServer((req: IncomingMessage, res: ServerResponse) => {
+  return createServer((req: IncomingMessage, res: ServerResponse): void => {
+    void handleRequest(req, res)
+  })
+
+  async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
 
     if (req.method === 'GET' && serveStatic(deps, url.pathname, res)) return
@@ -131,8 +145,93 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       return
     }
 
+    const turnMatch = /^\/api\/session\/([^/]+)\/turn$/.exec(url.pathname)
+    if (req.method === 'POST' && turnMatch) {
+      const id = turnMatch[1]!
+      const stored = store.get(id)
+      if (!stored) {
+        notFound(res)
+        return
+      }
+      if (stored.session.endedEarly()) {
+        sendJson(res, 409, { error: 'session already ended' })
+        return
+      }
+      store.touch(id, now())
+
+      // The moment the upload arrived is the moment Andre's turn actually
+      // ended — sample it before transcode/transcription latency has a
+      // chance to leak into the pacing analytics `submitTurn`/`reportFailure`
+      // stamp entries with.
+      const at = now()
+
+      const chunks: Buffer[] = []
+      let total = 0
+      let tooLarge = false
+      for await (const chunk of req) {
+        const buf = chunk as Buffer
+        total += buf.length
+        if (total > MAX_TURN_AUDIO_BYTES) {
+          tooLarge = true
+          break
+        }
+        chunks.push(buf)
+      }
+      if (tooLarge) {
+        sendJson(res, 413, { error: 'audio upload too large' })
+        req.destroy()
+        return
+      }
+      const audio = Buffer.concat(chunks)
+
+      const inputPath = join(stored.scratchDir, `turn-${Date.now()}.webm`)
+      const outputPath = join(stored.scratchDir, `turn-${Date.now()}.wav`)
+      await writeFile(inputPath, audio)
+
+      let text: string
+      try {
+        try {
+          await transcode(inputPath, outputPath)
+          text = (await deps.transcriber.transcribe(outputPath)).text
+        } finally {
+          // Never leave uploaded/transcoded audio behind, success or failure.
+          await Promise.all([
+            unlink(inputPath).catch(() => {}),
+            unlink(outputPath).catch(() => {}),
+          ])
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        stored.session.reportFailure(message, at)
+        sendJson(res, 422, { error: message })
+        endAndPersist(deps, store, id)
+        return
+      }
+
+      sendJson(res, 202, { text })
+
+      void (async () => {
+        // `submitTurn` commits the Andre entry synchronously, before the
+        // interviewer's reply streams — mirror that ordering on the wire so
+        // the browser sees Andre's turn land before the reply's sentences.
+        const iterable = stored.session.submitTurn(text, at)
+        const before = stored.session.entries().length - 1
+        if (stored.sseClient) {
+          writeSSE(stored.sseClient, 'entry', stored.session.entries()[before])
+        }
+        await streamTurn(stored.sseClient!, iterable)
+        if (stored.sseClient) {
+          for (const entry of stored.session.entries().slice(before + 1)) {
+            writeSSE(stored.sseClient, 'entry', entry)
+          }
+        }
+        if (stored.session.endedEarly()) endAndPersist(deps, store, id)
+      })()
+      return
+    }
+
     notFound(res)
-  })
+  }
 }
 
 /**

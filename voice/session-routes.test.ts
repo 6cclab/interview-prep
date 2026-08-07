@@ -84,6 +84,72 @@ describe('POST /api/session', () => {
   })
 })
 
+describe('POST /api/session/:id/turn', () => {
+  it('transcodes, transcribes, and streams the interviewer reply to the open SSE connection', async () => {
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* () {
+          yield 'Tell me more.'
+        },
+        transcriber: { transcribe: async () => ({ text: 'I would shard by tenant.' }) },
+        transcode: async (_input, output) => {
+          writeFileSync(output, Buffer.from('fake wav bytes'))
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(stream) // opening sentence
+    await readSSE(stream) // opening entry
+
+    const turnRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      headers: { 'content-type': 'audio/webm' },
+      body: Buffer.from('fake webm bytes'),
+    })
+    expect(turnRes.status).toBe(202)
+    expect(await turnRes.json()).toEqual({ text: 'I would shard by tenant.' })
+
+    const andreEntry = await readSSE(stream)
+    expect(andreEntry).toEqual({ event: 'entry', data: { speaker: 'andre', text: 'I would shard by tenant.', at: 0 } })
+
+    const replySentence = await readSSE(stream)
+    expect(replySentence).toEqual({ event: 'sentence', data: { speaker: 'interviewer', text: 'Tell me more.' } })
+  })
+
+  it('ends the session on a transcode failure and reports it over SSE', async () => {
+    const { port } = await listen(
+      baseDeps({
+        transcode: async () => {
+          throw new Error('ffmpeg: invalid data found')
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(stream)
+    await readSSE(stream)
+
+    const turnRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('garbage'),
+    })
+    expect(turnRes.status).toBe(422)
+
+    const ended = await readSSE(stream)
+    expect(ended.event).toBe('ended')
+    expect((ended.data as { endedEarly: string | null }).endedEarly).toMatch(/ffmpeg/i)
+  })
+
+  it('404s an unknown session id', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/nope/turn`, { method: 'POST', body: Buffer.from('x') })
+    expect(res.status).toBe(404)
+  })
+})
+
 describe('GET /api/session/:id/stream', () => {
   it('streams the opening turn as sentence events, then an entry event', async () => {
     const { port } = await listen(
