@@ -101,11 +101,11 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     if (req.method === 'GET' && serveStatic(deps, url.pathname, res)) return
 
     if (req.method === 'POST' && url.pathname === '/api/session') {
-      // No request body is read here: the design track is out of scope for
-      // this plan, so there is no client-supplied `track` or `problem` for
+      // Deliberately does not read the request body: the design track is out
+      // of scope, so there is no client-supplied `track` or `problem` for
       // this boundary to validate. If `/design` is ever added here,
       // `context.ts`'s `PROBLEM_SLUG` and `assertNoSpoilers` must run on
-      // whatever arrives before it reaches `buildSystemPrompt`.
+      // whatever arrives in the body before it reaches `buildSystemPrompt`.
       if (store.hasActive()) {
         sendJson(res, 409, { error: 'a session is already in progress' })
         return

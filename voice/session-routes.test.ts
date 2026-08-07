@@ -204,6 +204,26 @@ describe('idle reap', () => {
   })
 })
 
+describe('the track/problem boundary', () => {
+  it.each([
+    { track: 'design', problem: 'rate-limiter' },
+    { track: 'design', problem: '../../solutions/elimination/celebrity' },
+    { track: 'mock', problem: '/etc/passwd' },
+    { track: 'mock', problem: 'patterns.md' },
+  ])('ignores a client-supplied track/problem and always builds the mock prompt: %j', async (payload) => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    expect(res.status).toBe(201)
+    const { id } = (await res.json()) as { id: string }
+    expect(id).toBe('session-1')
+    // No 500, no path-traversal error surfaced — the body is simply never read.
+  })
+})
+
 describe('GET /api/session/:id/stream', () => {
   it('streams the opening turn as sentence events, then an entry event', async () => {
     const { port } = await listen(
