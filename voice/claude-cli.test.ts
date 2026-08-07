@@ -1,8 +1,9 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  assertSafeSpawnCwd,
   claudeCliArgs,
   claudeCliStream,
   extractErrorResult,
@@ -139,6 +140,27 @@ describe('feedLines', () => {
 
   it('handles an empty chunk', () => {
     expect(feedLines('carried', '')).toEqual({ lines: [], carry: 'carried' })
+  })
+})
+
+describe('assertSafeSpawnCwd', () => {
+  it('accepts a freshly created temp directory', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'guard-ok-'))
+    expect(() => assertSafeSpawnCwd(dir)).not.toThrow()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('rejects a cwd inside the repo', () => {
+    expect(() => assertSafeSpawnCwd(process.cwd())).toThrow(/repo/i)
+  })
+
+  it('rejects a real, existing directory outside the OS temp directory', () => {
+    expect(() => assertSafeSpawnCwd(homedir())).toThrow(/temp directory/i)
+  })
+
+  it('rejects a cwd that does not exist', () => {
+    const missing = join(tmpdir(), 'definitely-does-not-exist-xyz-abc')
+    expect(() => assertSafeSpawnCwd(missing)).toThrow(/does not exist/i)
   })
 })
 

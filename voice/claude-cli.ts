@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Message, StreamFn } from './interviewer'
 
 export interface ClaudeCliOptions {
@@ -11,6 +12,43 @@ export interface ClaudeCliOptions {
 }
 
 const DEFAULT_MODEL = 'claude-opus-5'
+
+/**
+ * This repo's `.claude/CLAUDE.md` names where the spoiler files
+ * (`solutions/`, `system-design/**\/reference.md`, `patterns.md`) live, which
+ * is exactly the map you don't want handed to a model that has working
+ * tools (see the security note on `claudeCliStream`). `REPO_ROOT` is derived
+ * from this file's own location rather than `process.cwd()` so the guard
+ * below still holds if the process is ever launched from a different
+ * working directory.
+ */
+const REPO_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..')
+
+/**
+ * The one property this whole security model rests on: `cwd` must be a
+ * temp directory that (a) actually exists and (b) is not the repo. Nothing
+ * else enforces this after `claudeCliStream` picks a `cwd` — a future edit
+ * could pass a different path and nothing would catch it without this
+ * check. Exported so the property can be tested directly.
+ */
+export function assertSafeSpawnCwd(cwd: string): void {
+  const resolvedCwd = resolve(cwd)
+
+  if (!existsSync(resolvedCwd)) {
+    throw new Error(`refusing to spawn claude CLI: cwd "${cwd}" does not exist`)
+  }
+
+  const withinRepo = resolvedCwd === REPO_ROOT || resolvedCwd.startsWith(REPO_ROOT + sep)
+  if (withinRepo) {
+    throw new Error(`refusing to spawn claude CLI: cwd "${cwd}" is inside the repo (${REPO_ROOT})`)
+  }
+
+  const resolvedTmp = resolve(tmpdir())
+  const withinTmp = resolvedCwd === resolvedTmp || resolvedCwd.startsWith(resolvedTmp + sep)
+  if (!withinTmp) {
+    throw new Error(`refusing to spawn claude CLI: cwd "${cwd}" is not inside the OS temp directory`)
+  }
+}
 
 const SPEAKER_LABEL: Record<Message['role'], string> = {
   user: 'CANDIDATE',
@@ -45,7 +83,35 @@ export function formatPrompt(messages: Message[]): string {
   ].join('\n')
 }
 
-/** The exact, load-bearing invocation. Every flag here was verified empirically. */
+/**
+ * The invocation. NOT all flags below do what they look like they do —
+ * see the per-flag notes.
+ *
+ * `--allowedTools ''` is a documented no-op, kept only so the intent is
+ * visible in the invocation and to leave a marker in case a future CLI
+ * version makes it load-bearing. Empirically (tested directly against the
+ * real `claude` binary, not this codebase) it does **not** disable tools:
+ * from an empty temp cwd containing a `secret.txt`, the model read it and
+ * returned its contents with this flag set. An explicit deny list
+ * (`--disallowedTools Read Write Edit Bash Glob Grep WebFetch WebSearch
+ * NotebookEdit Task`) didn't stop it either — it reached for `Monitor`
+ * (which runs shell commands) and said so. `--allowedTools '__none__'`
+ * read the file again too. `--allowedTools` appears to *pre-approve* tools
+ * for a run, not restrict the available set — the model always has
+ * working tools here.
+ *
+ * `--setting-sources ''` is real: it stops the CLI loading this repo's
+ * `.claude/CLAUDE.md`, which names where the spoiler files
+ * (`solutions/`, `system-design/**\/reference.md`, `patterns.md`) live —
+ * without this flag the model would at least know the map, even without
+ * being able to reach it.
+ *
+ * `--exclude-dynamic-system-prompt-sections` is a cost control, not a
+ * security flag: it cuts per-call overhead from 17,638 tokens to 2,748.
+ *
+ * The actual security boundary is not any flag here — see the note on
+ * `claudeCliStream`.
+ */
 export function claudeCliArgs(prompt: string, system: string, model: string): string[] {
   return [
     '-p', prompt,
@@ -124,15 +190,21 @@ function stderrSuffix(tail: string): string {
  * A `StreamFn` backed by `claude -p`, for when the caller has a Claude
  * subscription (via the authenticated CLI) rather than Console API credits.
  *
- * Security: the subprocess runs with `cwd` set to a freshly created, empty
- * temp directory — never the repo. `--allowedTools ''` and
- * `--setting-sources ''` already disable tools and this repo's CLAUDE.md,
- * but a flag being wrong, or a future CLI defaulting differently, is exactly
- * the failure this backstops: with an empty cwd there is nothing in reach,
- * so the repo's spoiler files (solutions, system-design references,
- * patterns.md) cannot be read regardless of what the flags do. The directory
- * is created fresh per turn and removed when the stream ends, including on
- * error.
+ * Security: the model invoked here has working tools — see the notes on
+ * `claudeCliArgs`, none of the flags there actually disable them. The
+ * single real boundary is `cwd`: it is set to a freshly created, empty temp
+ * directory, never the repo, and `assertSafeSpawnCwd` below asserts that
+ * before every spawn. Two things were verified directly against the real
+ * CLI from such a cwd: asking it to read the absolute path to this repo's
+ * `patterns.md` returned `READ_FAIL permission not granted`, and asking it
+ * to `wc -l` that same path via a shell tool returned `ESCAPE_FAIL path
+ * outside allowed working directory; command blocked`. So the boundary
+ * holds today — but it is Claude Code's own out-of-cwd permission
+ * enforcement doing the work, not anything this codebase controls, and it
+ * is a *single* layer: its correctness depends on that enforcement not
+ * changing behaviour in a future CLI release. There is no flag-based
+ * backstop here to fall back on if it ever does. The directory is created
+ * fresh per turn and removed when the stream ends, including on error.
  */
 export function claudeCliStream(opts: ClaudeCliOptions = {}): StreamFn {
   const binary = opts.binary ?? 'claude'
@@ -140,6 +212,7 @@ export function claudeCliStream(opts: ClaudeCliOptions = {}): StreamFn {
 
   return async function* (system, messages) {
     const cwd = mkdtempSync(join(tmpdir(), 'claude-cli-transport-'))
+    assertSafeSpawnCwd(cwd)
     try {
       const prompt = formatPrompt(messages)
       const child = spawn(binary, claudeCliArgs(prompt, system, model), {
