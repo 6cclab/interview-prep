@@ -126,5 +126,49 @@ describe('runSession', () => {
       expect(entries.endedEarly).toBeTruthy()
       expect(errorSpy).toHaveBeenCalled()
     })
+
+    it('keeps prior entries and signals early end when the recorder fails to stop', async () => {
+      const stop = vi.fn(async () => {
+        throw new Error('ffmpeg exited with code 1')
+      })
+      const entries = (await runSession(
+        deps({ startRecording: () => ({ stop }) }),
+      )) as SessionOutcome
+
+      // The opening turn survives, and nothing further is added.
+      expect(entries.map((e) => e.speaker)).toEqual(['interviewer', 'interviewer'])
+      expect(entries[1]!.text).toMatch(/ended early/i)
+      expect(entries[1]!.text).toMatch(/recording failed/i)
+      expect(entries.endedEarly).toMatch(/recording failed/i)
+      expect(errorSpy).toHaveBeenCalled()
+
+      // The recorder that was successfully started was still asked to stop —
+      // no leaked ffmpeg process outliving the drill.
+      expect(stop).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps prior entries and signals early end when transcription fails, and still stops the recorder', async () => {
+      const stop = vi.fn(async () => '/tmp/turn.wav')
+      const entries = (await runSession(
+        deps({
+          startRecording: () => ({ stop }),
+          transcriber: {
+            transcribe: async () => {
+              throw new Error('whisper-cli: model not found')
+            },
+          },
+        }),
+      )) as SessionOutcome
+
+      expect(entries.map((e) => e.speaker)).toEqual(['interviewer', 'interviewer'])
+      expect(entries[1]!.text).toMatch(/ended early/i)
+      expect(entries[1]!.text).toMatch(/transcription failed/i)
+      expect(entries.endedEarly).toMatch(/transcription failed/i)
+      expect(errorSpy).toHaveBeenCalled()
+
+      // Transcription only runs after the recorder has already been stopped
+      // successfully, so this confirms it wasn't left running either.
+      expect(stop).toHaveBeenCalledTimes(1)
+    })
   })
 })

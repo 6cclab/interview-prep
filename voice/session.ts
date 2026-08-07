@@ -3,6 +3,24 @@ import type { Interviewer } from './interviewer'
 import type { Speaker, Transcriber } from './speech'
 import type { Entry } from './transcript'
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Common exit for every mid-session failure mode: keep the entries already
+ * collected, append a synthetic marker naming what died, and flag the outcome
+ * so a caller can't mistake this for a normal end. Shared by the interviewer,
+ * recorder, and transcriber failure paths so all three produce one consistent
+ * shape.
+ */
+function endEarly(entries: SessionOutcome, at: number, message: string): SessionOutcome {
+  entries.push({ speaker: 'interviewer', text: `[Session ended early — ${message}]`, at })
+  entries.endedEarly = message
+  console.error(`Voice session ended early: ${message}`)
+  return entries
+}
+
 export interface SessionDeps {
   transcriber: Transcriber
   speaker: Speaker
@@ -50,26 +68,28 @@ export async function runSession(deps: SessionDeps): Promise<SessionOutcome> {
         await deps.speaker.speak(sentence)
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      entries.push({
-        speaker: 'interviewer',
-        text: `[Session ended early — ${message}]`,
-        at,
-      })
-      entries.endedEarly = message
-      console.error(`Voice session ended early: ${message}`)
-      return entries
+      return endEarly(entries, at, errorMessage(error))
     }
     entries.push({ speaker: 'interviewer', text: spoken.join(' '), at })
 
     const recorder = deps.startRecording()
     const decision = await deps.nextTurn()
-    const wavPath = await recorder.stop()
+
+    let wavPath: string
+    try {
+      wavPath = await recorder.stop()
+    } catch (error) {
+      return endEarly(entries, deps.now(), `recording failed: ${errorMessage(error)}`)
+    }
     if (decision === 'end') return entries
 
     const heardAt = deps.now()
-    const utterance = await deps.transcriber.transcribe(wavPath)
-    entries.push({ speaker: 'andre', text: utterance.text, at: heardAt })
-    said = utterance.text
+    try {
+      const utterance = await deps.transcriber.transcribe(wavPath)
+      entries.push({ speaker: 'andre', text: utterance.text, at: heardAt })
+      said = utterance.text
+    } catch (error) {
+      return endEarly(entries, heardAt, `transcription failed: ${errorMessage(error)}`)
+    }
   }
 }
