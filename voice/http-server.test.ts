@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Server } from 'node:http'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createVoiceServer, startVoiceServer } from './http-server'
 import { readSSE } from './test-helpers/sse'
 
 let server: Server | undefined
+let distDir: string | undefined
 
 afterEach(async () => {
   // A test can leave an SSE connection open on purpose without ever aborting
@@ -14,7 +18,16 @@ afterEach(async () => {
     await new Promise<void>((resolve) => server!.close(() => resolve()))
   }
   server = undefined
+  if (distDir) rmSync(distDir, { recursive: true, force: true })
+  distDir = undefined
 })
+
+/** A small fixture dist directory, standing in for a real `vite build` output. */
+function fixtureDistDir(): string {
+  distDir = mkdtempSync(join(tmpdir(), 'voice-dist-'))
+  writeFileSync(join(distDir, 'index.html'), '<!doctype html><title>Voice mock drill</title>')
+  return distDir
+}
 
 function listen(): Promise<{ port: number }> {
   return new Promise((resolve) => {
@@ -44,6 +57,7 @@ describe('createVoiceServer', () => {
   it('serves the page at GET /', async () => {
     server = createVoiceServer({
       root: process.cwd(),
+      distDir: fixtureDistDir(),
       createTransport: () => async function* () {},
       transcriber: { transcribe: async () => ({ text: '' }) },
     })
@@ -57,6 +71,7 @@ describe('createVoiceServer', () => {
   it('404s an unknown path', async () => {
     server = createVoiceServer({
       root: process.cwd(),
+      distDir: fixtureDistDir(),
       createTransport: () => async function* () {},
       transcriber: { transcribe: async () => ({ text: '' }) },
     })

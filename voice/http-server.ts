@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, existsSync, rmSync } from 'node:fs'
 import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +11,7 @@ import { createSession, finishSession } from './session'
 import { createSessionStore, type SessionStore } from './session-store'
 import { whisperTranscriber, type Transcriber } from './speech'
 import { transcodeToWav } from './transcode'
+import { readStaticFile, resolveStaticFile } from './static'
 
 export interface VoiceServerDeps {
   root: string
@@ -23,6 +24,12 @@ export interface VoiceServerDeps {
   idleMs?: number
   /** Injectable so tests never spawn a real ffmpeg process. */
   transcode?(inputPath: string, outputPath: string): Promise<void>
+  /**
+   * Directory the built React client is served from (Vite's `build.outDir`).
+   * Defaults to `<root>/voice/dist`. Overridable so tests can point at a
+   * small fixture directory instead of depending on a real `vite build`.
+   */
+  distDir?: string
 }
 
 // A recorded interview turn is at most a few minutes of audio; 25MB is a wide
@@ -30,19 +37,11 @@ export interface VoiceServerDeps {
 // straight into memory is a trivial way for a single request to exhaust it.
 const MAX_TURN_AUDIO_BYTES = 25 * 1024 * 1024
 
-const STATIC_FILES: Record<string, { file: string; contentType: string }> = {
-  '/': { file: 'index.html', contentType: 'text/html; charset=utf-8' },
-  '/app.js': { file: 'app.js', contentType: 'text/javascript; charset=utf-8' },
-  '/style.css': { file: 'style.css', contentType: 'text/css; charset=utf-8' },
-}
-
-function serveStatic(deps: VoiceServerDeps, pathname: string, res: ServerResponse): boolean {
-  const entry = STATIC_FILES[pathname]
-  if (!entry) return false
-  const full = join(deps.root, 'voice/public', entry.file)
-  if (!existsSync(full)) return false
-  res.writeHead(200, { 'content-type': entry.contentType })
-  res.end(readFileSync(full))
+function serveStatic(distDir: string, pathname: string, res: ServerResponse): boolean {
+  const resolved = resolveStaticFile(distDir, pathname)
+  if (!resolved) return false
+  res.writeHead(200, { 'content-type': resolved.contentType })
+  res.end(readStaticFile(resolved))
   return true
 }
 
@@ -118,6 +117,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   const idleClock = deps.now ?? Date.now
   const store = deps.store ?? createSessionStore(undefined, idleClock)
   const transcode = deps.transcode ?? transcodeToWav
+  const distDir = deps.distDir ?? join(deps.root, 'voice/dist')
   // Sessions whose POST /turn is still being processed (transcode/transcribe/
   // reply-stream in flight) — guards against a second /turn for the same
   // session landing before the first has finished.
@@ -149,7 +149,23 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
 
-    if (req.method === 'GET' && serveStatic(deps, url.pathname, res)) return
+    if (req.method === 'GET' && serveStatic(distDir, url.pathname, res)) return
+
+    // Recovery path for a 409 from POST /api/session below: the browser has
+    // no id for whatever session is stuck (the 409 body never carried one),
+    // so this ends whichever session the store currently considers active
+    // instead of requiring one. There is at most one, per `hasActive`'s
+    // invariant.
+    if (req.method === 'DELETE' && url.pathname === '/api/session') {
+      const id = store.activeId()
+      if (!id) {
+        sendJson(res, 404, { error: 'no active session' })
+        return
+      }
+      endAndPersist(deps, store, entryClocks, id)
+      sendJson(res, 200, { ended: true })
+      return
+    }
 
     if (req.method === 'POST' && url.pathname === '/api/session') {
       // Deliberately does not read the request body: the design track is out
@@ -397,8 +413,22 @@ function chooseTransport(): StreamFn {
 
 function main(): void {
   const port = process.env.PORT ? Number(process.env.PORT) : 4173
+  const root = process.cwd()
+  const distDir = join(root, 'voice/dist')
+  // `pnpm mock:web` builds before it starts this process (see package.json),
+  // so a missing dist here means the server was started some other way
+  // (directly via `tsx voice/http-server.ts`) without building first — fail
+  // with a clear instruction rather than a confusing string of 404s on every
+  // asset the page tries to load.
+  if (!existsSync(distDir)) {
+    console.error(
+      `Missing ${distDir} — build the web client first with \`pnpm build:web\`, ` +
+        'or just run `pnpm mock:web`, which does that for you.',
+    )
+    process.exit(1)
+  }
   const server = createVoiceServer({
-    root: process.cwd(),
+    root,
     createTransport: chooseTransport,
     transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
   })

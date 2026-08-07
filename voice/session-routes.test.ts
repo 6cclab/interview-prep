@@ -89,6 +89,36 @@ describe('POST /api/session', () => {
   })
 })
 
+// The recovery path for the 409 above: POST /api/session's 409 body never
+// carries the stuck session's id, so a client that hits it has no id to end
+// it with via the existing POST /api/session/:id/end. This lets it end
+// whichever session the server currently considers active instead.
+describe('DELETE /api/session', () => {
+  it('404s when no session is active', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'DELETE' })
+    expect(res.status).toBe(404)
+  })
+
+  it('ends the active session and clears the way for a new one', async () => {
+    let n = 0
+    const store = createSessionStore(() => `session-${++n}`)
+    const { port } = await listen(baseDeps({ store }))
+
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    expect(created.status).toBe(201)
+
+    const stuck = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    expect(stuck.status).toBe(409)
+
+    const deleted = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'DELETE' })
+    expect(deleted.status).toBe(200)
+
+    const retried = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    expect(retried.status).toBe(201)
+  })
+})
+
 describe('POST /api/session/:id/turn', () => {
   it('transcodes, transcribes, and streams the interviewer reply to the open SSE connection', async () => {
     const { port } = await listen(
