@@ -43,6 +43,20 @@ describe('assertNoSpoilers', () => {
       assertNoSpoilers(['behavioral/competencies.md', 'system-design/rate-limiter/rubric.md']),
     ).not.toThrow()
   })
+
+  it('rejects a traversal path that resolves into solutions/', () => {
+    expect(() =>
+      assertNoSpoilers(['system-design/../solutions/elimination/README.md']),
+    ).toThrow(/spoiler/i)
+  })
+
+  it('rejects an absolute path', () => {
+    expect(() => assertNoSpoilers(['/etc/passwd'])).toThrow(/spoiler/i)
+  })
+
+  it('rejects PATTERNS.MD regardless of case', () => {
+    expect(() => assertNoSpoilers(['PATTERNS.MD'])).toThrow(/spoiler/i)
+  })
 })
 
 describe('allowedPaths', () => {
@@ -58,6 +72,14 @@ describe('allowedPaths', () => {
     expect(allowedPaths('design', 'rate-limiter')).toContain(
       'system-design/rate-limiter/rubric.md',
     )
+  })
+
+  it('rejects a problem name that attempts path traversal', () => {
+    expect(() => allowedPaths('design', '../solutions/elimination')).toThrow()
+  })
+
+  it('still accepts an ordinary lowercase-and-hyphen problem slug', () => {
+    expect(() => allowedPaths('design', 'rate-limiter')).not.toThrow()
   })
 })
 
@@ -96,5 +118,11 @@ describe('buildSystemPrompt', () => {
 
   it('never includes the reference design', () => {
     expect(buildSystemPrompt(root, 'design', 'rate-limiter')).not.toContain('THE ANSWER')
+  })
+
+  it('throws a clear error for a nonexistent problem', () => {
+    expect(() => buildSystemPrompt(root, 'design', 'no-such-problem')).toThrow(
+      /no-such-problem/,
+    )
   })
 })

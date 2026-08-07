@@ -1,26 +1,38 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, normalize, sep } from 'node:path'
 
 export type Track = 'mock' | 'design'
 
 /**
  * Paths the interviewer must never see. `.claude/rules/no-spoilers.md` states
  * these as instructions to a reader; here they are a runtime invariant, because
- * a drill is destroyed the moment the answer enters context.
+ * a drill is destroyed the moment the answer enters context. Case-insensitive:
+ * macOS filesystems are case-insensitive by default, so `Patterns.MD` must be
+ * caught too.
  */
-const DENIED = [/^solutions\//, /^patterns\.md$/, /(^|\/)reference\.md$/]
+const DENIED = [/^solutions\//i, /^patterns\.md$/i, /(^|\/)reference\.md$/i]
 
 /**
  * Throw if any path is a spoiler. Called on every allowlist before it is read,
  * so widening the allowlist by mistake fails loudly instead of silently leaking.
+ *
+ * This is the last line of defence, so it does not trust its callers: every
+ * path is normalized before being tested against `DENIED`, and any path that
+ * is absolute or escapes upward (a `..` segment surviving normalization) is
+ * rejected outright, whether or not it happens to match a `DENIED` pattern.
  */
 export function assertNoSpoilers(paths: string[]): void {
   for (const path of paths) {
-    if (DENIED.some((pattern) => pattern.test(path))) {
+    const normalized = normalize(path)
+    const segments = normalized.split(sep)
+    const escapesRoot = normalized.startsWith('/') || segments.includes('..')
+    if (escapesRoot || DENIED.some((pattern) => pattern.test(normalized))) {
       throw new Error(`Refusing to read spoiler file into an interview: ${path}`)
     }
   }
 }
+
+const PROBLEM_SLUG = /^[a-z0-9-]+$/
 
 export function allowedPaths(track: Track, problem?: string): string[] {
   if (track === 'mock') {
@@ -31,6 +43,9 @@ export function allowedPaths(track: Track, problem?: string): string[] {
     ]
   }
   if (!problem) throw new Error('A design drill needs a problem name.')
+  if (!PROBLEM_SLUG.test(problem)) {
+    throw new Error(`Invalid problem name: ${problem}`)
+  }
   return [
     '.claude/commands/design.md',
     `system-design/${problem}/README.md`,
@@ -63,9 +78,14 @@ export function buildSystemPrompt(root: string, track: Track, problem?: string):
   const paths = allowedPaths(track, problem)
   assertNoSpoilers(paths)
 
-  const sections = paths.map(
-    (path) => `<file path="${path}">\n${readFileSync(join(root, path), 'utf8')}\n</file>`,
-  )
+  const sections = paths.map((path) => {
+    const full = join(root, path)
+    if (!existsSync(full)) {
+      const label = problem ? ` "${problem}"` : ''
+      throw new Error(`Unknown problem${label}: missing expected file ${path}`)
+    }
+    return `<file path="${path}">\n${readFileSync(full, 'utf8')}\n</file>`
+  })
 
   if (track === 'mock') {
     const { all, covered } = competencyCoverage(root)
