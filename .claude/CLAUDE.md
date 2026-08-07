@@ -36,6 +36,9 @@ pnpm bootstrap          # seed local/ (idempotent, never overwrites)
 pnpm test <problem>     # run one drill
 pnpm test               # everything, as a regression check
 pnpm reset <problem>    # restore stub.ts over solution.ts
+pnpm mock:voice         # spoken behavioral drill
+pnpm design:voice <p>   # spoken live design drill
+pnpm voice:devices      # list microphones and speakers for local/voice.json
 pnpm typecheck
 ```
 

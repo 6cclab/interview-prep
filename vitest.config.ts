@@ -8,6 +8,7 @@ export default defineConfig({
       'feature/**/*.test.ts',
       'scripts/**/*.test.ts',
       'test-utils/**/*.test.ts',
+      'voice/**/*.test.ts',
     ],
     testTimeout: 10_000,
   },

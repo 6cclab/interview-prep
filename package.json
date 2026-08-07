@@ -8,12 +8,18 @@
     "test:watch": "vitest",
     "bootstrap": "tsx scripts/bootstrap.ts",
     "reset": "tsx scripts/reset.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "mock:voice": "tsx voice/cli.ts mock",
+    "design:voice": "tsx voice/cli.ts design",
+    "voice:devices": "tsx voice/cli.ts devices"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0"
   }
 }
