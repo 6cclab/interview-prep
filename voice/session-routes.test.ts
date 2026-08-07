@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Server } from 'node:http'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
 import { createSessionStore } from './session-store'
+import { readSSE } from './test-helpers/sse'
 
 let server: Server | undefined
 let root: string
@@ -50,7 +51,15 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()))
+  // A test can leave an SSE connection open on purpose (it's asserting on a
+  // still-live stream) without ever aborting it. `server.close()` alone waits
+  // for every open connection to end on its own, which would hang here
+  // forever; `closeAllConnections()` drops them immediately so the suite can
+  // move on.
+  if (server) {
+    server.closeAllConnections()
+    await new Promise<void>((resolve) => server!.close(() => resolve()))
+  }
   server = undefined
   rmSync(root, { recursive: true, force: true })
 })
@@ -72,5 +81,53 @@ describe('POST /api/session', () => {
     const second = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
     expect(second.status).toBe(409)
     expect(((await second.json()) as { error: string }).error).toMatch(/already in progress/i)
+  })
+})
+
+describe('GET /api/session/:id/stream', () => {
+  it('streams the opening turn as sentence events, then an entry event', async () => {
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* () {
+          yield 'What are we '
+          yield 'optimising for?'
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    expect(stream.status).toBe(200)
+    expect(stream.headers.get('content-type')).toContain('text/event-stream')
+
+    const first = await readSSE(stream)
+    expect(first).toEqual({ event: 'sentence', data: { speaker: 'interviewer', text: 'What are we optimising for?' } })
+
+    const second = await readSSE(stream)
+    expect(second.event).toBe('entry')
+    expect(second.data).toMatchObject({ speaker: 'interviewer', text: 'What are we optimising for?' })
+  })
+
+  it('404s an unknown session id', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/nope/stream`)
+    expect(res.status).toBe(404)
+  })
+
+  it('a client disconnecting ends and persists the session', async () => {
+    const { port } = await listen(baseDeps())
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    const controller = new AbortController()
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`, { signal: controller.signal })
+    await readSSE(stream) // the opening sentence event, so the server has definitely started the turn
+    controller.abort()
+
+    // Give the server's 'close' handler a tick to run and persist.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const relPath = join(root, 'local/mock-' + new Date().toISOString().slice(0, 10) + '.md')
+    expect(existsSync(relPath)).toBe(true)
   })
 })

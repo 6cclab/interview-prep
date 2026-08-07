@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildSystemPrompt } from './context'
 import { createInterviewer, type StreamFn } from './interviewer'
-import { createSession } from './session'
+import { createSession, finishSession } from './session'
 import { createSessionStore, type SessionStore } from './session-store'
 import type { Transcriber } from './speech'
 
@@ -44,6 +44,31 @@ function notFound(res: ServerResponse): void {
   sendJson(res, 404, { error: 'not found' })
 }
 
+function writeSSE(res: ServerResponse, event: string, data: unknown): void {
+  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+}
+
+async function streamTurn(res: ServerResponse, turn: AsyncIterable<string>): Promise<void> {
+  for await (const sentence of turn) {
+    writeSSE(res, 'sentence', { speaker: 'interviewer', text: sentence })
+  }
+}
+
+function endAndPersist(deps: VoiceServerDeps, store: SessionStore, id: string): void {
+  const stored = store.get(id)
+  if (!stored) return
+  const { relPath } = finishSession(stored.session, stored.interviewer, {
+    root: deps.root,
+    track: 'mock',
+    startedAt: stored.startedAt,
+  })
+  if (stored.sseClient) {
+    writeSSE(stored.sseClient, 'ended', { endedEarly: stored.session.endedEarly() ?? null, relPath })
+    stored.sseClient.end()
+  }
+  store.remove(id)
+}
+
 export function createVoiceServer(deps: VoiceServerDeps): Server {
   const store = deps.store ?? createSessionStore()
   const now = deps.now ?? Date.now
@@ -69,6 +94,40 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       const scratchDir = mkdtempSync(join(tmpdir(), 'voice-web-'))
       const stored = store.create(session, interviewer, new Date(), scratchDir)
       sendJson(res, 201, { id: stored.id })
+      return
+    }
+
+    const streamMatch = /^\/api\/session\/([^/]+)\/stream$/.exec(url.pathname)
+    if (req.method === 'GET' && streamMatch) {
+      const id = streamMatch[1]!
+      const stored = store.get(id)
+      if (!stored) {
+        notFound(res)
+        return
+      }
+
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      })
+      stored.sseClient = res
+
+      req.on('close', () => {
+        endAndPersist(deps, store, id)
+      })
+
+      const alreadyBegun = stored.session.entries().length > 0
+      if (!alreadyBegun) {
+        void (async () => {
+          const before = stored.session.entries().length
+          await streamTurn(res, stored.session.begin())
+          for (const entry of stored.session.entries().slice(before)) {
+            writeSSE(res, 'entry', entry)
+          }
+          if (stored.session.endedEarly()) endAndPersist(deps, store, id)
+        })()
+      }
       return
     }
 
