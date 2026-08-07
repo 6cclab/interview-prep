@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Server } from 'node:http'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -6,6 +6,7 @@ import { join, sep } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
 import { createSessionStore } from './session-store'
 import { readSSE } from './test-helpers/sse'
+import { buildWeb } from './test-helpers/build-web'
 
 let server: Server | undefined
 let root: string
@@ -36,6 +37,15 @@ function listen(deps: VoiceServerDeps): Promise<{ port: number }> {
     })
   })
 }
+
+// Only the "real build" test below reads `voice/dist`, but it needs a fresh,
+// real `vite build` (not a stale or absent one) to assert anything meaningful
+// about what a real deploy serves. Building once per file run, rather than
+// per test, keeps the cost to a single build even though only one `it` uses
+// it.
+beforeAll(async () => {
+  await buildWeb()
+}, 30_000)
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'voice-spoiler-'))
@@ -177,12 +187,12 @@ describe('spoiler gate', () => {
 
   it('every static asset in the real build never contains denied-file content or the raw trailer', async () => {
     // Rooted at the real project directory (not the synthetic `root` used
-    // above) and reading the actual `voice/dist` build (see
-    // voice/test-helpers/build-web.ts, which vitest's globalSetup runs
-    // before this suite) — the files a real deploy serves — rather than a
-    // fixture that could pass for reasons unrelated to what's really on
-    // disk. Vite emits content-hashed filenames, so the set of paths is
-    // discovered by walking the build output rather than hardcoded.
+    // above) and reading the actual `voice/dist` build (built fresh by this
+    // file's own `beforeAll`, see voice/test-helpers/build-web.ts) — the
+    // files a real deploy serves — rather than a fixture that could pass for
+    // reasons unrelated to what's really on disk. Vite emits content-hashed
+    // filenames, so the set of paths is discovered by walking the build
+    // output rather than hardcoded.
     const { port } = await listen({
       root: process.cwd(),
       createTransport: () => async function* () {},
