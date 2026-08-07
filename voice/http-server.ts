@@ -143,6 +143,17 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   sweep.unref()
 
   return createServer((req: IncomingMessage, res: ServerResponse): void => {
+    // Opt-in request log, for diagnosing a browser we cannot see. Off unless
+    // VOICE_DEBUG is set, so default behaviour and the test suite are
+    // untouched. Logs method, path and response status only — never a body,
+    // because a turn body is captured audio and a response could carry
+    // transcribed speech.
+    if (process.env.VOICE_DEBUG) {
+      const started = Date.now()
+      res.once('finish', () => {
+        console.error(`[req] ${req.method} ${req.url} -> ${res.statusCode} (${Date.now() - started}ms)`)
+      })
+    }
     void handleRequest(req, res)
   })
 
