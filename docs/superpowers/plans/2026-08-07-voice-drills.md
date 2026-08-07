@@ -1466,10 +1466,22 @@ In `package.json`, add these two entries to `scripts`, after `"reset"`:
     "design:voice": "tsx voice/cli.ts design",
 ```
 
-- [ ] **Step 7: Run the whole suite and typecheck**
+- [ ] **Step 7: Run the voice suites and typecheck**
 
-Run: `pnpm test && pnpm typecheck`
-Expected: every suite passes, including the pre-existing `problems/`, `debugging/`, `feature/`, and `scripts/` tests.
+**Do not expect `pnpm test` to pass.** In this repo unsolved drills ship red on
+purpose — `problems/**/solution.ts` throws `not implemented` until Andre solves
+it. At the time this plan was written the baseline was **28 failed test files**,
+all of them drill stubs. A green full suite would mean the drills had been
+damaged.
+
+Run: `pnpm vitest run voice/ && pnpm typecheck`
+Expected: every `voice/` suite passes, typecheck clean.
+
+Then confirm nothing outside `voice/` regressed:
+
+Run: `pnpm vitest run 2>&1 | tail -5`
+Expected: the failed-file count is still 28, and no failing path starts with
+`voice/`. A count above 28, or any `voice/` failure, is a regression to fix.
 
 - [ ] **Step 8: Run one real drill end to end**
 
