@@ -4,6 +4,7 @@ import { RecordingIndicator } from './components/RecordingIndicator'
 import { ElapsedReadout } from './components/ElapsedReadout'
 import { ErrorBanner } from './components/ErrorBanner'
 import { Transcript } from './components/Transcript'
+import { MicCheck } from './components/MicCheck'
 import type { Mode } from './types'
 
 const MIC_UNSUPPORTED_MESSAGE =
@@ -131,6 +132,8 @@ export default function App() {
         </div>
 
         <Transcript entries={entries} interimText={interviewerSpeaking ? interimInterviewerText : ''} />
+
+        <MicCheck />
       </main>
     </>
   )

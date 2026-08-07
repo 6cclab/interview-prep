@@ -656,3 +656,76 @@ main {
     justify-content: center;
   }
 }
+
+/* Microphone diagnostic — deliberately quiet and last in the reading order.
+   It is a tool for when something is wrong, not part of the drill. */
+.mic-check {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.mic-check__run {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+}
+
+.mic-check__run:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.mic-check__run:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.mic-check__results {
+  margin: 1rem 0 0;
+  display: grid;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.mic-check__row {
+  display: grid;
+  grid-template-columns: minmax(8rem, auto) 1fr;
+  gap: 0.25rem 1rem;
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--border);
+}
+
+.mic-check__row dt {
+  color: var(--text-muted);
+}
+
+/* Long device names and DOMException messages arrive as unbroken strings —
+   without this they push the layout wider than the viewport. */
+.mic-check__row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mic-check__row[data-state='ok'] {
+  border-left-color: var(--good);
+}
+
+.mic-check__row[data-state='warn'] {
+  border-left-color: var(--warn);
+}
+
+.mic-check__row[data-state='bad'] {
+  border-left-color: var(--over);
+}
+
+@media (max-width: 30rem) {
+  .mic-check__row {
+    grid-template-columns: 1fr;
+  }
+}
