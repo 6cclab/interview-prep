@@ -22,14 +22,19 @@ function seedContext() {
 }
 
 function baseDeps(overrides: Partial<VoiceServerDeps> = {}): VoiceServerDeps {
+  // The default store must be built against the same clock the server ends
+  // up using, so a test that only overrides `now` (like the idle-reap test
+  // below) doesn't silently get a store stamping `lastActivity` off the real
+  // wall clock instead.
+  const now = overrides.now ?? ((): number => 0)
   return {
     root,
     createTransport: () => async function* () {
       yield 'Ready when you are.'
     },
     transcriber: { transcribe: async () => ({ text: '' }) },
-    store: createSessionStore(() => 'session-1'),
-    now: () => 0,
+    store: createSessionStore(() => 'session-1', now),
+    now,
     ...overrides,
   }
 }
@@ -147,6 +152,75 @@ describe('POST /api/session/:id/turn', () => {
     const { port } = await listen(baseDeps())
     const res = await fetch(`http://127.0.0.1:${port}/api/session/nope/turn`, { method: 'POST', body: Buffer.from('x') })
     expect(res.status).toBe(404)
+  })
+
+  it('rejects a second POST /turn for the same session while the first is still in flight', async () => {
+    let releaseTranscode: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      releaseTranscode = resolve
+    })
+    const { port } = await listen(
+      baseDeps({
+        transcode: async (_input, output) => {
+          await gate
+          writeFileSync(output, Buffer.from('fake wav bytes'))
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(stream)
+    await readSSE(stream)
+
+    const first = fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('fake webm bytes'),
+    })
+    // Give the server a moment to accept the first request and mark the turn
+    // in flight before the second one lands.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    const second = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('another turn'),
+    })
+    expect(second.status).toBe(409)
+    expect(((await second.json()) as { error: string }).error).toMatch(/already in progress/i)
+
+    releaseTranscode()
+    expect((await first).status).toBe(202)
+  })
+})
+
+describe('scratch directory cleanup', () => {
+  it('removes the session scratch directory on POST /end', async () => {
+    const store = createSessionStore(() => 'session-1')
+    const { port } = await listen(baseDeps({ store }))
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const scratchDir = store.get(id)!.scratchDir
+    expect(existsSync(scratchDir)).toBe(true)
+
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    expect(existsSync(scratchDir)).toBe(false)
+  })
+
+  it('removes the session scratch directory when an SSE disconnect ends the session', async () => {
+    const store = createSessionStore(() => 'session-1')
+    const { port } = await listen(baseDeps({ store }))
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const scratchDir = store.get(id)!.scratchDir
+    expect(existsSync(scratchDir)).toBe(true)
+
+    const controller = new AbortController()
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`, { signal: controller.signal })
+    await readSSE(stream)
+    controller.abort()
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(existsSync(scratchDir)).toBe(false)
   })
 })
 
@@ -269,5 +343,24 @@ describe('GET /api/session/:id/stream', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     const relPath = join(root, 'local/mock-' + new Date().toISOString().slice(0, 10) + '.md')
     expect(existsSync(relPath)).toBe(true)
+  })
+
+  it('a second connection ends the previous response instead of leaving it open', async () => {
+    const { port } = await listen(baseDeps())
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    const first = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(first) // the opening sentence
+    await readSSE(first) // the opening entry — both are written before the reconnect below
+
+    const second = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    expect(second.status).toBe(200)
+
+    // The first response must have been ended by the server, not merely
+    // abandoned — reading past everything it had already buffered should
+    // observe the stream closing rather than hang waiting for bytes nobody
+    // will ever write.
+    await expect(readSSE(first)).rejects.toThrow(/stream ended/i)
   })
 })

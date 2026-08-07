@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -59,13 +59,22 @@ function writeSSE(res: ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 }
 
-async function streamTurn(res: ServerResponse, turn: AsyncIterable<string>): Promise<void> {
+// `res` is optional: a turn can be submitted with no live SSE connection (the
+// browser tab closed, or never reconnected), and the reply must still be
+// drained to completion so the session's entries/endedEarly state advances —
+// there is simply nowhere to write the sentence events.
+async function streamTurn(res: ServerResponse | undefined, turn: AsyncIterable<string>): Promise<void> {
   for await (const sentence of turn) {
-    writeSSE(res, 'sentence', { speaker: 'interviewer', text: sentence })
+    if (res) writeSSE(res, 'sentence', { speaker: 'interviewer', text: sentence })
   }
 }
 
-function endAndPersist(deps: VoiceServerDeps, store: SessionStore, id: string): void {
+function endAndPersist(
+  deps: VoiceServerDeps,
+  store: SessionStore,
+  entryClocks: Map<string, () => number>,
+  id: string,
+): void {
   const stored = store.get(id)
   if (!stored) return
   const { relPath } = finishSession(stored.session, stored.interviewer, {
@@ -78,17 +87,57 @@ function endAndPersist(deps: VoiceServerDeps, store: SessionStore, id: string): 
     stored.sseClient.end()
   }
   store.remove(id)
+  entryClocks.delete(id)
+  // Every session's scratch directory is created in POST /api/session and
+  // must not outlive the session — per-turn files are already unlinked as
+  // they're consumed, but the directory itself was never removed on any exit
+  // path until now.
+  rmSync(stored.scratchDir, { recursive: true, force: true })
 }
 
 export function createVoiceServer(deps: VoiceServerDeps): Server {
-  const store = deps.store ?? createSessionStore()
-  const now = deps.now ?? Date.now
+  // Two different clocks, deliberately not the same function:
+  //
+  // `idleClock` is cross-session bookkeeping (lastActivity/reapIdle). It only
+  // ever needs internal consistency — every read compares two values it
+  // itself produced — so a plain wall clock is correct and has no zero-point
+  // to get wrong.
+  //
+  // `Entry.at` is different: it's elapsed milliseconds *since that session
+  // started*, not wall time — `transcript.ts` renders it as `[mm:ss]` and the
+  // drill grades pacing off it. `cli.ts` gets this right by capturing
+  // `started = Date.now()` once and subtracting, but that only works there
+  // because a CLI process is one-shot: process start and session start are
+  // the same instant. This server is long-running and can serve many
+  // sessions back to back, so a single `Date.now() - <server start>` default
+  // shared across all of them would give the second session's first entry an
+  // `at` equal to however long the server had already been up — the same
+  // class of bug as stamping raw epoch, just with a smaller, sneakier offset.
+  // Each session's default clock must therefore be created fresh, at that
+  // session's own start.
+  const idleClock = deps.now ?? Date.now
+  const store = deps.store ?? createSessionStore(undefined, idleClock)
   const transcode = deps.transcode ?? transcodeToWav
+  // Sessions whose POST /turn is still being processed (transcode/transcribe/
+  // reply-stream in flight) — guards against a second /turn for the same
+  // session landing before the first has finished.
+  const turnsInFlight = new Set<string>()
+  // Per-session elapsed clock for `Entry.at`, keyed by session id. When a
+  // caller injects `deps.now` (every test in this repo), all sessions share
+  // that one clock, same as before. When nothing is injected (production),
+  // each session gets its own clock zeroed at that session's creation.
+  const entryClocks = new Map<string, () => number>()
+
+  function makeEntryClock(): () => number {
+    if (deps.now) return deps.now
+    const start = Date.now()
+    return () => Date.now() - start
+  }
 
   const idleMs = deps.idleMs ?? 5 * 60_000
   const sweep = setInterval(() => {
-    for (const stored of store.reapIdle(now(), idleMs)) {
-      endAndPersist(deps, store, stored.id)
+    for (const stored of store.reapIdle(idleClock(), idleMs)) {
+      endAndPersist(deps, store, entryClocks, stored.id)
     }
   }, Math.min(idleMs, 30_000))
   sweep.unref()
@@ -114,13 +163,11 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       }
       const system = buildSystemPrompt(deps.root, 'mock')
       const interviewer = createInterviewer(system, deps.createTransport())
-      const session = createSession({ interviewer, now: () => now() })
+      const entryClock = makeEntryClock()
+      const session = createSession({ interviewer, now: () => entryClock() })
       const scratchDir = mkdtempSync(join(tmpdir(), 'voice-web-'))
       const stored = store.create(session, interviewer, new Date(), scratchDir)
-      // `create()` stamps `lastActivity` with the real wall clock; put it on
-      // the injected clock instead so the idle sweep (which reads via
-      // `now()`) measures against the same timeline tests control.
-      store.touch(stored.id, now())
+      entryClocks.set(stored.id, entryClock)
       sendJson(res, 201, { id: stored.id })
       return
     }
@@ -134,6 +181,17 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         return
       }
 
+      if (stored.sseClient) {
+        // A reconnect: the previous response has no reader left on the other
+        // end, and a turn already in flight could still write to it. End it
+        // explicitly rather than leaving it open until its own socket happens
+        // to close — that would let the stale response linger indefinitely
+        // and race the new one for writes. Ending it here (rather than
+        // refusing the new connection) is what lets `EventSource`'s built-in
+        // auto-reconnect actually recover a dropped connection.
+        stored.sseClient.end()
+      }
+
       res.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
@@ -142,7 +200,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       stored.sseClient = res
 
       req.on('close', () => {
-        endAndPersist(deps, store, id)
+        endAndPersist(deps, store, entryClocks, id)
       })
 
       const alreadyBegun = stored.session.entries().length > 0
@@ -153,8 +211,10 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(res, 'entry', entry)
           }
-          if (stored.session.endedEarly()) endAndPersist(deps, store, id)
-        })()
+          if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, id)
+        })().catch((error: unknown) => {
+          console.error('voice session opening turn failed:', error)
+        })
       }
       return
     }
@@ -171,13 +231,20 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         sendJson(res, 409, { error: 'session already ended' })
         return
       }
-      store.touch(id, now())
+      if (turnsInFlight.has(id)) {
+        sendJson(res, 409, { error: 'a turn is already in progress for this session' })
+        return
+      }
+      turnsInFlight.add(id)
+      store.touch(id, idleClock())
 
       // The moment the upload arrived is the moment Andre's turn actually
       // ended — sample it before transcode/transcription latency has a
       // chance to leak into the pacing analytics `submitTurn`/`reportFailure`
-      // stamp entries with.
-      const at = now()
+      // stamp entries with. Uses this session's own entry clock, not the
+      // idle-bookkeeping one — see the comment above `entryClocks`.
+      const entryClock = entryClocks.get(id)!
+      const at = entryClock()
 
       const chunks: Buffer[] = []
       let total = 0
@@ -192,6 +259,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         chunks.push(buf)
       }
       if (tooLarge) {
+        turnsInFlight.delete(id)
         sendJson(res, 413, { error: 'audio upload too large' })
         req.destroy()
         return
@@ -215,10 +283,11 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
           ])
         }
       } catch (error) {
+        turnsInFlight.delete(id)
         const message = error instanceof Error ? error.message : String(error)
         stored.session.reportFailure(message, at)
         sendJson(res, 422, { error: message })
-        endAndPersist(deps, store, id)
+        endAndPersist(deps, store, entryClocks, id)
         return
       }
 
@@ -233,14 +302,23 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         if (stored.sseClient) {
           writeSSE(stored.sseClient, 'entry', stored.session.entries()[before])
         }
-        await streamTurn(stored.sseClient!, iterable)
+        // No live SSE connection is a normal state (a turn submitted between
+        // reconnects, say), not a reason to stop draining the reply — the
+        // session's entries/endedEarly state must still advance either way.
+        await streamTurn(stored.sseClient, iterable)
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before + 1)) {
             writeSSE(stored.sseClient, 'entry', entry)
           }
         }
-        if (stored.session.endedEarly()) endAndPersist(deps, store, id)
+        if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, id)
       })()
+        .catch((error: unknown) => {
+          console.error('voice session turn failed:', error)
+        })
+        .finally(() => {
+          turnsInFlight.delete(id)
+        })
       return
     }
 
@@ -262,6 +340,8 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         stored.sseClient.end()
       }
       store.remove(id)
+      entryClocks.delete(id)
+      rmSync(stored.scratchDir, { recursive: true, force: true })
       sendJson(res, 200, { relPath, storyLogWritten })
       return
     }

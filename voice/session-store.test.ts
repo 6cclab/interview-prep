@@ -59,10 +59,24 @@ describe('createSessionStore', () => {
     expect(stored.lastActivity).toBe(9999)
   })
 
+  // Regression for a bug where create() stamped lastActivity with the real
+  // wall clock instead of the store's own injected clock: the idle reaper and
+  // every other read of lastActivity go through the injected `now`, so a
+  // fresh session's lastActivity landing on a different timeline than that
+  // clock throws off idle-reap timing from the moment the session is created.
+  // This must not call touch() first — that would paper over exactly the bug
+  // being guarded against.
+  it('create() stamps lastActivity from the injected clock, not the wall clock', () => {
+    const store = createSessionStore(() => 'abc', () => 4242)
+    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch')
+    expect(stored.lastActivity).toBe(4242)
+  })
+
   it('reapIdle() returns sessions past the idle threshold and nothing else', () => {
-    const store = createSessionStore(() => 'abc')
+    // No pre-emptive touch(): create() itself must land lastActivity on the
+    // injected clock for this timing to hold.
+    const store = createSessionStore(() => 'abc', () => 1000)
     store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch')
-    store.touch('abc', 1000)
     expect(store.reapIdle(1000 + 4_000, 5_000)).toEqual([])
     expect(store.reapIdle(1000 + 6_000, 5_000).map((s) => s.id)).toEqual(['abc'])
   })

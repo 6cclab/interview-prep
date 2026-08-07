@@ -26,7 +26,10 @@ export interface SessionStore {
   reapIdle(now: number, idleMs: number): StoredSession[]
 }
 
-export function createSessionStore(idFactory: () => string = randomUUID): SessionStore {
+export function createSessionStore(
+  idFactory: () => string = randomUUID,
+  now: () => number = Date.now,
+): SessionStore {
   const sessions = new Map<string, StoredSession>()
 
   return {
@@ -37,7 +40,7 @@ export function createSessionStore(idFactory: () => string = randomUUID): Sessio
         interviewer,
         startedAt,
         scratchDir,
-        lastActivity: Date.now(),
+        lastActivity: now(),
       }
       sessions.set(stored.id, stored)
       return stored
