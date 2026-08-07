@@ -61,4 +61,63 @@ describe('createInterviewer', () => {
     await collect(interviewer.turn('Done.'))
     expect(interviewer.lastRaw()).toContain('competency: Conflict')
   })
+
+  it('catches a fence split across two deltas', async () => {
+    const { stream } = scripted([
+      ['Cut the middle minute. ', '``', '`story-log\ncompetency: Conflict\n```'],
+    ])
+    const interviewer = createInterviewer('SYSTEM', stream)
+    const sentences = await collect(interviewer.turn('Done.'))
+    expect(sentences).toEqual(['Cut the middle minute.'])
+    for (const sentence of sentences) {
+      expect(sentence).not.toContain('`')
+      expect(sentence).not.toContain('competency')
+    }
+  })
+
+  it('catches a fence split with a different straddle', async () => {
+    const { stream } = scripted([['Fine. ', '`', '``story-log\ncompetency: Conflict\n```']])
+    const interviewer = createInterviewer('SYSTEM', stream)
+    const sentences = await collect(interviewer.turn('Done.'))
+    expect(sentences).toEqual(['Fine.'])
+    for (const sentence of sentences) {
+      expect(sentence).not.toContain('`')
+      expect(sentence).not.toContain('competency')
+    }
+  })
+
+  it('does not lose the tail when no fence appears', async () => {
+    const { stream } = scripted([['One two three']])
+    const interviewer = createInterviewer('SYSTEM', stream)
+    expect(await collect(interviewer.turn('Done.'))).toEqual(['One two three'])
+  })
+
+  it('rolls back the user message when the stream throws mid-turn', async () => {
+    const seen: { system: string; messages: Message[] }[] = []
+    let call = 0
+    const stream: StreamFn = async function* (system, messages) {
+      seen.push({ system, messages: structuredClone(messages) })
+      if (call === 0) {
+        call++
+        yield 'Partial reply. '
+        throw new Error('stream exploded')
+      }
+      yield 'Second reply.'
+    }
+    const interviewer = createInterviewer('SYSTEM', stream)
+
+    await expect(collect(interviewer.turn('First.'))).rejects.toThrow('stream exploded')
+
+    await collect(interviewer.turn('First.'))
+    expect(seen[1]!.messages).toEqual([{ role: 'user', content: 'First.' }])
+  })
+
+  it('rejects and leaves history unchanged on an empty stream', async () => {
+    const { stream, seen } = scripted([[], ['Second reply.']])
+    const interviewer = createInterviewer('SYSTEM', stream)
+    await expect(collect(interviewer.turn('First.'))).rejects.toThrow()
+
+    await collect(interviewer.turn('First.'))
+    expect(seen[1]!.messages).toEqual([{ role: 'user', content: 'First.' }])
+  })
 })

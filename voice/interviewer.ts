@@ -32,21 +32,47 @@ export function createInterviewer(system: string, stream: StreamFn): Interviewer
       const buffer = new SentenceBuffer()
       raw = ''
       let fenced = false
+      let carry = ''
+      const holdback = FENCE.length - 1
 
-      for await (const delta of stream(system, messages)) {
-        raw += delta
-        if (fenced) continue
-        const fenceAt = delta.indexOf(FENCE)
-        if (fenceAt !== -1) {
-          fenced = true
-          for (const sentence of buffer.push(delta.slice(0, fenceAt))) yield sentence
-          continue
+      try {
+        for await (const delta of stream(system, messages)) {
+          raw += delta
+          if (fenced) continue
+
+          const text = carry + delta
+          const fenceAt = text.indexOf(FENCE)
+          if (fenceAt !== -1) {
+            fenced = true
+            carry = ''
+            for (const sentence of buffer.push(text.slice(0, fenceAt))) yield sentence
+            continue
+          }
+
+          if (text.length < holdback) {
+            carry = text
+            continue
+          }
+
+          carry = text.slice(text.length - holdback)
+          for (const sentence of buffer.push(text.slice(0, text.length - holdback))) yield sentence
         }
-        for (const sentence of buffer.push(delta)) yield sentence
-      }
 
-      for (const sentence of buffer.flush()) yield sentence
-      messages.push({ role: 'assistant', content: raw })
+        if (!fenced && carry) {
+          for (const sentence of buffer.push(carry)) yield sentence
+        }
+
+        for (const sentence of buffer.flush()) yield sentence
+
+        if (raw.trim() === '') {
+          throw new Error('the interviewer returned nothing')
+        }
+
+        messages.push({ role: 'assistant', content: raw })
+      } catch (error) {
+        messages.pop()
+        throw error
+      }
     },
 
     lastRaw(): string {
