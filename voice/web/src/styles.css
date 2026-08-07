@@ -1,41 +1,641 @@
+/* ---------------------------------------------------------------------- */
+/* Tokens                                                                  */
+/* ---------------------------------------------------------------------- */
+
 :root {
   color-scheme: light dark;
-  font-family: system-ui, sans-serif;
+
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --surface-sunken: #efefec;
+  --border: #ddddd7;
+  --text: #1b1b18;
+  --text-muted: #66665e;
+  --focus-ring: #2f6f9e;
+
+  --accent: #b8341f;
+  --accent-strong: #8f2717;
+  --accent-wash: rgba(184, 52, 31, 0.08);
+  --good: #2f7a52;
+  --good-wash: rgba(47, 122, 82, 0.12);
+  --warn: #9a6a12;
+  --warn-wash: rgba(154, 106, 18, 0.14);
+  --over: #a8371f;
+  --over-wash: rgba(168, 55, 31, 0.14);
+
+  --radius-sm: 0.4rem;
+  --radius-md: 0.75rem;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 1px rgba(0, 0, 0, 0.04);
+
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131311;
+    --surface: #1c1c19;
+    --surface-sunken: #171715;
+    --border: #37372f;
+    --text: #ececE4;
+    --text-muted: #a2a297;
+    --focus-ring: #6db6f0;
+
+    --accent: #e2543a;
+    --accent-strong: #ff6b4d;
+    --accent-wash: rgba(226, 84, 58, 0.14);
+    --good: #59b184;
+    --good-wash: rgba(89, 177, 132, 0.14);
+    --warn: #d3a13f;
+    --warn-wash: rgba(211, 161, 63, 0.16);
+    --over: #e2604a;
+    --over-wash: rgba(226, 96, 74, 0.16);
+
+    --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Base                                                                    */
+/* ---------------------------------------------------------------------- */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
 }
 
 body {
   margin: 0;
-  padding: 1.5rem;
-  max-width: 40rem;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+main {
+  max-width: 42rem;
   margin-inline: auto;
+  padding: 1.5rem 1.25rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
 }
 
-.warning {
-  border: 1px solid #b45309;
-  background: color-mix(in srgb, #b45309 12%, transparent);
-  padding: 0.75rem 1rem;
-  border-radius: 0.375rem;
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-#status {
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Header                                                                  */
+/* ---------------------------------------------------------------------- */
+
+.app-header {
+  padding-top: 0.5rem;
+}
+
+.app-header h1 {
+  font-size: 1.375rem;
   font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.01em;
 }
 
-#elapsed {
+.app-header__subtitle {
+  margin: 0.15rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* A second, redundant recording signal meant to register in peripheral
+   vision without needing to focus on the page — see App.tsx's comment. */
+.accent-bar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 5px;
+  background: transparent;
+  transition: background-color 200ms ease;
+  z-index: 10;
+}
+
+.accent-bar--recording {
+  background: var(--accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .accent-bar--recording {
+    animation: accent-pulse 2.4s ease-in-out infinite;
+  }
+}
+
+@keyframes accent-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Error banner                                                            */
+/* ---------------------------------------------------------------------- */
+
+.error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  background: var(--over-wash);
+  border: 1px solid var(--over);
+  color: var(--text);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1rem;
+}
+
+.error-banner__icon {
+  flex: none;
+  color: var(--over);
+  margin-top: 0.1rem;
+}
+
+.error-banner__message {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.error-banner__action {
+  flex: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.4rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--over);
+  background: var(--surface);
+  color: var(--over);
+  cursor: pointer;
+}
+
+.error-banner__action:hover {
+  background: var(--over-wash);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Stage: recording indicator + status + elapsed readout                  */
+/* ---------------------------------------------------------------------- */
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 2rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+}
+
+.indicator {
+  position: relative;
+  width: 6.5rem;
+  height: 6.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.indicator__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--surface-sunken);
+}
+
+.indicator__ring--outer {
+  inset: -0.4rem;
+  border-color: transparent;
+  background: transparent;
+}
+
+.indicator__dot {
+  position: relative;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.indicator__label {
+  position: absolute;
+  bottom: -1.6rem;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* idle: quiet, neutral, does not compete for attention */
+.indicator--idle .indicator__ring {
+  border-color: var(--border);
+}
+
+/* interviewer speaking: calm, unmistakably NOT a recording state */
+.indicator--speaking .indicator__ring {
+  border-color: var(--focus-ring);
+  background: transparent;
+}
+.indicator--speaking .indicator__dot {
+  background: var(--focus-ring);
+}
+.indicator--speaking .indicator__label {
+  color: var(--focus-ring);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .indicator--speaking .indicator__dot {
+    animation: speaking-breathe 1.6s ease-in-out infinite;
+  }
+}
+@keyframes speaking-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.75);
+    opacity: 0.6;
+  }
+}
+
+/* recording: the single most important state in the app. Large, high
+   contrast, animated (with a static fallback under reduced motion), and
+   backed up by the full-width accent bar and the "REC" label so it reads
+   from across a room or in peripheral vision. */
+.indicator--recording .indicator__ring {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+.indicator--recording .indicator__ring--outer {
+  border: 2px solid var(--accent);
+}
+.indicator--recording .indicator__dot {
+  background: var(--accent);
+  width: 1.5rem;
+  height: 1.5rem;
+}
+.indicator--recording .indicator__label {
+  color: var(--accent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .indicator--recording .indicator__ring--outer {
+    animation: recording-ring 1.8s ease-out infinite;
+  }
+}
+@keyframes recording-ring {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+/* ended: settled, resolved, unambiguously not live */
+.indicator--ended .indicator__ring {
+  border-color: var(--border);
+  background: var(--surface-sunken);
+}
+.indicator--ended .indicator__dot {
+  background: var(--text-muted);
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 2px;
+}
+
+.status-text {
+  margin: 0.6rem 0 0;
+  font-weight: 500;
+  text-align: center;
+  min-height: 1.3em;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Elapsed readout                                                         */
+/* ---------------------------------------------------------------------- */
+
+.elapsed {
+  width: 100%;
+  max-width: 20rem;
+  margin-top: 0.25rem;
+}
+
+.elapsed__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.elapsed__time {
   font-variant-numeric: tabular-nums;
-  color: #555;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
-#transcript {
-  padding-left: 1.25rem;
+.elapsed__zone-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
 }
 
-#transcript li {
-  margin-bottom: 0.5rem;
+.elapsed--good .elapsed__zone-label {
+  color: var(--good);
+}
+.elapsed--warn .elapsed__zone-label {
+  color: var(--warn);
+}
+.elapsed--over .elapsed__zone-label {
+  color: var(--over);
 }
 
-button {
-  font-size: 1rem;
-  padding: 0.5rem 1rem;
-  margin-right: 0.5rem;
+.elapsed__bar {
+  position: relative;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.elapsed__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--good);
+  transition: width 1s linear;
+}
+
+.elapsed--warn .elapsed__fill {
+  background: var(--warn);
+}
+.elapsed--over .elapsed__fill {
+  background: var(--over);
+}
+
+.elapsed__mark {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: color-mix(in srgb, var(--text) 35%, transparent);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Controls                                                                */
+/* ---------------------------------------------------------------------- */
+
+.controls {
+  display: flex;
+  justify-content: center;
+}
+
+.primary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  padding: 0.8rem 1.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition:
+    transform 80ms ease,
+    background-color 120ms ease;
+}
+
+.primary-button:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.primary-button:active {
+  transform: scale(0.98);
+}
+
+.primary-button[data-mode='listening-to-interviewer'] {
+  background: var(--focus-ring);
+  border-color: var(--focus-ring);
+}
+.primary-button[data-mode='listening-to-interviewer']:hover {
+  filter: brightness(1.08);
+}
+
+.primary-button[data-mode='idle'],
+.primary-button[data-mode='ended'] {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+.primary-button[data-mode='idle']:hover,
+.primary-button[data-mode='ended']:hover {
+  filter: brightness(1.15);
+}
+
+.primary-button__hint {
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.3rem;
+  background: rgba(255, 255, 255, 0.22);
+  color: inherit;
+  opacity: 0.85;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Transcript                                                              */
+/* ---------------------------------------------------------------------- */
+
+.transcript-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  max-height: 24rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+}
+
+.transcript__empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-width: 88%;
+  min-width: 0;
+}
+
+.turn--andre {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.turn--interviewer {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.turn__speaker {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding-inline: 0.2rem;
+}
+
+.turn__text {
+  margin: 0;
+  padding: 0.55rem 0.8rem;
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: 0.95rem;
+}
+
+.turn--andre .turn__text {
+  background: var(--focus-ring);
+  color: #fff;
+  border-bottom-right-radius: 0.2rem;
+}
+
+.turn--interviewer .turn__text {
+  background: var(--surface-sunken);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 0.2rem;
+}
+
+.turn--live .turn__text {
+  opacity: 0.85;
+}
+
+.turn__cursor {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 0.15em;
+  vertical-align: text-bottom;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .turn__cursor {
+    animation: cursor-blink 1s steps(2, start) infinite;
+  }
+}
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.jump-button {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+}
+
+.jump-button:hover {
+  background: var(--surface-sunken);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Narrow widths                                                           */
+/* ---------------------------------------------------------------------- */
+
+@media (max-width: 22rem) {
+  main {
+    padding: 1rem 0.85rem 2rem;
+  }
+
+  .turn {
+    max-width: 96%;
+  }
+
+  .primary-button {
+    width: 100%;
+    justify-content: center;
+  }
 }
