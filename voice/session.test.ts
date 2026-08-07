@@ -200,6 +200,30 @@ describe('runSession', () => {
       // successfully, so this confirms it wasn't left running either.
       expect(stop).toHaveBeenCalledTimes(1)
     })
+
+    it('stamps the early-end marker when transcription fails at the moment recording stopped, not after transcription latency', async () => {
+      // Same technique as the successful-turn case: a clock that only moves
+      // when told to, and jumps forward inside the failing operation. If the
+      // marker re-samples the clock after `transcribe` returns (rather than
+      // reusing the pre-transcribe timestamp), this catches it — a bare
+      // `typeof at === 'number'` assertion would not.
+      let clock = 0
+      const entries = (await runSession(
+        deps({
+          now: () => clock,
+          transcriber: {
+            transcribe: async () => {
+              clock += 5000 // simulated whisper.cpp latency before the failure surfaces
+              throw new Error('whisper-cli: model not found')
+            },
+          },
+        }),
+      )) as SessionOutcome
+
+      const marker = entries.find((e) => /ended early/i.test(e.text))!
+      expect(marker.at).toBe(0)
+      expect(marker.at).toBeLessThan(5000)
+    })
   })
 })
 
@@ -226,7 +250,7 @@ describe('createSession', () => {
   it('submitTurn() records the Andre entry immediately, before the reply arrives', async () => {
     let ticks = 0
     const session = createSession({ interviewer: fakeInterviewer(['Go on.']), now: () => (ticks += 100) })
-    const iter = session.submitTurn('Ready latency.')
+    const iter = session.submitTurn('Ready latency.', 100)
     const first = await iter[Symbol.asyncIterator]().next()
     expect(first.value).toBe('Go on.')
     expect(session.entries()[0]).toEqual({ speaker: 'andre', text: 'Ready latency.', at: 100 })
@@ -253,9 +277,28 @@ describe('createSession', () => {
     expect(session.entries()[0]!.text).toMatch(/ended early.*stream exploded/i)
   })
 
+  it('stamps the early-end marker at turn-start, not after the failing stream runs', async () => {
+    // Same technique as `runSession`'s transcription case: a clock that only
+    // advances inside the failing operation. If the marker re-samples the
+    // clock after the stream throws (rather than reusing the timestamp
+    // captured at the top of the turn), this catches it.
+    let clock = 0
+    const flaky: Interviewer = {
+      async *turn() {
+        clock += 5000 // simulated slow stream before it throws
+        throw new Error('stream failed')
+      },
+      lastRaw: () => '',
+    }
+    const session = createSession({ interviewer: flaky, now: () => clock })
+    for await (const _ of session.begin()) void _
+    expect(session.entries()[0]!.at).toBe(0)
+    expect(session.entries()[0]!.at).toBeLessThan(5000)
+  })
+
   it('reportFailure() marks the session ended without needing a turn', () => {
     const session = createSession({ interviewer: fakeInterviewer([]), now: () => 7 })
-    session.reportFailure('transcode failed')
+    session.reportFailure('transcode failed', 7)
     expect(session.endedEarly()).toBe('transcode failed')
     expect(session.entries()).toEqual([
       { speaker: 'interviewer', text: '[Session ended early — transcode failed]', at: 7 },
@@ -276,7 +319,7 @@ describe('finishSession', () => {
 
   it('writes the transcript to local/mock-<date>.md', () => {
     const session = createSession({ interviewer: { turn: async function* () {}, lastRaw: () => '' }, now: () => 0 })
-    session.submitTurn('Ready latency.')
+    session.submitTurn('Ready latency.', 0)
     const startedAt = new Date('2026-08-07T10:00:00.000Z')
     const { relPath } = finishSession(session, { turn: async function* () {}, lastRaw: () => '' }, {
       root,

@@ -31,9 +31,12 @@ export interface Session {
    * sentences. `at` is the moment Andre's turn actually ended — e.g. when a
    * caller stopped the recording — so it stays accurate even when the caller
    * awaits a slow transcription (or a separate HTTP request) before calling
-   * this. Falls back to sampling the clock itself when omitted.
+   * this. Required, not defaulted: a caller that doesn't have this moment on
+   * hand yet has no business calling `submitTurn` — a quiet `now()` fallback
+   * is exactly how transcription latency leaked into the pacing analytics
+   * before.
    */
-  submitTurn(said: string, at?: number): AsyncIterable<string>
+  submitTurn(said: string, at: number): AsyncIterable<string>
   /** The transcript so far. */
   entries(): Entry[]
   /** Set once a turn has failed; the message named in the synthetic entry. */
@@ -41,9 +44,12 @@ export interface Session {
   /**
    * Record a failure that happened before any text existed to feed
    * `submitTurn` — a failed audio transcode or transcription. Produces the
-   * same synthetic entry and marker `submitTurn`'s own catch path does.
+   * same synthetic entry and marker `submitTurn`'s own catch path does. `at`
+   * is the moment the failure actually occurred — required, not defaulted,
+   * so a caller can't accidentally let the failed operation's own latency
+   * leak into the marker's timestamp.
    */
-  reportFailure(message: string): void
+  reportFailure(message: string, at: number): void
 }
 
 export interface CreateSessionOptions {
@@ -56,8 +62,8 @@ export function createSession(opts: CreateSessionOptions): Session {
   const entries: Entry[] = []
   let earlyMarker: string | undefined
 
-  function reportFailure(message: string): void {
-    entries.push({ speaker: 'interviewer', text: `[Session ended early — ${message}]`, at: opts.now() })
+  function reportFailure(message: string, at: number): void {
+    entries.push({ speaker: 'interviewer', text: `[Session ended early — ${message}]`, at })
     earlyMarker = message
     console.error(`Voice session ended early: ${message}`)
   }
@@ -71,7 +77,10 @@ export function createSession(opts: CreateSessionOptions): Session {
         yield sentence
       }
     } catch (error) {
-      reportFailure(errorMessage(error))
+      // Reuse the turn-start timestamp, not a fresh sample — the failing
+      // stream may have run for a while before throwing, and that latency
+      // must not leak into the marker's `at`.
+      reportFailure(errorMessage(error), at)
       return
     }
     entries.push({ speaker: 'interviewer', text: spoken.join(' '), at })
@@ -81,8 +90,8 @@ export function createSession(opts: CreateSessionOptions): Session {
     begin(): AsyncIterable<string> {
       return runInterviewerTurn(OPENING)
     },
-    submitTurn(said: string, at?: number): AsyncIterable<string> {
-      entries.push({ speaker: 'andre', text: said, at: at ?? opts.now() })
+    submitTurn(said: string, at: number): AsyncIterable<string> {
+      entries.push({ speaker: 'andre', text: said, at })
       return runInterviewerTurn(said)
     },
     entries: () => entries,
@@ -167,7 +176,10 @@ export async function runSession(deps: SessionDeps): Promise<SessionOutcome> {
     try {
       wavPath = await recorder.stop()
     } catch (error) {
-      session.reportFailure(`recording failed: ${errorMessage(error)}`)
+      // No earlier accurate timestamp exists here — the recording itself
+      // never successfully stopped — so sampling now is the correct moment,
+      // not a fallback.
+      session.reportFailure(`recording failed: ${errorMessage(error)}`, deps.now())
       return outcomeOf(session)
     }
     if (decision === 'end') return outcomeOf(session)
@@ -183,7 +195,9 @@ export async function runSession(deps: SessionDeps): Promise<SessionOutcome> {
       const utterance = await deps.transcriber.transcribe(wavPath)
       utteranceText = utterance.text
     } catch (error) {
-      session.reportFailure(`transcription failed: ${errorMessage(error)}`)
+      // Reuse the pre-transcribe timestamp, not a fresh sample — whisper's
+      // latency on the failed attempt must not leak into the marker's `at`.
+      session.reportFailure(`transcription failed: ${errorMessage(error)}`, stoppedAt)
       return outcomeOf(session)
     }
 
