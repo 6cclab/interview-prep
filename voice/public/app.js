@@ -68,7 +68,13 @@ async function startSession() {
 }
 
 async function startRecording() {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  let stream
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  } catch (error) {
+    setStatus(`Microphone access failed: ${error.message || error}. Click to try again.`)
+    return
+  }
   recordedChunks = []
   mediaRecorder = new MediaRecorder(stream)
   mediaRecorder.ondataavailable = (event) => {
