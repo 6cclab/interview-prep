@@ -68,6 +68,23 @@ describe('parseWhisperOutput', () => {
     expect(warn.mock.calls[0]?.join(' ')).toContain('so the thing is: we shard by tenant')
     warn.mockRestore()
   })
+
+  it('warns on a single-word-then-colon prose line rather than silently dropping it, but keeps recognised segments', () => {
+    // This exact shape ('okay: so we shard by tenant') matched the old heuristic
+    // /^[a-z_]+(\s*\([^)]*\))?:/ and would have been silently discarded as whisper
+    // log noise. Reaching the warn path (not the silent-discard path) proves the
+    // new allowlist no longer swallows it.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stdout = [
+      '[00:00:00.000 --> 00:00:01.000]   Read latency.',
+      'okay: so we shard by tenant',
+      '[00:00:01.000 --> 00:00:02.000]   Write latency.',
+    ].join('\n')
+    expect(parseWhisperOutput(stdout).text).toBe('Read latency. Write latency.')
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]?.join(' ')).toContain('okay: so we shard by tenant')
+    warn.mockRestore()
+  })
 })
 
 describe('isWhisperLogLine', () => {
@@ -84,6 +101,12 @@ describe('isWhisperLogLine', () => {
 
   it('does not recognise a bracket-less prose line that ends its first clause with a colon', () => {
     expect(isWhisperLogLine('so the thing is: we shard by tenant')).toBe(false)
+  })
+
+  it('does not recognise a single lowercase word immediately followed by a colon', () => {
+    // The previous heuristic (/^[a-z_]+(\s*\([^)]*\))?:/) matched exactly this
+    // shape and would have silently discarded it as whisper log noise.
+    expect(isWhisperLogLine('okay: so we shard by tenant')).toBe(false)
   })
 
   it('recognises a ggml log line', () => {
