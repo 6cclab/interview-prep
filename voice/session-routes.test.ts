@@ -191,6 +191,39 @@ describe('POST /api/session/:id/turn', () => {
     releaseTranscode()
     expect((await first).status).toBe(202)
   })
+
+  it('accepts a turn with no live SSE connection open and leaves the session usable', async () => {
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* () {
+          yield 'Tell me more.'
+        },
+        transcriber: { transcribe: async () => ({ text: 'answer' }) },
+        transcode: async (_input, output) => {
+          writeFileSync(output, Buffer.from('fake wav bytes'))
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    // Deliberately no GET /stream — the zero-client path. `stored.sseClient`
+    // is `undefined` for the whole request.
+    const turnRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('fake webm bytes'),
+    })
+    expect(turnRes.status).toBe(202)
+    expect(await turnRes.json()).toEqual({ text: 'answer' })
+
+    // Give the fire-and-forget reply-stream IIFE a moment to drain to
+    // completion with nowhere to write — it must not throw or hang.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // The session must not be left wedged: a normal /end still works.
+    const endRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    expect(endRes.status).toBe(200)
+  })
 })
 
 describe('scratch directory cleanup', () => {
@@ -362,5 +395,52 @@ describe('GET /api/session/:id/stream', () => {
     // observe the stream closing rather than hang waiting for bytes nobody
     // will ever write.
     await expect(readSSE(first)).rejects.toThrow(/stream ended/i)
+  })
+
+  it('a reconnect replaces the stream but keeps the session alive and usable', async () => {
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* () {
+          yield 'Tell me more.'
+        },
+        transcriber: { transcribe: async () => ({ text: 'answer' }) },
+        transcode: async (_input, output) => {
+          writeFileSync(output, Buffer.from('fake wav bytes'))
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    const first = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(first) // opening sentence
+    await readSSE(first) // opening entry — both are written before the reconnect below
+
+    const second = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    expect(second.status).toBe(200)
+
+    // Ending the first response fires *its own* already-registered 'close'
+    // handler. Give it a tick to run: it must not tear the session down out
+    // from under the reconnect (that was the regression).
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // The session must still be alive and usable: a turn submitted after the
+    // reconnect streams to the *new* connection.
+    const turnRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('fake webm bytes'),
+    })
+    expect(turnRes.status).toBe(202)
+
+    const andreEntry = await readSSE(second)
+    expect(andreEntry).toEqual({ event: 'entry', data: { speaker: 'andre', text: 'answer', at: 0 } })
+    const replySentence = await readSSE(second)
+    expect(replySentence).toEqual({ event: 'sentence', data: { speaker: 'interviewer', text: 'Tell me more.' } })
+
+    // And the session is still in the store — a genuine end still works,
+    // rather than the reconnect having already silently ended it (a 404 here
+    // would mean the regression is back).
+    const endRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    expect(endRes.status).toBe(200)
   })
 })

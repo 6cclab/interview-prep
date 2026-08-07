@@ -197,9 +197,28 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         'cache-control': 'no-cache',
         connection: 'keep-alive',
       })
+      // `writeHead` only queues the status line and headers — Node doesn't
+      // actually put them on the wire until the first `write()`/`end()`, per
+      // its own docs. A reconnect that lands after the opening turn has
+      // already streamed (the common case: the drill has been running for a
+      // while) writes nothing else until the next real event, so without an
+      // explicit flush here the new connection's headers would sit buffered
+      // indefinitely and the client would hang waiting for a response that
+      // was, from Node's perspective, already "sent".
+      res.flushHeaders()
       stored.sseClient = res
 
       req.on('close', () => {
+        // This handler is registered once per connection, but a reconnect
+        // (above) proactively ends the *previous* response, which fires
+        // *that* response's own already-registered 'close' handler. By the
+        // time it fires, `stored.sseClient` has already been reassigned to
+        // the new connection's response — so only tear down the session if
+        // this handler's own `res` is still the current client. Otherwise a
+        // stale handler from an ended, superseded response would run
+        // `endAndPersist` and kill the session (and the brand-new
+        // connection) out from under a live reconnect.
+        if (store.get(id)?.sseClient !== res) return
         endAndPersist(deps, store, entryClocks, id)
       })
 
