@@ -26,8 +26,14 @@ const OPENING = 'Begin the interview.'
 export interface Session {
   /** The interviewer's first turn. No Andre entry is recorded for it. */
   begin(): AsyncIterable<string>
-  /** Feed a transcribed turn; yields the interviewer's reply as speakable sentences. */
-  submitTurn(said: string): AsyncIterable<string>
+  /**
+   * Feed a transcribed turn; yields the interviewer's reply as speakable
+   * sentences. `at` is the moment Andre's turn actually ended — e.g. when a
+   * caller stopped the recording — so it stays accurate even when the caller
+   * awaits a slow transcription (or a separate HTTP request) before calling
+   * this. Falls back to sampling the clock itself when omitted.
+   */
+  submitTurn(said: string, at?: number): AsyncIterable<string>
   /** The transcript so far. */
   entries(): Entry[]
   /** Set once a turn has failed; the message named in the synthetic entry. */
@@ -75,8 +81,8 @@ export function createSession(opts: CreateSessionOptions): Session {
     begin(): AsyncIterable<string> {
       return runInterviewerTurn(OPENING)
     },
-    submitTurn(said: string): AsyncIterable<string> {
-      entries.push({ speaker: 'andre', text: said, at: opts.now() })
+    submitTurn(said: string, at?: number): AsyncIterable<string> {
+      entries.push({ speaker: 'andre', text: said, at: at ?? opts.now() })
       return runInterviewerTurn(said)
     },
     entries: () => entries,
@@ -166,6 +172,12 @@ export async function runSession(deps: SessionDeps): Promise<SessionOutcome> {
     }
     if (decision === 'end') return outcomeOf(session)
 
+    // Sample the clock the moment recording stopped — i.e. when Andre
+    // actually finished speaking — not after transcription, whose latency
+    // (real seconds, for whisper.cpp) would otherwise leak into the
+    // transcript's pacing analytics.
+    const stoppedAt = deps.now()
+
     let utteranceText: string
     try {
       const utterance = await deps.transcriber.transcribe(wavPath)
@@ -175,7 +187,7 @@ export async function runSession(deps: SessionDeps): Promise<SessionOutcome> {
       return outcomeOf(session)
     }
 
-    for await (const sentence of session.submitTurn(utteranceText)) {
+    for await (const sentence of session.submitTurn(utteranceText, stoppedAt)) {
       await deps.speaker.speak(sentence)
     }
     if (session.endedEarly()) return outcomeOf(session)

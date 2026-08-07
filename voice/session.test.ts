@@ -89,6 +89,32 @@ describe('runSession', () => {
     expect(entries.map((e) => e.at)).toEqual([500, 1000, 1500])
   })
 
+  it('stamps Andre at the moment recording stopped, not after transcription latency', async () => {
+    // A clock that only moves when told to. It stays at 0 through recording
+    // and only jumps forward inside `transcribe`, standing in for the real
+    // seconds whisper.cpp spends on a long answer. A stub that "transcribes"
+    // instantly can't distinguish "stamped before transcription" from
+    // "stamped after" — this one can, because the two produce different
+    // numbers.
+    let clock = 0
+    const entries = await runSession(
+      deps({
+        now: () => clock,
+        transcriber: {
+          transcribe: async () => {
+            clock += 5000 // simulated whisper.cpp latency
+            return { text: 'Read latency.' }
+          },
+        },
+      }),
+    )
+    const andre = entries.find((e) => e.speaker === 'andre')!
+    // Stamped when the user actually stopped speaking (before transcription
+    // ran the clock forward), not once transcription finished.
+    expect(andre.at).toBe(0)
+    expect(andre.at).toBeLessThan(5000)
+  })
+
   describe('when a turn fails mid-session', () => {
     let errorSpy: ReturnType<typeof vi.spyOn>
 
