@@ -55,6 +55,19 @@ describe('parseWhisperOutput', () => {
     expect(warn.mock.calls[0]?.join(' ')).toContain('a line whisper never emits')
     warn.mockRestore()
   })
+
+  it('warns on a bracket-less prose-with-colon line rather than silently dropping it, but keeps recognised segments', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stdout = [
+      '[00:00:00.000 --> 00:00:01.000]   Read latency.',
+      'so the thing is: we shard by tenant',
+      '[00:00:01.000 --> 00:00:02.000]   Write latency.',
+    ].join('\n')
+    expect(parseWhisperOutput(stdout).text).toBe('Read latency. Write latency.')
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]?.join(' ')).toContain('so the thing is: we shard by tenant')
+    warn.mockRestore()
+  })
 })
 
 describe('isWhisperLogLine', () => {
@@ -67,5 +80,13 @@ describe('isWhisperLogLine', () => {
 
   it('does not recognise plain transcribed prose', () => {
     expect(isWhisperLogLine('So the first thing I want to pin down is the ratio.')).toBe(false)
+  })
+
+  it('does not recognise a bracket-less prose line that ends its first clause with a colon', () => {
+    expect(isWhisperLogLine('so the thing is: we shard by tenant')).toBe(false)
+  })
+
+  it('recognises a ggml log line', () => {
+    expect(isWhisperLogLine('ggml_metal_init: allocating')).toBe(true)
   })
 })

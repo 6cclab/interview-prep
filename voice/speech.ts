@@ -19,10 +19,14 @@ const SEGMENT = /^\[\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}\]\s*(.
 
 // whisper.cpp's own startup/diagnostic log lines, e.g.
 // `whisper_init_from_file_with_params_no_state: loading model`,
-// `whisper_model_load: n_vocab = 51866`, `system_info: n_threads = 4`.
-// A lowercase/underscore identifier (optionally parenthesised) followed by a
-// colon is enough to recognise them; an empty line is also noise.
-const WHISPER_LOG_LINE = /^[a-z_]+(\s*\([^)]*\))?:/
+// `whisper_model_load: n_vocab = 51866`, `system_info: n_threads = 4`,
+// `ggml_metal_init: allocating`. An allowlist of its real prefixes, rather
+// than a generic "identifier followed by colon" shape: the generic shape
+// also matches ordinary prose that happens to contain a colon (e.g.
+// "so the thing is: we shard by tenant"), which would silently discard real
+// speech — the worst failure mode this module can have. An empty line is
+// also noise.
+const WHISPER_LOG_LINE = /^(whisper_|ggml_|system_info:|main:)/
 
 export function isWhisperLogLine(line: string): boolean {
   const trimmed = line.trim()
@@ -49,9 +53,8 @@ export function parseWhisperOutput(stdout: string): Utterance {
   return { text: parts.join(' ') }
 }
 
-// A long interview answer's whisper.cpp stdout/stderr is unlikely to reach
-// Node's 1MB default `maxBuffer`, but exceeding it fails with an opaque
-// ERR_CHILD_PROCESS_STDIO_MAXBUFFER — raise the ceiling well clear of that.
+// ~150 words/min * 45min * ~6 bytes/word, plus a ~30-byte timestamp prefix
+// per segment, lands in the low hundreds of KB — 32MB is a wide margin, not a guess.
 const WHISPER_MAX_BUFFER = 32 * 1024 * 1024
 
 /**
@@ -91,7 +94,10 @@ export function saySpeaker(opts: { voice?: string; rate?: number } = {}): Speake
       try {
         await run('say', args)
       } catch (err) {
-        throw new Error('macOS `say` failed to speak text', { cause: err })
+        throw new Error(
+          `macOS \`say\` failed to speak text (voice: ${opts.voice ?? 'default'}, length: ${text.length})`,
+          { cause: err },
+        )
       }
     },
   }
