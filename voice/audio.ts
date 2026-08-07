@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { statSync } from 'node:fs'
 import { join } from 'node:path'
 
 export interface Recorder {
@@ -34,6 +35,14 @@ type Outcome =
 export function record(dir: string, device = ':0', binary = 'ffmpeg'): Recorder {
   const wavPath = join(dir, `turn-${process.hrtime.bigint()}.wav`)
   const child = spawn(binary, ffmpegArgs(device, wavPath), { stdio: ['ignore', 'ignore', 'pipe'] })
+
+  function wavWasWritten(): boolean {
+    try {
+      return statSync(wavPath).size > 0
+    } catch {
+      return false
+    }
+  }
 
   let stderrTail = ''
   child.stderr?.on('data', (chunk: Buffer) => {
@@ -86,8 +95,19 @@ export function record(dir: string, device = ':0', binary = 'ffmpeg'): Recorder 
         const finish = () => {
           process.removeListener('exit', onParentExit)
           if (!outcome) return
-          if (outcome.kind === 'clean') resolve(wavPath)
-          else reject(new Error(outcome.reason))
+          if (outcome.kind === 'clean') {
+            // A zero exit (or a stop-by-SIGINT) doesn't guarantee ffmpeg ever
+            // wrote the file — a bad device or a binary that exits early can
+            // leave nothing on disk. Catch that here rather than let it
+            // surface downstream as a confusing whisper error.
+            if (!wavWasWritten()) {
+              reject(new Error(`ffmpeg exited cleanly but the recording was never written: ${wavPath}`))
+              return
+            }
+            resolve(wavPath)
+          } else {
+            reject(new Error(outcome.reason))
+          }
         }
 
         if (outcome) {
