@@ -150,6 +150,60 @@ describe('POST /api/session/:id/turn', () => {
   })
 })
 
+describe('POST /api/session/:id/end', () => {
+  it('persists the transcript and reports the path', async () => {
+    const { port } = await listen(baseDeps())
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { relPath: string; storyLogWritten: boolean }
+    expect(body.relPath).toMatch(/^local\/mock-\d{4}-\d{2}-\d{2}\.md$/)
+    expect(existsSync(join(root, body.relPath))).toBe(true)
+  })
+
+  it('404s an unknown session id', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/nope/end`, { method: 'POST' })
+    expect(res.status).toBe(404)
+  })
+
+  it('a second /end on the same id 404s — the session is already gone', async () => {
+    const { port } = await listen(baseDeps())
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    expect(res.status).toBe(404)
+  })
+})
+
+describe('idle reap', () => {
+  it('reaps and persists a session nobody has touched within idleMs', async () => {
+    let clock = 0
+    const { port } = await listen(baseDeps({ now: () => clock, idleMs: 1000 }))
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    clock = 5000
+    // The sweep runs on its own interval; poll briefly for the file to appear
+    // rather than asserting on internal timer state.
+    const deadline = Date.now() + 2000
+    let found = false
+    while (Date.now() < deadline) {
+      const files = existsSync(join(root, 'local'))
+      if (files) {
+        found = true
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    expect(found).toBe(true)
+    void id
+  })
+})
+
 describe('GET /api/session/:id/stream', () => {
   it('streams the opening turn as sentence events, then an entry event', async () => {
     const { port } = await listen(

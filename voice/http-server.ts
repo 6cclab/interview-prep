@@ -83,6 +83,14 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   const now = deps.now ?? Date.now
   const transcode = deps.transcode ?? transcodeToWav
 
+  const idleMs = deps.idleMs ?? 5 * 60_000
+  const sweep = setInterval(() => {
+    for (const stored of store.reapIdle(now(), idleMs)) {
+      endAndPersist(deps, store, stored.id)
+    }
+  }, Math.min(idleMs, 30_000))
+  sweep.unref()
+
   return createServer((req: IncomingMessage, res: ServerResponse): void => {
     void handleRequest(req, res)
   })
@@ -107,6 +115,10 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       const session = createSession({ interviewer, now: () => now() })
       const scratchDir = mkdtempSync(join(tmpdir(), 'voice-web-'))
       const stored = store.create(session, interviewer, new Date(), scratchDir)
+      // `create()` stamps `lastActivity` with the real wall clock; put it on
+      // the injected clock instead so the idle sweep (which reads via
+      // `now()`) measures against the same timeline tests control.
+      store.touch(stored.id, now())
       sendJson(res, 201, { id: stored.id })
       return
     }
@@ -227,6 +239,28 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         }
         if (stored.session.endedEarly()) endAndPersist(deps, store, id)
       })()
+      return
+    }
+
+    const endMatch = /^\/api\/session\/([^/]+)\/end$/.exec(url.pathname)
+    if (req.method === 'POST' && endMatch) {
+      const id = endMatch[1]!
+      const stored = store.get(id)
+      if (!stored) {
+        notFound(res)
+        return
+      }
+      const { relPath, storyLogWritten } = finishSession(stored.session, stored.interviewer, {
+        root: deps.root,
+        track: 'mock',
+        startedAt: stored.startedAt,
+      })
+      if (stored.sseClient) {
+        writeSSE(stored.sseClient, 'ended', { endedEarly: stored.session.endedEarly() ?? null, relPath })
+        stored.sseClient.end()
+      }
+      store.remove(id)
+      sendJson(res, 200, { relPath, storyLogWritten })
       return
     }
 
