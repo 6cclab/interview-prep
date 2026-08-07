@@ -1,24 +1,121 @@
-import type { Recorder } from './audio'
 import type { Interviewer } from './interviewer'
+import type { Recorder } from './audio'
 import type { Speaker, Transcriber } from './speech'
-import type { Entry } from './transcript'
+import type { Track } from './context'
+import { appendStoryLog, formatSession, sessionPath, splitTrailer, writeSession, type Entry } from './transcript'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+const OPENING = 'Begin the interview.'
+
 /**
- * Common exit for every mid-session failure mode: keep the entries already
- * collected, append a synthetic marker naming what died, and flag the outcome
- * so a caller can't mistake this for a normal end. Shared by the interviewer,
- * recorder, and transcriber failure paths so all three produce one consistent
- * shape.
+ * The turn engine, extracted off the JS call stack `runSession` used to hold
+ * it on. `begin()` and `submitTurn()` both stream the interviewer's reply one
+ * speakable sentence at a time and commit exactly one interviewer `Entry` when
+ * the reply completes; `submitTurn()` additionally commits the Andre `Entry`
+ * for the text it was fed, immediately, before the interviewer replies. A
+ * failed turn — the interviewer's stream throwing or returning nothing —
+ * appends the same synthetic `[Session ended early — ...]` marker `runSession`
+ * has always produced, sets `endedEarly()`, and stops yielding; it does not
+ * throw, so both `runSession` and the HTTP routes can treat "the async
+ * iterable simply ended" and "it ended because of a failure" as the same
+ * shape, distinguished by checking `endedEarly()` afterwards.
  */
-function endEarly(entries: SessionOutcome, at: number, message: string): SessionOutcome {
-  entries.push({ speaker: 'interviewer', text: `[Session ended early — ${message}]`, at })
-  entries.endedEarly = message
-  console.error(`Voice session ended early: ${message}`)
-  return entries
+export interface Session {
+  /** The interviewer's first turn. No Andre entry is recorded for it. */
+  begin(): AsyncIterable<string>
+  /** Feed a transcribed turn; yields the interviewer's reply as speakable sentences. */
+  submitTurn(said: string): AsyncIterable<string>
+  /** The transcript so far. */
+  entries(): Entry[]
+  /** Set once a turn has failed; the message named in the synthetic entry. */
+  endedEarly(): string | undefined
+  /**
+   * Record a failure that happened before any text existed to feed
+   * `submitTurn` — a failed audio transcode or transcription. Produces the
+   * same synthetic entry and marker `submitTurn`'s own catch path does.
+   */
+  reportFailure(message: string): void
+}
+
+export interface CreateSessionOptions {
+  interviewer: Interviewer
+  /** Milliseconds since the session started. */
+  now(): number
+}
+
+export function createSession(opts: CreateSessionOptions): Session {
+  const entries: Entry[] = []
+  let earlyMarker: string | undefined
+
+  function reportFailure(message: string): void {
+    entries.push({ speaker: 'interviewer', text: `[Session ended early — ${message}]`, at: opts.now() })
+    earlyMarker = message
+    console.error(`Voice session ended early: ${message}`)
+  }
+
+  async function* runInterviewerTurn(said: string): AsyncIterable<string> {
+    const at = opts.now()
+    const spoken: string[] = []
+    try {
+      for await (const sentence of opts.interviewer.turn(said)) {
+        spoken.push(sentence)
+        yield sentence
+      }
+    } catch (error) {
+      reportFailure(errorMessage(error))
+      return
+    }
+    entries.push({ speaker: 'interviewer', text: spoken.join(' '), at })
+  }
+
+  return {
+    begin(): AsyncIterable<string> {
+      return runInterviewerTurn(OPENING)
+    },
+    submitTurn(said: string): AsyncIterable<string> {
+      entries.push({ speaker: 'andre', text: said, at: opts.now() })
+      return runInterviewerTurn(said)
+    },
+    entries: () => entries,
+    endedEarly: () => earlyMarker,
+    reportFailure,
+  }
+}
+
+/**
+ * Persist a session's transcript, and its story-log trailer for `mock`. This
+ * is the web path's equivalent of what `cli.ts` does inline once `runSession`
+ * returns; `cli.ts` is left calling `transcript.ts` directly and is untouched
+ * by this function's existence.
+ */
+export interface FinishOptions {
+  root: string
+  track: Track
+  problem?: string
+  startedAt: Date
+}
+
+export interface FinishResult {
+  relPath: string
+  storyLogWritten: boolean
+}
+
+export function finishSession(session: Session, interviewer: Interviewer, opts: FinishOptions): FinishResult {
+  const relPath = sessionPath(opts.track, opts.startedAt, opts.problem)
+  writeSession(opts.root, relPath, formatSession(session.entries(), opts.startedAt))
+
+  let storyLogWritten = false
+  if (opts.track === 'mock') {
+    const { log } = splitTrailer(interviewer.lastRaw())
+    if (log) {
+      appendStoryLog(opts.root, log)
+      storyLogWritten = true
+    }
+  }
+  return { relPath, storyLogWritten }
 }
 
 export interface SessionDeps {
@@ -32,46 +129,31 @@ export interface SessionDeps {
   now(): number
 }
 
-const OPENING = 'Begin the interview.'
-
-/**
- * `runSession`'s normal return value, widened with an optional marker. A mid-
- * session turn failure ends the session early rather than throwing, so the
- * entries collected so far still reach the caller (and the transcript still
- * gets written). `endedEarly` is how that caller can tell this apart from a
- * normal end — set on the array itself so callers that only care about the
- * entries (like `cli.ts`) can keep treating the return value as `Entry[]`.
- */
 export type SessionOutcome = Entry[] & { endedEarly?: string }
 
+function outcomeOf(session: Session): SessionOutcome {
+  const outcome = session.entries() as SessionOutcome
+  const marker = session.endedEarly()
+  if (marker) outcome.endedEarly = marker
+  return outcome
+}
+
 /**
- * One drill, start to finish. The interviewer speaks first; after that every
- * cycle is: record until Andre yields, transcribe, reply, speak the reply.
- *
- * `interviewer.turn()` throws on a stream failure or an empty reply, and
- * rolls back its own message history when it does. There is no retry policy
- * here — that's a decision nobody has made — so a failed turn simply ends the
- * session: the entries already collected are returned (not discarded), a
- * synthetic entry marks roughly where it happened, and `endedEarly` is set so
- * this can't be mistaken for a normal end.
+ * One drill, start to finish, driven over the shared `Session` turn engine.
+ * The interviewer speaks first; after that every cycle is: record until Andre
+ * yields, transcribe, feed the turn, speak the reply. Behaviour is unchanged
+ * from before the `Session` extraction — see `session.test.ts`, which is not
+ * modified by this refactor.
  */
 export async function runSession(deps: SessionDeps): Promise<SessionOutcome> {
-  const entries: SessionOutcome = []
-  let said = OPENING
+  const session = createSession({ interviewer: deps.interviewer, now: deps.now })
+
+  for await (const sentence of session.begin()) {
+    await deps.speaker.speak(sentence)
+  }
+  if (session.endedEarly()) return outcomeOf(session)
 
   for (;;) {
-    const at = deps.now()
-    const spoken: string[] = []
-    try {
-      for await (const sentence of deps.interviewer.turn(said)) {
-        spoken.push(sentence)
-        await deps.speaker.speak(sentence)
-      }
-    } catch (error) {
-      return endEarly(entries, at, errorMessage(error))
-    }
-    entries.push({ speaker: 'interviewer', text: spoken.join(' '), at })
-
     const recorder = deps.startRecording()
     const decision = await deps.nextTurn()
 
@@ -79,17 +161,23 @@ export async function runSession(deps: SessionDeps): Promise<SessionOutcome> {
     try {
       wavPath = await recorder.stop()
     } catch (error) {
-      return endEarly(entries, deps.now(), `recording failed: ${errorMessage(error)}`)
+      session.reportFailure(`recording failed: ${errorMessage(error)}`)
+      return outcomeOf(session)
     }
-    if (decision === 'end') return entries
+    if (decision === 'end') return outcomeOf(session)
 
-    const heardAt = deps.now()
+    let utteranceText: string
     try {
       const utterance = await deps.transcriber.transcribe(wavPath)
-      entries.push({ speaker: 'andre', text: utterance.text, at: heardAt })
-      said = utterance.text
+      utteranceText = utterance.text
     } catch (error) {
-      return endEarly(entries, heardAt, `transcription failed: ${errorMessage(error)}`)
+      session.reportFailure(`transcription failed: ${errorMessage(error)}`)
+      return outcomeOf(session)
     }
+
+    for await (const sentence of session.submitTurn(utteranceText)) {
+      await deps.speaker.speak(sentence)
+    }
+    if (session.endedEarly()) return outcomeOf(session)
   }
 }
