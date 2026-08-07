@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { isWhisperLogLine, parseWhisperOutput } from './speech'
+import { isWhisperLogLine, parseWhisperOutput, sayArgs } from './speech'
 
 describe('parseWhisperOutput', () => {
   it('joins timestamped segments into one utterance', () => {
@@ -111,5 +111,32 @@ describe('isWhisperLogLine', () => {
 
   it('recognises a ggml log line', () => {
     expect(isWhisperLogLine('ggml_metal_init: allocating')).toBe(true)
+  })
+})
+
+describe('sayArgs', () => {
+  it('passes just the text when no options are given', () => {
+    expect(sayArgs('hello there')).toEqual(['hello there'])
+  })
+
+  it('adds -v for a voice', () => {
+    expect(sayArgs('hello there', { voice: 'Alex' })).toEqual(['-v', 'Alex', 'hello there'])
+  })
+
+  it('adds -r for a rate', () => {
+    expect(sayArgs('hello there', { rate: 200 })).toEqual(['-r', '200', 'hello there'])
+  })
+
+  it('adds -a for an audio device, routing the interviewer to a chosen output', () => {
+    expect(sayArgs('hello there', { audioDevice: '75' })).toEqual(['-a', '75', 'hello there'])
+  })
+
+  it('combines voice, rate, and audio device, text always last', () => {
+    expect(sayArgs('hello there', { voice: 'Alex', rate: 200, audioDevice: '75' })).toEqual([
+      '-v', 'Alex',
+      '-r', '200',
+      '-a', '75',
+      'hello there',
+    ])
   })
 })

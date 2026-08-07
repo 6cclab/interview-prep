@@ -83,16 +83,35 @@ export function whisperTranscriber(opts: { binary: string; model: string }): Tra
   }
 }
 
+export interface SayOptions {
+  voice?: string
+  rate?: number
+  audioDevice?: string
+}
+
+/**
+ * Build the argv for macOS `say`. Pure so it can be tested without exercising
+ * the `execFile` subprocess — asserting on `say`'s audio would be testing
+ * third-party software, which is out of scope here.
+ *
+ * `-a <id>` selects the output device. It's a real, undocumented `say` flag
+ * (absent from `say --help`) — not a typo for a documented one.
+ */
+export function sayArgs(text: string, opts: SayOptions = {}): string[] {
+  const args: string[] = []
+  if (opts.voice) args.push('-v', opts.voice)
+  if (opts.rate) args.push('-r', String(opts.rate))
+  if (opts.audioDevice) args.push('-a', opts.audioDevice)
+  args.push(text)
+  return args
+}
+
 /** macOS `say`. Robotic but free and instant; swap this out, not the loop. */
-export function saySpeaker(opts: { voice?: string; rate?: number } = {}): Speaker {
+export function saySpeaker(opts: SayOptions = {}): Speaker {
   return {
     async speak(text: string): Promise<void> {
-      const args: string[] = []
-      if (opts.voice) args.push('-v', opts.voice)
-      if (opts.rate) args.push('-r', String(opts.rate))
-      args.push(text)
       try {
-        await run('say', args)
+        await run('say', sayArgs(text, opts))
       } catch (err) {
         throw new Error(
           `macOS \`say\` failed to speak text (voice: ${opts.voice ?? 'default'}, length: ${text.length})`,
