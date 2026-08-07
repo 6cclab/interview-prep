@@ -1,4 +1,4 @@
-export type Mode = 'idle' | 'listening-to-interviewer' | 'recording' | 'ended'
+export type Mode = 'idle' | 'listening-to-interviewer' | 'requesting-mic' | 'recording' | 'ended'
 
 /**
  * Mirrors `voice/transcript.ts`'s `Entry` shape as it arrives over the

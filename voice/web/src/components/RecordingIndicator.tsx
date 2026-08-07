@@ -5,11 +5,12 @@ interface Props {
   interviewerSpeaking: boolean
 }
 
-type Visual = 'idle' | 'speaking' | 'recording' | 'ended'
+type Visual = 'idle' | 'speaking' | 'requesting-mic' | 'recording' | 'ended'
 
 const LABEL: Record<Visual, string> = {
   idle: 'Ready',
   speaking: 'Interviewer',
+  'requesting-mic': 'Mic pending',
   recording: 'Recording',
   ended: 'Ended',
 }
@@ -17,12 +18,18 @@ const LABEL: Record<Visual, string> = {
 const ARIA_LABEL: Record<Visual, string> = {
   idle: 'Idle. Microphone is off.',
   speaking: 'The interviewer is speaking. Microphone is off.',
+  'requesting-mic': 'Requesting microphone access. You are not being recorded yet.',
   recording: 'Microphone is live. You are being recorded.',
   ended: 'The session has ended.',
 }
 
 function visualFor(mode: Mode, interviewerSpeaking: boolean): Visual {
   if (mode === 'recording') return 'recording'
+  // Distinct from `recording`: this is the state the fix in
+  // useVoiceSession.ts's `record` exists for — the mic has been asked for
+  // but `MediaRecorder.start()` has not run yet, so the UI must not claim a
+  // live mic (no pulsing ring, no "RECORDING" word) here.
+  if (mode === 'requesting-mic') return 'requesting-mic'
   if (mode === 'ended') return 'ended'
   if (mode === 'listening-to-interviewer' && interviewerSpeaking) return 'speaking'
   return 'idle'

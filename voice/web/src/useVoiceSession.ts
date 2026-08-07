@@ -46,6 +46,29 @@ function mediaDevicesUnsupported(): boolean {
   return typeof navigator === 'undefined' || navigator.mediaDevices === undefined
 }
 
+// A cached stream can go bad without an explicit error: the device can be
+// unplugged, or the OS can revoke access mid-session. `active` flips false
+// and/or the audio track's `readyState` flips to `'ended'` when that
+// happens; either is a signal to re-acquire rather than hand a dead stream
+// to a new MediaRecorder.
+function streamIsLive(stream: MediaStream | null): stream is MediaStream {
+  return stream !== null && stream.active && stream.getAudioTracks().some((track) => track.readyState === 'live')
+}
+
+// How long `getUserMedia` gets before the watchdog in `acquireStream` below
+// stops being patient and names a cause. Short enough that a genuinely stuck
+// permission prompt (the reported symptom) doesn't read as a frozen page for
+// long, long enough that a normal "click Allow" pause never trips it.
+const MIC_WATCHDOG_MS = 4000
+
+const MIC_WATCHDOG_MESSAGE =
+  'Still waiting for microphone access. If Chrome never showed a permission prompt, this is almost ' +
+  "always one of two things: this origin's own microphone permission is blocked or was previously " +
+  'dismissed — check chrome://settings/content/microphone (permissions are per-origin, so a ' +
+  'different port counts as a different site) — or Chrome itself lacks microphone access at the OS ' +
+  'level (macOS: System Settings → Privacy & Security → Microphone). This request is still pending ' +
+  'and will proceed on its own if access is granted.'
+
 export function useVoiceSession(): VoiceSession {
   const [mode, setMode] = useState<Mode>('idle')
   const [status, setStatus] = useState('Idle.')
@@ -60,6 +83,11 @@ export function useVoiceSession(): VoiceSession {
   const eventSourceRef = useRef<EventSource | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
+  // Acquired once per session (see `start`) and reused for every turn's
+  // MediaRecorder — this is the fix for the "prompts every turn" complaint.
+  // Only released at session end or unmount (`releaseMicStream`), never
+  // between turns.
+  const mediaStreamRef = useRef<MediaStream | null>(null)
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const modeRef = useRef<Mode>(mode)
   modeRef.current = mode
@@ -68,6 +96,40 @@ export function useVoiceSession(): VoiceSession {
     if (elapsedTimerRef.current !== null) {
       clearInterval(elapsedTimerRef.current)
       elapsedTimerRef.current = null
+    }
+  }, [])
+
+  // Stops the cached stream's tracks and drops the reference. Called at
+  // session end and on unmount — deliberately never between turns, which is
+  // the behavior this whole fix replaces.
+  const releaseMicStream = useCallback(() => {
+    const stream = mediaStreamRef.current
+    if (stream) {
+      for (const track of stream.getTracks()) track.stop()
+    }
+    mediaStreamRef.current = null
+  }, [])
+
+  // Requests the microphone, watching for the permission prompt hanging
+  // indefinitely (the reported symptom): after `MIC_WATCHDOG_MS`, the status
+  // line gets replaced with actionable text, but the original promise is
+  // never abandoned or raced against a fabricated rejection — if the user
+  // grants access late, this still resolves normally and the caller
+  // proceeds as if nothing happened.
+  const acquireStream = useCallback(async (): Promise<MediaStream | null> => {
+    if (mediaDevicesUnsupported()) return null
+
+    const watchdog = setTimeout(() => setStatus(MIC_WATCHDOG_MESSAGE), MIC_WATCHDOG_MS)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      clearTimeout(watchdog)
+      mediaStreamRef.current = stream
+      return stream
+    } catch (error) {
+      clearTimeout(watchdog)
+      const message = error instanceof Error ? error.message : String(error)
+      setStatus(`Microphone access failed: ${message}. You can still hear the interviewer; press the button to try again when you answer.`)
+      return null
     }
   }, [])
 
@@ -107,8 +169,9 @@ export function useVoiceSession(): VoiceSession {
       setInterimInterviewerText('')
       es.close()
       setMode('ended')
+      releaseMicStream()
     })
-  }, [])
+  }, [releaseMicStream])
 
   const start = useCallback(() => {
     setSessionConflict(false)
@@ -127,8 +190,18 @@ export function useVoiceSession(): VoiceSession {
       setInterimInterviewerText('')
       connectStream(id)
       setMode('listening-to-interviewer')
+
+      // Acquire the microphone here, on this call's real user gesture
+      // (clicking "Start session"), rather than waiting for the first
+      // "Record your answer" press. This is what makes reuse across turns
+      // possible at all, and it also means a mic problem surfaces before
+      // Andre is ever asked to speak. Deliberately fire-and-forget: a
+      // failure (surfaced via `status` inside `acquireStream`) must not
+      // block the session — the interviewer's opening question should
+      // still play.
+      if (!mediaDevicesUnsupported()) void acquireStream()
     })()
-  }, [connectStream])
+  }, [connectStream, acquireStream])
 
   // Recovery path for a 409 that would otherwise be a dead end: there is no
   // client-known id for the stuck session (POST /api/session's 409 body
@@ -145,10 +218,6 @@ export function useVoiceSession(): VoiceSession {
   }, [])
 
   const record = useCallback(() => {
-    // Feedback the instant the button is pressed: getUserMedia can hang on a
-    // slow permission prompt, or reject outright, and with no state change
-    // here the page looks dead for however long that takes.
-    setMode('recording')
     setElapsedSeconds(0)
 
     if (mediaDevicesUnsupported()) {
@@ -156,21 +225,28 @@ export function useVoiceSession(): VoiceSession {
         'Microphone access is unavailable: this page is not running in a secure context ' +
           '(Safari does not treat http://localhost as one). Try Chrome or Firefox, or serve this over HTTPS.',
       )
-      setMode('listening-to-interviewer')
       return
     }
 
-    setStatus('Requesting microphone access…')
-
     void (async () => {
-      let stream: MediaStream
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        setStatus(`Microphone access failed: ${message}. Click to try again.`)
-        setMode('listening-to-interviewer')
-        return
+      // Reuse the stream acquired in `start`, unless it's gone bad (device
+      // unplugged, track ended) — then fall back to a fresh request instead
+      // of handing a dead stream to MediaRecorder. Most turns take this
+      // branch and skip straight to recording with no prompt at all.
+      let stream = mediaStreamRef.current
+      if (!streamIsLive(stream)) {
+        // Honest feedback for the case that DOES have to wait on the
+        // browser: distinct from `'recording'` so the indicator/button never
+        // claim a live mic before one exists. Getting this wrong — flipping
+        // to `'recording'` before permission is granted — is the bug this
+        // fix replaces.
+        setMode('requesting-mic')
+        setStatus('Requesting microphone access…')
+        stream = await acquireStream()
+        if (!stream) {
+          setMode('listening-to-interviewer')
+          return
+        }
       }
 
       recordedChunksRef.current = []
@@ -180,6 +256,9 @@ export function useVoiceSession(): VoiceSession {
         if (event.data.size > 0) recordedChunksRef.current.push(event.data)
       }
       recorder.start()
+      // Only now — after `MediaRecorder.start()` has actually been called —
+      // does the UI claim to be recording.
+      setMode('recording')
       setStatus('Recording. Press the button when you are done.')
 
       // Display only. This interval NEVER calls `recorder.stop()` — turn-
@@ -192,7 +271,7 @@ export function useVoiceSession(): VoiceSession {
         setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
       }, 1000)
     })()
-  }, [])
+  }, [acquireStream])
 
   const stopAndSubmit = useCallback(() => {
     clearElapsedTimer()
@@ -204,7 +283,11 @@ export function useVoiceSession(): VoiceSession {
       })
       recorder.stop()
       await stopped
-      for (const track of recorder.stream.getTracks()) track.stop()
+      // Deliberately NOT stopping `recorder.stream`'s tracks here — that
+      // stream is cached in `mediaStreamRef` and reused for the next turn
+      // (see `record`/`acquireStream`). Tracks are stopped only at session
+      // end or unmount (`releaseMicStream`); stopping them per-turn is what
+      // forced a fresh permission-adjacent `getUserMedia` call every turn.
 
       const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType })
       setStatus('Transcribing…')
@@ -219,12 +302,13 @@ export function useVoiceSession(): VoiceSession {
         const { error } = (await res.json()) as { error: string }
         setStatus(`Turn failed: ${error}`)
         setMode('ended')
+        releaseMicStream()
         return
       }
       setMode('listening-to-interviewer')
       setStatus('Your turn was received.')
     })()
-  }, [clearElapsedTimer])
+  }, [clearElapsedTimer, releaseMicStream])
 
   useEffect(() => {
     const handler = (): void => {
@@ -240,6 +324,7 @@ export function useVoiceSession(): VoiceSession {
   }, [])
 
   useEffect(() => clearElapsedTimer, [clearElapsedTimer])
+  useEffect(() => releaseMicStream, [releaseMicStream])
 
   return {
     mode,

@@ -301,6 +301,23 @@ main {
   }
 }
 
+/* requesting-mic: the button has been pressed and the browser is being
+   asked for the microphone, but recording has NOT started — deliberately
+   styled to look neither idle nor like `recording` (no accent color, no
+   "RECORDING" word) so it can never be mistaken for a live mic. */
+.indicator--requesting-mic .indicator__ring {
+  border-color: var(--text-muted);
+  background: var(--surface-sunken);
+}
+.indicator--requesting-mic .indicator__label {
+  color: var(--text-muted);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .indicator--requesting-mic .indicator__dot {
+    animation: speaking-breathe 1.6s ease-in-out infinite;
+  }
+}
+
 /* recording: the single most important state in the app. Large, high
    contrast, animated (with a static fallback under reduced motion), and
    backed up by the full-width accent bar and the "REC" label so it reads

@@ -14,6 +14,8 @@ function primaryLabel(mode: Mode): string {
   switch (mode) {
     case 'listening-to-interviewer':
       return 'Record your answer'
+    case 'requesting-mic':
+      return 'Requesting microphone…'
     case 'recording':
       return 'Done — send turn'
     case 'idle':
@@ -114,7 +116,13 @@ export default function App() {
         </section>
 
         <div className="controls">
-          <button type="button" className="primary-button" data-mode={mode} onClick={onPrimaryAction}>
+          <button
+            type="button"
+            className="primary-button"
+            data-mode={mode}
+            disabled={mode === 'requesting-mic'}
+            onClick={onPrimaryAction}
+          >
             {primaryLabel(mode)}
             <kbd className="primary-button__hint" aria-hidden="true">
               Space
