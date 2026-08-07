@@ -58,6 +58,87 @@ describe('splitTrailer', () => {
     const partial = '```story-log\ncompetency: Conflict\n```'
     expect(splitTrailer(partial).log).toBeNull()
   })
+
+  it('strips every story-log block, keeping only the first for parsing', () => {
+    const retried = [
+      'That result never landed. Cut the middle minute.',
+      '',
+      '```story-log',
+      'competency: Conflict',
+      'story: Redis migration',
+      'worked: named the tradeoff out loud',
+      'fix: no number in the result',
+      '```',
+      '',
+      '```story-log',
+      'competency: Ambiguity',
+      'story: something else',
+      'worked: unclear',
+      'fix: unclear',
+      '```',
+    ].join('\n')
+    const result = splitTrailer(retried)
+    expect(result.spoken).not.toContain('```')
+    expect(result.spoken).not.toContain('competency:')
+    expect(result.spoken).toBe('That result never landed. Cut the middle minute.')
+    expect(result.log).toEqual({
+      competency: 'Conflict',
+      story: 'Redis migration',
+      worked: 'named the tradeoff out loud',
+      fix: 'no number in the result',
+    })
+  })
+
+  it('suppresses an unclosed trailer fence from spoken text', () => {
+    const truncated = [
+      'That result never landed. Cut the middle minute.',
+      '',
+      '```story-log',
+      'competency: Conflict',
+      'story: Redis migration',
+    ].join('\n')
+    const result = splitTrailer(truncated)
+    expect(result.spoken).toBe('That result never landed. Cut the middle minute.')
+    expect(result.log).toBeNull()
+  })
+
+  it('keeps prose before and after a well-formed trailer', () => {
+    const wrapped = [
+      'Opening remark.',
+      '',
+      '```story-log',
+      'competency: Conflict',
+      'story: Redis migration',
+      'worked: named the tradeoff out loud',
+      'fix: no number in the result',
+      '```',
+      '',
+      'Closing remark.',
+    ].join('\n')
+    const result = splitTrailer(wrapped)
+    expect(result.spoken).toContain('Opening remark.')
+    expect(result.spoken).toContain('Closing remark.')
+    expect(result.spoken).not.toContain('```')
+  })
+
+  it('parses a field value that itself contains a colon', () => {
+    const colonValue = [
+      'Some remark.',
+      '',
+      '```story-log',
+      'competency: Conflict',
+      'story: Redis: the migration',
+      'worked: named the tradeoff out loud',
+      'fix: no number in the result',
+      '```',
+    ].join('\n')
+    expect(splitTrailer(colonValue).log).toEqual({
+      competency: 'Conflict',
+      story: 'Redis: the migration',
+      worked: 'named the tradeoff out loud',
+      fix: 'no number in the result',
+    })
+  })
 })
 
 describe('formatSession', () => {
@@ -119,5 +200,20 @@ describe('appendStoryLog', () => {
     const body = readFileSync(join(root, 'local/stories.md'), 'utf8')
     expect(body).toContain('## Ambiguity')
     expect(body).toContain('## Conflict')
+  })
+
+  it('does not open a fresh file with a leading blank line', () => {
+    appendStoryLog(root, log)
+    const body = readFileSync(join(root, 'local/stories.md'), 'utf8')
+    expect(body.startsWith('\n')).toBe(false)
+  })
+
+  it('keeps entries separated when appending to an existing file', () => {
+    mkdirSync(join(root, 'local'), { recursive: true })
+    writeFileSync(join(root, 'local/stories.md'), '## Ambiguity\n\nexisting\n')
+    appendStoryLog(root, log)
+    const body = readFileSync(join(root, 'local/stories.md'), 'utf8')
+    expect(body).not.toContain('existing\n## Conflict')
+    expect(body).toContain('existing\n\n## Conflict')
   })
 })

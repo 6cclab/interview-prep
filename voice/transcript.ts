@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Track } from './context'
 
@@ -16,7 +16,8 @@ export interface StoryLog {
   fix: string
 }
 
-const TRAILER = /```story-log\n([\s\S]*?)```/
+const TRAILER = /```story-log\n([\s\S]*?)```/g
+const OPEN_MARKER = /```story-log\n/
 
 /**
  * Separate the interviewer's spoken words from the structured trailer it emits
@@ -25,7 +26,15 @@ const TRAILER = /```story-log\n([\s\S]*?)```/
  */
 export function splitTrailer(text: string): { spoken: string; log: StoryLog | null } {
   const match = TRAILER.exec(text)
-  if (!match) return { spoken: text.trim(), log: null }
+  TRAILER.lastIndex = 0
+
+  if (!match) {
+    // No well-formed block. If an opening marker is present, the trailer was
+    // truncated mid-block — suppress it and everything after it from speech.
+    const open = OPEN_MARKER.exec(text)
+    if (open) return { spoken: text.slice(0, open.index).trim(), log: null }
+    return { spoken: text.trim(), log: null }
+  }
 
   const fields = new Map<string, string>()
   for (const line of match[1]!.split('\n')) {
@@ -81,8 +90,9 @@ export function writeSession(root: string, relPath: string, body: string): void 
 export function appendStoryLog(root: string, log: StoryLog): void {
   const full = join(root, 'local/stories.md')
   mkdirSync(dirname(full), { recursive: true })
+  const hasExistingContent = existsSync(full) && readFileSync(full, 'utf8').length > 0
   const entry = [
-    '',
+    ...(hasExistingContent ? [''] : []),
     `## ${log.competency}`,
     '',
     `**Story.** ${log.story}`,
