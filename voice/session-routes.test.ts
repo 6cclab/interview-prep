@@ -170,6 +170,36 @@ describe('GET /api/session/:id', () => {
     expect(res.status).toBe(404)
   })
 
+  // The naming scheme separates transcripts by start time to the minute, which
+  // is not a uniqueness guarantee: "End it and start fresh" (the stuck-session
+  // banner) ends one session and immediately starts another, so two can share a
+  // stamp. `writeSession`'s refusal to overwrite is what keeps that safe, and
+  // this drives the whole flow through the real routes rather than trusting the
+  // unit test of the fallback in isolation.
+  it('keeps both transcripts when a session is ended and restarted inside the same minute', async () => {
+    let n = 0
+    const store = createSessionStore(() => `session-${++n}`)
+    const { port } = await listen(baseDeps({ store }))
+
+    const firstCreate = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id: firstId } = (await firstCreate.json()) as { id: string }
+    const firstEnd = await fetch(`http://127.0.0.1:${port}/api/session/${firstId}/end`, { method: 'POST' })
+    const { relPath: firstPath } = (await firstEnd.json()) as { relPath: string }
+
+    const secondCreate = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    expect(secondCreate.status).toBe(201)
+    const { id: secondId } = (await secondCreate.json()) as { id: string }
+    const secondEnd = await fetch(`http://127.0.0.1:${port}/api/session/${secondId}/end`, { method: 'POST' })
+    const { relPath: secondPath } = (await secondEnd.json()) as { relPath: string }
+
+    // Two distinct files, both still on disk, and each reported path is the one
+    // that actually exists — a reported path that isn't there is the specific
+    // way this fix could half-work.
+    expect(secondPath).not.toBe(firstPath)
+    expect(existsSync(join(root, firstPath))).toBe(true)
+    expect(existsSync(join(root, secondPath))).toBe(true)
+  })
+
   // The whole point of reopening: the entries survive so a reattached client can
   // render the transcript it missed, and reattaching does not disturb them.
   it('keeps reporting the full transcript across a reconnect', async () => {

@@ -65,10 +65,14 @@ function clock(ms: number): string {
  *
  * The date alone is not a unique name: two drills on the same day resolved to
  * the same path, and `writeSession` overwrites, so the second silently
- * destroyed the first. Two sessions cannot start within the same minute (only
- * one may be active at a time, and each opens with a spoken question), so
- * minute precision is enough to make the name unique without making it
- * unreadable.
+ * destroyed the first. Minute precision separates ordinary back-to-back drills
+ * while staying readable.
+ *
+ * It is not a uniqueness *guarantee*, and nothing here should be read as one:
+ * ending a session and starting another inside the same minute is a supported
+ * flow (the stuck-session banner's "End it and start fresh" does exactly that),
+ * so two sessions can legitimately share a stamp. `writeSession`'s refusal to
+ * overwrite is what makes that safe — this only keeps the common case tidy.
  */
 function isoStamp(at: Date): string {
   const iso = at.toISOString()
@@ -113,8 +117,12 @@ export function writeSession(root: string, relPath: string, body: string): strin
 
 function firstFreePath(full: string): string {
   if (!existsSync(full)) return full
+  // `> lastSep + 1`, not `> lastSep`: a leading dot makes a dotfile, not an
+  // extension, so `.hidden` must suffix to `.hidden-2` rather than splitting
+  // into an empty stem and a `.hidden` extension.
   const dot = full.lastIndexOf('.')
-  const [stem, ext] = dot > full.lastIndexOf(sep) ? [full.slice(0, dot), full.slice(dot)] : [full, '']
+  const lastSep = full.lastIndexOf(sep)
+  const [stem, ext] = dot > lastSep + 1 ? [full.slice(0, dot), full.slice(dot)] : [full, '']
   for (let n = 2; ; n++) {
     const candidate = `${stem}-${n}${ext}`
     if (!existsSync(candidate)) return candidate

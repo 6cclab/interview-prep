@@ -209,6 +209,16 @@ describe('writeSession', () => {
     const third = writeSession(root, 'local/mock-2026-08-07-1000.md', 'THIRD')
     expect(third).toBe('local/mock-2026-08-07-1000-3.md')
   })
+
+  // A dotfile's leading dot is not an extension. Not reachable from any current
+  // caller, but this function's whole job is protecting data that cannot be
+  // recovered, so it should not have a shape that quietly produces nonsense.
+  it('suffixes a name with no extension, and a dotfile, without mangling it', () => {
+    writeSession(root, 'local/notes', 'FIRST')
+    expect(writeSession(root, 'local/notes', 'SECOND')).toBe('local/notes-2')
+    writeSession(root, 'local/.hidden', 'FIRST')
+    expect(writeSession(root, 'local/.hidden', 'SECOND')).toBe('local/.hidden-2')
+  })
 })
 
 describe('appendStoryLog', () => {
