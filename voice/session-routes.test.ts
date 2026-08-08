@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Server } from 'node:http'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
@@ -625,7 +625,7 @@ describe('POST /api/session/:id/end', () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
     expect(res.status).toBe(200)
     const body = (await res.json()) as { relPath: string; storyLogWritten: boolean }
-    expect(body.relPath).toMatch(/^local\/mock-\d{4}-\d{2}-\d{2}\.md$/)
+    expect(body.relPath).toMatch(/^local\/mock-\d{4}-\d{2}-\d{2}-\d{4}\.md$/)
     expect(existsSync(join(root, body.relPath))).toBe(true)
   })
 
@@ -733,8 +733,12 @@ describe('GET /api/session/:id/stream', () => {
 
     // Give the server's 'close' handler a tick to run and persist.
     await new Promise((resolve) => setTimeout(resolve, 50))
-    const relPath = join(root, 'local/mock-' + new Date().toISOString().slice(0, 10) + '.md')
-    expect(existsSync(relPath)).toBe(true)
+    // Matched by prefix rather than by exact name: the transcript is named from
+    // the session's real start time down to the minute, which this test does not
+    // control. What it is asserting is that a disconnect persisted *something*.
+    const today = new Date().toISOString().slice(0, 10)
+    const written = readdirSync(join(root, 'local')).filter((name) => name.startsWith(`mock-${today}`))
+    expect(written).toHaveLength(1)
   })
 
   it('a second connection ends the previous response instead of leaving it open', async () => {

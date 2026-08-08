@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Server } from 'node:http'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, startVoiceServer } from './http-server'
@@ -8,6 +8,35 @@ import { readSSE } from './test-helpers/sse'
 
 let server: Server | undefined
 let distDir: string | undefined
+let root: string
+
+/**
+ * A throwaway repo root, seeded with just the files `context.ts` reads.
+ *
+ * These tests must NOT be rooted at `process.cwd()`. Ending a session persists
+ * its transcript to `<root>/local/`, so a real-repo root made the suite write
+ * into Andre's actual drill log on every run — and because a mock transcript
+ * used to be named by date alone, that overwrote any real session from the same
+ * day. Note the clock is a separate concern: the point of the tests below is
+ * that they run the *unmodified production clock*, and a temp root does not
+ * weaken that at all.
+ */
+function seededRoot(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'voice-http-'))
+  const seed = (relPath: string, body: string) => {
+    const full = join(dir, relPath)
+    mkdirSync(join(full, '..'), { recursive: true })
+    writeFileSync(full, body)
+  }
+  seed('.claude/commands/mock.md', 'MOCK COMMAND')
+  seed('behavioral/competencies.md', '# C\n\n## Conflict\n\nbody\n')
+  seed('behavioral/questions.md', 'QUESTIONS')
+  return dir
+}
+
+beforeEach(() => {
+  root = seededRoot()
+})
 
 afterEach(async () => {
   // A test can leave an SSE connection open on purpose without ever aborting
@@ -20,6 +49,7 @@ afterEach(async () => {
   server = undefined
   if (distDir) rmSync(distDir, { recursive: true, force: true })
   distDir = undefined
+  rmSync(root, { recursive: true, force: true })
 })
 
 /** A small fixture dist directory, standing in for a real `vite build` output. */
@@ -46,7 +76,7 @@ describe('createVoiceServer', () => {
   // that the server binds itself to 127.0.0.1.
   it('binds to 127.0.0.1, never 0.0.0.0', async () => {
     server = await startVoiceServer({
-      root: process.cwd(),
+      root,
       createTransport: () => async function* () {},
       transcriber: { transcribe: async () => ({ text: '' }) },
     })
@@ -56,7 +86,7 @@ describe('createVoiceServer', () => {
 
   it('serves the page at GET /', async () => {
     server = createVoiceServer({
-      root: process.cwd(),
+      root,
       distDir: fixtureDistDir(),
       createTransport: () => async function* () {},
       transcriber: { transcribe: async () => ({ text: '' }) },
@@ -70,7 +100,7 @@ describe('createVoiceServer', () => {
 
   it('404s an unknown path', async () => {
     server = createVoiceServer({
-      root: process.cwd(),
+      root,
       distDir: fixtureDistDir(),
       createTransport: () => async function* () {},
       transcriber: { transcribe: async () => ({ text: '' }) },
@@ -94,7 +124,7 @@ describe('createVoiceServer', () => {
   // constructs it.
   it('stamps Entry.at with elapsed time from the unmodified production clock, not epoch time', async () => {
     server = createVoiceServer({
-      root: process.cwd(),
+      root,
       createTransport: () => async function* () {
         yield 'Tell me about a time you disagreed with a decision.'
       },
@@ -130,7 +160,7 @@ describe('createVoiceServer', () => {
   // clock, and holds both sessions to the same near-zero bound.
   it('does not let a second sequential session inherit the first session elapsed time', async () => {
     server = createVoiceServer({
-      root: process.cwd(),
+      root,
       createTransport: () => async function* () {
         yield 'Ready when you are.'
       },
@@ -295,7 +325,7 @@ describe('server-side TTS (deps.speaker)', () => {
     }
 
     server = createVoiceServer({
-      root: process.cwd(),
+      root,
       createTransport: () => async function* () {
         // Trailing spaces matter here: `SentenceBuffer` (chunk.ts) only
         // confirms a sentence boundary once whitespace follows the
@@ -340,7 +370,7 @@ describe('server-side TTS (deps.speaker)', () => {
     }
 
     server = createVoiceServer({
-      root: process.cwd(),
+      root,
       createTransport: () => async function* () {
         yield 'Tell me about a time you disagreed with a decision.'
       },

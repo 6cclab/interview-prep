@@ -317,7 +317,7 @@ describe('finishSession', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('writes the transcript to local/mock-<date>.md', () => {
+  it('writes the transcript to local/mock-<date>-<hhmm>.md', () => {
     const session = createSession({ interviewer: { turn: async function* () {}, lastRaw: () => '' }, now: () => 0 })
     session.submitTurn('Ready latency.', 0)
     const startedAt = new Date('2026-08-07T10:00:00.000Z')
@@ -326,7 +326,7 @@ describe('finishSession', () => {
       track: 'mock',
       startedAt,
     })
-    expect(relPath).toBe('local/mock-2026-08-07.md')
+    expect(relPath).toBe('local/mock-2026-08-07-1000.md')
     expect(readFileSync(join(root, relPath), 'utf8')).toContain('Ready latency.')
   })
 
