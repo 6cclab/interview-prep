@@ -10,13 +10,15 @@ export interface VoiceSession {
   /** True while the interviewer's reply is actively streaming in as sentences. Display only. */
   interviewerSpeaking: boolean
   /**
-   * Sentences of the interviewer's in-progress reply, joined so far. Cleared
-   * the moment the matching `entry` event lands with the full, final text —
-   * this exists purely so the transcript can show the reply arriving
-   * progressively rather than popping in all at once. Never a source of
-   * truth: `entries` (built only from `entry` events) is.
+   * Sentences of the interviewer's in-progress reply, one per `sentence` SSE
+   * event, oldest first. Cleared the moment the matching `entry` event lands
+   * with the full, final text — this exists purely so the transcript can
+   * show the reply arriving progressively, one animated sentence at a time
+   * (per the handoff's `sentenceIn` treatment), rather than popping in all at
+   * once. Never a source of truth: `entries` (built only from `entry`
+   * events) is.
    */
-  interimInterviewerText: string
+  interimSentences: string[]
   /** True when this browser cannot offer microphone access at all (see `mediaDevicesUnsupported`). */
   micUnsupported: boolean
   /** True after a 409 from POST /api/session — an existing session is stuck. */
@@ -41,6 +43,8 @@ export interface VoiceSession {
   start(): void
   record(): void
   stopAndSubmit(): void
+  /** The dock's "End session" action — ends the current session, wherever it is in its turn cycle. */
+  endSession(): void
   /**
    * Recovery path for `sessionConflict`: force-ends whatever session is
    * stuck, then immediately starts a fresh one — this is what makes the
@@ -112,7 +116,7 @@ export function useVoiceSession(): VoiceSession {
   const [entries, setEntries] = useState<Entry[]>([])
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [interviewerSpeaking, setInterviewerSpeaking] = useState(false)
-  const [interimInterviewerText, setInterimInterviewerText] = useState('')
+  const [interimSentences, setInterimSentences] = useState<string[]>([])
   const [sessionConflict, setSessionConflict] = useState(false)
   const [micUnsupported] = useState(mediaDevicesUnsupported)
   const [micFailureKind, setMicFailureKind] = useState<'denied' | 'nodevice' | null>(null)
@@ -183,11 +187,11 @@ export function useVoiceSession(): VoiceSession {
       const { text } = JSON.parse((event as MessageEvent<string>).data) as { text: string }
       setStatus('Interviewer speaking…')
       setInterviewerSpeaking(true)
-      // Accumulates for the *current* reply only — cleared below the moment
-      // the matching `entry` lands. Display only, same spoiler boundary as
+      // Appends for the *current* reply only — cleared below the moment the
+      // matching `entry` lands. Display only, same spoiler boundary as
       // `entries`: this text originates from the same `sentence` payload the
       // server already sends, nothing new is exposed.
-      setInterimInterviewerText((prev) => (prev ? `${prev} ${text}` : text))
+      setInterimSentences((prev) => [...prev, text])
       void speak(text)
     })
 
@@ -200,14 +204,14 @@ export function useVoiceSession(): VoiceSession {
       const entry = JSON.parse((event as MessageEvent<string>).data) as Entry
       setEntries((prev) => [...prev, entry])
       setInterviewerSpeaking(false)
-      setInterimInterviewerText('')
+      setInterimSentences([])
     })
 
     es.addEventListener('ended', (event) => {
       const { endedEarly } = JSON.parse((event as MessageEvent<string>).data) as { endedEarly: string | null }
       setStatus(endedEarly ? `Session ended early: ${endedEarly}` : 'Session ended.')
       setInterviewerSpeaking(false)
-      setInterimInterviewerText('')
+      setInterimSentences([])
       es.close()
       setMode('ended')
       releaseMicStream()
@@ -230,7 +234,7 @@ export function useVoiceSession(): VoiceSession {
       sessionIdRef.current = id
       setEntries([])
       setInterviewerSpeaking(false)
-      setInterimInterviewerText('')
+      setInterimSentences([])
       connectStream(id)
       setMode('listening-to-interviewer')
 
@@ -262,6 +266,18 @@ export function useVoiceSession(): VoiceSession {
       start()
     })()
   }, [start])
+
+  // The dock's "End session" action. Reuses the same `POST /turn`-adjacent
+  // endpoint the `beforeunload` handler below already fires via
+  // `sendBeacon` (`/api/session/:id/end`) — the server's response is the
+  // `ended` SSE event `connectStream` already listens for, which is what
+  // actually flips `mode` to `'ended'` and releases the mic stream. No new
+  // server surface needed for this.
+  const endSession = useCallback(() => {
+    const id = sessionIdRef.current
+    if (!id) return
+    void fetch(`/api/session/${id}/end`, { method: 'POST' })
+  }, [])
 
   const record = useCallback(() => {
     setElapsedSeconds(0)
@@ -403,7 +419,7 @@ export function useVoiceSession(): VoiceSession {
     entries,
     elapsedSeconds,
     interviewerSpeaking,
-    interimInterviewerText,
+    interimSentences,
     micUnsupported,
     sessionConflict,
     micFailureKind,
@@ -413,6 +429,7 @@ export function useVoiceSession(): VoiceSession {
     start,
     record,
     stopAndSubmit,
+    endSession,
     forceEndStuckSession,
   }
 }

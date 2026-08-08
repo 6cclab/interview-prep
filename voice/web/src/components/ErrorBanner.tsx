@@ -1,32 +1,37 @@
-interface Action {
+import { Button } from 'brutalkit/button'
+
+export interface ErrorAction {
   label: string
+  variant: 'brand' | 'outline' | 'ghost'
   onClick(): void
 }
 
 interface Props {
-  message: string
-  action?: Action
+  title: string
+  body: string
+  actions: ErrorAction[]
 }
 
-// Errors are first-class: every one of them says what happened and gives a
-// way out, rather than the silent dead ends that made the previous UI
-// unusable. `role="alert"` makes this an assertive live region on its own,
-// so it's announced the instant it appears without a separate aria-live wire-up.
-export function ErrorBanner({ message, action }: Props) {
+// Errors are never silent and never dead ends: each states what happened and
+// carries at least one recovery action that genuinely does something (see
+// App.tsx's `errorActions` for what each of the four real failure paths can
+// and cannot offer). The title is pushed to the assertive live region by the
+// caller — this component only renders it.
+export function ErrorBanner({ title, body, actions }: Props) {
   return (
-    <div className="error-banner" role="alert">
-      <svg className="error-banner__icon" aria-hidden="true" viewBox="0 0 20 20" width="20" height="20">
-        <path
-          fill="currentColor"
-          d="M10 1.5 19 17.5H1L10 1.5Zm0 5.5a1 1 0 0 0-1 1v4a1 1 0 0 0 2 0V8a1 1 0 0 0-1-1Zm0 8a1.15 1.15 0 1 0 0-2.3 1.15 1.15 0 0 0 0 2.3Z"
-        />
-      </svg>
-      <p className="error-banner__message">{message}</p>
-      {action && (
-        <button type="button" className="error-banner__action" onClick={action.onClick}>
-          {action.label}
-        </button>
-      )}
+    <div className="error-banner">
+      <div className="error-banner__rule" aria-hidden="true" />
+      <div className="error-banner__content">
+        <div className="error-banner__title">{title}</div>
+        <p className="error-banner__body">{body}</p>
+        <div className="error-banner__actions">
+          {actions.map((action) => (
+            <Button key={action.label} variant={action.variant} size="sm" onClick={action.onClick}>
+              {action.label}
+            </Button>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

@@ -3,74 +3,161 @@ import type { Entry } from '../types'
 
 interface Props {
   entries: Entry[]
-  /** The interviewer's reply-in-progress, joined sentence by sentence. See useVoiceSession.ts. */
-  interimText: string
+  /** Sentences of the interviewer's in-progress reply — see useVoiceSession.ts's `interimSentences`. */
+  interimSentences: string[]
+  /** True while the interviewer's reply is actively streaming (drives the blinking caret). */
+  streaming: boolean
+  /** `entries[i]`'s rendered metadata — "N:NN spoken" for candidate turns, wall-clock for interviewer turns. See App.tsx. */
+  meta: string[]
 }
 
-// How close to the bottom (px) still counts as "at the bottom" for the
-// purposes of auto-scrolling. Generous enough to absorb sub-pixel rounding
-// and the last turn's own height without feeling sticky.
-const STICK_THRESHOLD_PX = 48
+// How close to the bottom (px) still counts as "pinned" — matches the
+// handoff's 48px.
+const PIN_THRESHOLD_PX = 48
+// Long critiques on turns that are not the newest collapse past this many
+// words, per the handoff.
+const COLLAPSE_WORD_THRESHOLD = 90
+
+function wordCount(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length
+}
 
 // Renders only the `speaker`/`text`/`at` fields of an `Entry`, sourced only
-// from the `entry` SSE event (see useVoiceSession.ts's `entry` listener) or,
+// from the `entry` SSE event (see useVoiceSession.ts's `entry` listener), or
 // for the in-progress reply, the same `sentence` payload the server already
-// streams. Never the assembled system prompt, never `interviewer.lastRaw()`.
-// This is the client half of the spoiler gate; the server half is enforced
-// by voice/spoiler-gate.test.ts.
-export function Transcript({ entries, interimText }: Props) {
+// streams. Never the assembled system prompt, never `interviewer.lastRaw()`,
+// which carries an unstripped story-log trailer. This is the client half of
+// the spoiler gate; the server half is enforced by voice/spoiler-gate.test.ts.
+export function Transcript({ entries, interimSentences, streaming, meta }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [stuckToBottom, setStuckToBottom] = useState(true)
+  const [pinned, setPinned] = useState(true)
+  const [unseen, setUnseen] = useState(0)
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const mountedRef = useRef(false)
+  const prevCountRef = useRef(0)
+
+  const totalTurnsNow = entries.length + (interimSentences.length > 0 ? 1 : 0)
+
+  // Jumps to the bottom on mount with no animated scroll (handoff: "On mount
+  // the container jumps to the bottom"), then auto-follows on new content
+  // only while pinned. Scrolling up unpins immediately elsewhere
+  // (`handleScroll`) — content never yanks the view out from under a reader
+  // who scrolled up mid-session.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (!mountedRef.current) {
+      mountedRef.current = true
+      const behavior = el.style.scrollBehavior
+      el.style.scrollBehavior = 'auto'
+      el.scrollTop = el.scrollHeight
+      el.style.scrollBehavior = behavior
+      prevCountRef.current = totalTurnsNow
+      return
+    }
+    if (totalTurnsNow > prevCountRef.current) {
+      if (pinned) {
+        el.scrollTop = el.scrollHeight
+        setUnseen(0)
+      } else {
+        setUnseen((n) => n + (totalTurnsNow - prevCountRef.current))
+      }
+    }
+    prevCountRef.current = totalTurnsNow
+  }, [totalTurnsNow, pinned, entries, interimSentences])
 
   const handleScroll = (): void => {
     const el = scrollRef.current
     if (!el) return
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    setStuckToBottom(distanceFromBottom < STICK_THRESHOLD_PX)
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < PIN_THRESHOLD_PX
+    if (atBottom !== pinned) {
+      setPinned(atBottom)
+      if (atBottom) setUnseen(0)
+    }
   }
 
-  // Sticks to the bottom as new turns/sentences arrive — but only while the
-  // reader was already at the bottom. Reviewing an earlier turn mid-session
-  // (thirty turns in, scrolled up) must not get yanked back down by the next
-  // sentence streaming in.
-  useEffect(() => {
+  const jumpToLive = (): void => {
     const el = scrollRef.current
-    if (!el || !stuckToBottom) return
-    el.scrollTop = el.scrollHeight
-  }, [entries, interimText, stuckToBottom])
-
-  const jumpToBottom = (): void => {
-    const el = scrollRef.current
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-    setStuckToBottom(true)
+    if (el) el.scrollTop = el.scrollHeight
+    setPinned(true)
+    setUnseen(0)
   }
 
-  const empty = entries.length === 0 && !interimText
+  const isEmpty = entries.length === 0 && interimSentences.length === 0
 
   return (
-    <div className="transcript-wrap">
+    <div className="transcript-region">
+      {isEmpty && (
+        <div className="transcript-empty">
+          <h1>Nothing started yet.</h1>
+          <p>
+            The interviewer asks out loud. You press once to start answering and once when you are finished. Nothing
+            ends a turn but you.
+          </p>
+        </div>
+      )}
+
       <div className="transcript" ref={scrollRef} onScroll={handleScroll} role="log" aria-label="Interview transcript">
-        {empty && <p className="transcript__empty">The conversation will appear here once the interviewer begins.</p>}
-        {entries.map((entry, i) => (
-          <div className={`turn turn--${entry.speaker}`} key={i}>
-            <span className="turn__speaker">{entry.speaker === 'andre' ? 'You' : 'Interviewer'}</span>
-            <p className="turn__text">{entry.text}</p>
-          </div>
-        ))}
-        {interimText && (
-          <div className="turn turn--interviewer turn--live">
-            <span className="turn__speaker">Interviewer</span>
-            <p className="turn__text">
-              {interimText}
-              <span className="turn__cursor" aria-hidden="true" />
-            </p>
+        {entries.map((entry, i) => {
+          const isNewest = i === entries.length - 1 && interimSentences.length === 0
+          if (entry.speaker === 'interviewer') {
+            const words = wordCount(entry.text)
+            const collapsible = !isNewest && words > COLLAPSE_WORD_THRESHOLD && !expanded.has(i)
+            return (
+              <div className="turn turn--interviewer" key={i}>
+                <div className="turn__head">
+                  <span className="turn__label">Interviewer</span>
+                  <span className="turn__meta">{meta[i]}</span>
+                </div>
+                {collapsible ? (
+                  <div>
+                    <div className="turn__body turn__body--collapsed">{entry.text}</div>
+                    <button
+                      type="button"
+                      className="turn__expand"
+                      onClick={() => setExpanded((prev) => new Set(prev).add(i))}
+                    >
+                      Show full critique — {words} words
+                    </button>
+                  </div>
+                ) : (
+                  <div className="turn__body">{entry.text}</div>
+                )}
+              </div>
+            )
+          }
+          return (
+            <div className="turn turn--candidate" key={i}>
+              <div className="turn__head">
+                <span className="turn__label turn__label--muted">You</span>
+                <span className="turn__meta">{meta[i]}</span>
+              </div>
+              <div className="turn__body turn__body--candidate">{entry.text}</div>
+            </div>
+          )
+        })}
+
+        {interimSentences.length > 0 && (
+          <div className="turn turn--interviewer" key="live">
+            <div className="turn__head">
+              <span className="turn__label">Interviewer</span>
+              <span className="turn__meta" />
+            </div>
+            <div className="turn__body">
+              {interimSentences.map((sentence, i) => (
+                <span className="turn__sentence" key={i}>
+                  {sentence}{' '}
+                </span>
+              ))}
+              {streaming && <span className="turn__caret" aria-hidden="true" />}
+            </div>
           </div>
         )}
       </div>
-      {!stuckToBottom && (
-        <button type="button" className="jump-button" onClick={jumpToBottom}>
-          Jump to latest ↓
+
+      {!pinned && entries.length + interimSentences.length > 0 && (
+        <button type="button" className="jump-pill" onClick={jumpToLive}>
+          {unseen > 0 ? `Jump to live — ${unseen} new ↓` : 'Back to live ↓'}
         </button>
       )}
     </div>
