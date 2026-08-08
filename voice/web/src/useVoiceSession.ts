@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Entry, Mode } from './types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Entry, ErrorKind, Mode } from './types'
 
 export interface VoiceSession {
   mode: Mode
@@ -21,10 +21,31 @@ export interface VoiceSession {
   micUnsupported: boolean
   /** True after a 409 from POST /api/session — an existing session is stuck. */
   sessionConflict: boolean
+  /**
+   * Set from the `DOMException.name` of a rejected `getUserMedia` call — see
+   * `classifyMicError`. `null` once a request is in flight or has succeeded.
+   */
+  micFailureKind: 'denied' | 'nodevice' | null
+  /**
+   * True after a 422 from `POST /turn`. The server (`voice/http-server.ts`,
+   * off-limits to modify here) unconditionally ends and persists the session
+   * on a transcription failure — so unlike the handoff's "parks in Ready"
+   * description, this always lands in `mode === 'ended'`. See the deviation
+   * note in the design report.
+   */
+  transcriptFailed: boolean
+  /** One computed banner selector for the presentation layer — see `ErrorKind`. */
+  errorKind: ErrorKind | null
+  /** Dismisses the currently-showing error banner without changing `mode`. */
+  dismissError(): void
   start(): void
   record(): void
   stopAndSubmit(): void
-  /** Recovery path for `sessionConflict`: force-ends whatever session is stuck. */
+  /**
+   * Recovery path for `sessionConflict`: force-ends whatever session is
+   * stuck, then immediately starts a fresh one — this is what makes the
+   * "stuck" banner's "End it and start fresh" action do what it says.
+   */
   forceEndStuckSession(): void
 }
 
@@ -61,6 +82,22 @@ function streamIsLive(stream: MediaStream | null): stream is MediaStream {
 // long, long enough that a normal "click Allow" pause never trips it.
 const MIC_WATCHDOG_MS = 4000
 
+// Classifies a rejected `getUserMedia` call into one of the handoff's two
+// permission-shaped error banners. `NotAllowedError`/`PermissionDeniedError`/
+// `SecurityError` are the browser refusing an existing device; everything
+// else that still names a device-shaped cause (`NotFoundError`,
+// `DevicesNotFoundError`, `OverconstrainedError`) means no usable input
+// exists at all. An error with none of these names is rare in practice (most
+// getUserMedia rejections are one of the above); it's treated as `denied`
+// since "try again" is the safer default action to offer.
+function classifyMicError(error: unknown): 'denied' | 'nodevice' {
+  const name = error instanceof DOMException ? error.name : ''
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+    return 'nodevice'
+  }
+  return 'denied'
+}
+
 const MIC_WATCHDOG_MESSAGE =
   'Still waiting for microphone access. If Chrome never showed a permission prompt, this is almost ' +
   "always one of two things: this origin's own microphone permission is blocked or was previously " +
@@ -78,6 +115,8 @@ export function useVoiceSession(): VoiceSession {
   const [interimInterviewerText, setInterimInterviewerText] = useState('')
   const [sessionConflict, setSessionConflict] = useState(false)
   const [micUnsupported] = useState(mediaDevicesUnsupported)
+  const [micFailureKind, setMicFailureKind] = useState<'denied' | 'nodevice' | null>(null)
+  const [transcriptFailed, setTranscriptFailed] = useState(false)
 
   const sessionIdRef = useRef<string | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -119,6 +158,7 @@ export function useVoiceSession(): VoiceSession {
   const acquireStream = useCallback(async (): Promise<MediaStream | null> => {
     if (mediaDevicesUnsupported()) return null
 
+    setMicFailureKind(null)
     const watchdog = setTimeout(() => setStatus(MIC_WATCHDOG_MESSAGE), MIC_WATCHDOG_MS)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -129,6 +169,7 @@ export function useVoiceSession(): VoiceSession {
       clearTimeout(watchdog)
       const message = error instanceof Error ? error.message : String(error)
       setStatus(`Microphone access failed: ${message}. You can still hear the interviewer; press the button to try again when you answer.`)
+      setMicFailureKind(classifyMicError(error))
       return null
     }
   }, [])
@@ -175,6 +216,8 @@ export function useVoiceSession(): VoiceSession {
 
   const start = useCallback(() => {
     setSessionConflict(false)
+    setMicFailureKind(null)
+    setTranscriptFailed(false)
     setStatus('Starting session…')
     void (async () => {
       const res = await fetch('/api/session', { method: 'POST' })
@@ -213,9 +256,12 @@ export function useVoiceSession(): VoiceSession {
     void (async () => {
       await fetch('/api/session', { method: 'DELETE' })
       setSessionConflict(false)
-      setStatus('Idle. The stuck session was ended — try starting again.')
+      // "End it and start fresh" is one action in the handoff, not two — chain
+      // straight into `start` rather than leaving Andre back at Idle needing
+      // a second press.
+      start()
     })()
-  }, [])
+  }, [start])
 
   const record = useCallback(() => {
     setElapsedSeconds(0)
@@ -301,7 +347,12 @@ export function useVoiceSession(): VoiceSession {
       if (res.status === 422) {
         const { error } = (await res.json()) as { error: string }
         setStatus(`Turn failed: ${error}`)
+        // The server (voice/http-server.ts) unconditionally ends and persists
+        // the session on a transcription failure, so there is no live
+        // session left to return the question to — `mode` must follow it to
+        // 'ended' rather than the handoff's 'ready'. See the design report.
         setMode('ended')
+        setTranscriptFailed(true)
         releaseMicStream()
         return
       }
@@ -326,6 +377,26 @@ export function useVoiceSession(): VoiceSession {
   useEffect(() => clearElapsedTimer, [clearElapsedTimer])
   useEffect(() => releaseMicStream, [releaseMicStream])
 
+  // One banner selector combining every real failure path this hook reaches.
+  // Precedence matters where two could theoretically coexist: a stuck
+  // session (refused at `start`) takes priority over a stale mic failure
+  // from a previous attempt, and a fresh mic failure takes priority over
+  // `micUnsupported`, which is a standing environmental fact rather than a
+  // one-off rejection.
+  const errorKind: ErrorKind | null = useMemo(() => {
+    if (sessionConflict) return 'stuck'
+    if (transcriptFailed) return 'transcript'
+    if (micFailureKind) return micFailureKind
+    if (micUnsupported && (mode === 'requesting-mic' || mode === 'recording')) return 'nodevice'
+    return null
+  }, [sessionConflict, transcriptFailed, micFailureKind, micUnsupported, mode])
+
+  const dismissError = useCallback(() => {
+    setSessionConflict(false)
+    setTranscriptFailed(false)
+    setMicFailureKind(null)
+  }, [])
+
   return {
     mode,
     status,
@@ -335,6 +406,10 @@ export function useVoiceSession(): VoiceSession {
     interimInterviewerText,
     micUnsupported,
     sessionConflict,
+    micFailureKind,
+    transcriptFailed,
+    errorKind,
+    dismissError,
     start,
     record,
     stopAndSubmit,
