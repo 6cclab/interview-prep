@@ -72,4 +72,38 @@ describe('SentenceBuffer', () => {
   it('does not split consecutive terminators across a delta boundary', () => {
     expect(feed(['Wait.', '.. Really?'])).toEqual(['Wait...', 'Really?'])
   })
+
+  // Initialisms are recognised structurally, not from a list, so ones nobody
+  // thought to enumerate hold together too. The visible failure of getting this
+  // wrong is the interviewer stopping audibly mid-sentence.
+  it.each(['U.S.', 'U.K.', 'a.m.', 'p.m.', 'Ph.D.'])('does not split after %s', (abbrev) => {
+    expect(feed([`We shipped it in the ${abbrev} last year.`])).toEqual([
+      `We shipped it in the ${abbrev} last year.`,
+    ])
+  })
+
+  // The counterpart the structural rule must NOT swallow: a lone letter ending a
+  // real sentence. This is why the rule requires a preceding period rather than
+  // treating every isolated letter as an abbreviation.
+  it('still splits a sentence that ends in a single letter', () => {
+    expect(feed(['Go with option A. Justify it.'])).toEqual(['Go with option A.', 'Justify it.'])
+  })
+
+  it('emits held text once it grows past the cap rather than buffering forever', () => {
+    const buffer = new SentenceBuffer()
+    // No terminator anywhere: the un-capped buffer would hold all of this and
+    // speak nothing until the stream ended.
+    const out = Array.from({ length: 30 }, () => buffer.push('word '.repeat(20))).flat()
+    expect(out.length).toBeGreaterThan(0)
+    expect(out.join(' ')).not.toContain('  ')
+    // Everything emitted plus everything still held must be exactly what went
+    // in — a forced break may not drop or duplicate words.
+    const words = [...out, ...buffer.flush()].join(' ').split(/\s+/).filter(Boolean)
+    expect(words).toHaveLength(30 * 20)
+  })
+
+  it('does not force a break on ordinary sentence-length input', () => {
+    const buffer = new SentenceBuffer()
+    expect(buffer.push('A fairly long question about tradeoffs, '.repeat(4))).toEqual([])
+  })
 })

@@ -802,4 +802,90 @@ describe('GET /api/session/:id/stream', () => {
     const endRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
     expect(endRes.status).toBe(200)
   })
+
+  // The harder case than the one above: the reconnect lands *while* a turn's
+  // reply is mid-stream, so the in-flight write loop is holding the response
+  // the reconnect is about to end. This interleaving was only ever verified by
+  // an ad hoc script during review — a real drill hits it whenever the laptop
+  // sleeps or the wifi blips mid-answer, and what it guards against is the
+  // whole session dying rather than one truncated sentence.
+  it('a reconnect landing mid-reply keeps the session alive and completes the in-flight turn', async () => {
+    let releaseTail: () => void = () => {}
+    const tailGate = new Promise<void>((resolve) => {
+      releaseTail = resolve
+    })
+    let calls = 0
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* () {
+          calls++
+          if (calls === 1) {
+            yield 'Ready when you are.'
+            return
+          }
+          // The reply to the turn below, deliberately paused between sentences
+          // so the reconnect can land while this generator is still running.
+          // Two sentences in this one delta on purpose: `interviewer.ts` holds
+          // back the last couple of characters of every delta so a story-log
+          // fence split across deltas can still be detected, which means a
+          // delta ending in its own terminator emits nothing until the next one
+          // arrives. A second sentence here gives the first one something to be
+          // confirmed by, so it reaches the wire before the gate.
+          yield 'That is one option. Say more about the tradeoff.'
+          await tailGate
+          yield 'What did it cost you?'
+        },
+        transcriber: { transcribe: async () => ({ text: 'answer' }) },
+        transcode: async (_input, output) => {
+          writeFileSync(output, Buffer.from('fake wav bytes'))
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    const first = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(first) // opening sentence
+    await readSSE(first) // opening entry
+
+    const turnRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('fake webm bytes'),
+    })
+    expect(turnRes.status).toBe(202)
+    await readSSE(first) // Andre's entry
+    await readSSE(first) // the reply's first sentence — the turn is now parked mid-stream
+
+    // Reconnect while that generator is still suspended.
+    const second = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    expect(second.status).toBe(200)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    releaseTail()
+
+    // The turn finishes and commits its interviewer entry, which lands on the
+    // *new* connection. The tail sentence written to the superseded response is
+    // lost — the accepted cost of a dropped connection — but losing it must not
+    // throw, wedge the turn, or take the session with it.
+    const interviewerEntry = await readSSE(second)
+    expect(interviewerEntry.event).toBe('entry')
+    expect(interviewerEntry.data).toMatchObject({ speaker: 'interviewer' })
+
+    // `turnsInFlight` was released, so a further turn is accepted rather than
+    // 409ing forever — a leak there wedges the session permanently.
+    const nextTurn = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('another webm'),
+    })
+    expect(nextTurn.status).toBe(202)
+
+    // And the persisted transcript has the whole reply, including the sentence
+    // that streamed after the reconnect: the wire lost it, the record did not.
+    const endRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    expect(endRes.status).toBe(200)
+    const { relPath } = (await endRes.json()) as { relPath: string }
+    const transcript = readFileSync(join(root, relPath), 'utf8')
+    expect(transcript).not.toContain('Session ended early')
+    expect(transcript).toContain('What did it cost you?')
+  })
 })
