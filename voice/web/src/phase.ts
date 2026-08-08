@@ -38,11 +38,15 @@ export interface ErrorCopy {
 }
 
 // Titles and bodies are the handoff's exact copy (section "The four errors"),
-// with one adjustment: the `stuck` body drops the fabricated "07:12" start
-// time. The handoff's prototype hardcodes that clock reading as canned copy;
-// the real 409 response from POST /api/session (voice/http-server.ts, which
-// this task does not modify) carries no timestamp for the session it
-// refused, so there is nothing honest to put there. See the design report.
+// with one remaining adjustment: the `stuck` body drops the fabricated
+// "07:12" start time. The handoff's prototype hardcodes that clock reading as
+// canned copy; the real 409 response from POST /api/session
+// (voice/http-server.ts, which this task does not modify) carries no
+// timestamp for the session it refused, so there is nothing honest to put
+// there. See the design report. `transcript`'s copy is now the handoff's
+// verbatim text — the server-side fix that makes "Retry transcription" and
+// "Answer again" real (voice/http-server.ts's turn/retry and turn/abandon
+// routes) removed the deviation that used to be noted here.
 export const ERROR_COPY: Record<ErrorKind, ErrorCopy> = {
   denied: {
     title: 'The browser blocked microphone access',
@@ -54,7 +58,7 @@ export const ERROR_COPY: Record<ErrorKind, ErrorCopy> = {
   },
   transcript: {
     title: 'That answer was recorded but not transcribed',
-    body: 'The recording finished and the audio is still here, but transcription failed, so this turn was not added to the transcript and the interviewer has not heard it. The session has ended and the transcript so far is saved — start a new session to keep going. Nothing was silently dropped.',
+    body: 'The recording finished and the audio is still here, but transcription failed, so this turn was not added to the transcript and the interviewer has not heard it. You can retry transcription on the audio you already gave, or answer the question again from the top. Nothing was silently dropped.',
   },
   stuck: {
     title: 'An earlier session is still open',

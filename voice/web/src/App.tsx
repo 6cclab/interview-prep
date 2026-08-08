@@ -32,6 +32,8 @@ export default function App() {
     interimSentences,
     errorKind,
     dismissError,
+    retryTranscription,
+    abandonTurn,
     start,
     record,
     stopAndSubmit,
@@ -170,10 +172,9 @@ export default function App() {
   const alertText = errorKind ? ERROR_COPY[errorKind].title : ''
 
   // Recovery actions per error kind. Every action here does something real —
-  // see the design report for the two the handoff specifies that have no
-  // honest counterpart (a resumable "stuck" session to open; a still-held
-  // audio blob to retry transcription on) and were dropped rather than
-  // shipped as dead buttons.
+  // see the design report for the one the handoff specifies that has no
+  // honest counterpart (a resumable "stuck" session to open) and was dropped
+  // rather than shipped as a dead button.
   const errorActions = useMemo((): ErrorAction[] => {
     if (!errorKind) return []
     const kind: ErrorKind = errorKind
@@ -192,24 +193,17 @@ export default function App() {
           { label: 'Dismiss', variant: 'outline', onClick: dismissError },
         ]
       case 'transcript':
-        // The server ends and persists the session on any transcription
-        // failure (voice/http-server.ts, not modified here), so there is no
-        // live session left to retry the audio against or return the
-        // question to. "Retry transcription" and "Answer again" both
-        // collapse into starting a fresh session; "Skip this turn" becomes a
-        // plain dismiss, since there is no next turn in this session to
-        // skip to.
+        // All three of the handoff's actions are real now that the server
+        // retains the failed turn's audio and stays alive (voice/http-server.ts's
+        // turn/retry and turn/abandon routes): "Retry transcription" re-runs
+        // transcription server-side with no re-recording; "Answer again" and
+        // "Skip this turn" both drop the retained audio and return to Ready —
+        // see the comment on `abandonTurn` in useVoiceSession.ts for why that
+        // collapses into one server call.
         return [
-          {
-            label: 'Start new session',
-            variant: 'brand',
-            onClick: () => {
-              dismissError()
-              setSessionSeconds(0)
-              start()
-            },
-          },
-          { label: 'Dismiss', variant: 'ghost', onClick: dismissError },
+          { label: 'Retry transcription', variant: 'brand', onClick: retryTranscription },
+          { label: 'Answer again', variant: 'outline', onClick: abandonTurn },
+          { label: 'Skip this turn', variant: 'ghost', onClick: abandonTurn },
         ]
       case 'stuck':
         // "Open that session" has no server-side counterpart — there is no
@@ -217,7 +211,7 @@ export default function App() {
         // so it is omitted rather than shipped inert.
         return [{ label: 'End it and start fresh', variant: 'brand', onClick: forceEndStuckSession }]
     }
-  }, [errorKind, phase, dismissError, record, start, forceEndStuckSession])
+  }, [errorKind, phase, dismissError, record, retryTranscription, abandonTurn, forceEndStuckSession])
 
   let statusTitle = 'Not started'
   let statusDetail = 'The first question is asked out loud. Nothing is recorded until you start a turn.'
