@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { parseInputDevices, parseOutputDevices, readDeviceConfig } from './devices'
+import { parseInputDevices, parseOutputDevices, readDeviceConfig, writeDeviceConfig } from './devices'
 
 const FFMPEG_STDERR = [
   '[AVFoundation indev @ 0x72d068000] AVFoundation video devices:',
@@ -93,5 +93,34 @@ describe('readDeviceConfig', () => {
   it('ignores non-string values rather than passing them to a subprocess', () => {
     writeConfig('{ "input": 3, "output": null }')
     expect(readDeviceConfig(root)).toEqual({})
+  })
+
+  it('reads a webInput field, distinct from input', () => {
+    writeConfig('{ "input": ":3", "webInput": "browser-device-abc" }')
+    expect(readDeviceConfig(root)).toEqual({ input: ':3', webInput: 'browser-device-abc' })
+  })
+})
+
+describe('writeDeviceConfig', () => {
+  it('creates local/ and the file when neither exists yet', () => {
+    writeDeviceConfig(root, { output: '75' })
+    expect(readDeviceConfig(root)).toEqual({ output: '75' })
+  })
+
+  it('merges with the existing config rather than clobbering unrelated fields', () => {
+    writeDeviceConfig(root, { input: ':3' })
+    writeDeviceConfig(root, { output: '75' })
+    expect(readDeviceConfig(root)).toEqual({ input: ':3', output: '75' })
+  })
+
+  it('overwrites only the field it is given', () => {
+    writeDeviceConfig(root, { output: '75', webInput: 'old-id' })
+    writeDeviceConfig(root, { webInput: 'new-id' })
+    expect(readDeviceConfig(root)).toEqual({ output: '75', webInput: 'new-id' })
+  })
+
+  it('returns the merged config it wrote', () => {
+    writeDeviceConfig(root, { input: ':3' })
+    expect(writeDeviceConfig(root, { output: '75' })).toEqual({ input: ':3', output: '75' })
   })
 })
