@@ -87,6 +87,120 @@ describe('POST /api/session', () => {
     expect(second.status).toBe(409)
     expect(((await second.json()) as { error: string }).error).toMatch(/already in progress/i)
   })
+
+  // Without these two fields the 409 is a dead end for "Open that session":
+  // there is no id to reopen, and the banner has no honest start time to name.
+  it('names the session it refused, with its start time, so the client can reopen it', async () => {
+    let n = 0
+    const store = createSessionStore(() => `session-${++n}`)
+    const { port } = await listen(baseDeps({ store }))
+    const first = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await first.json()) as { id: string }
+
+    const conflict = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    expect(conflict.status).toBe(409)
+    const body = (await conflict.json()) as { id: string; startedAt: string }
+    expect(body.id).toBe(id)
+    // A real ISO instant for the refused session, not the time of the refusal.
+    expect(Number.isNaN(Date.parse(body.startedAt))).toBe(false)
+    expect(body.startedAt).toBe(store.get(id)!.startedAt.toISOString())
+  })
+})
+
+// Reopening a session the browser lost track of. SSE replays nothing, so
+// reattaching to the stream alone would show an empty transcript for a session
+// several turns deep — this is where the client catches up from.
+describe('GET /api/session/:id', () => {
+  it('reports the session identity and its committed entries', async () => {
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* () {
+          yield 'Tell me about a disagreement.'
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(stream) // opening sentence
+    await readSSE(stream) // opening entry, so an entry is definitely committed
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      id: string
+      startedAt: string
+      entries: { speaker: string; text: string; at: number }[]
+      awaitingRetry: boolean
+    }
+    expect(body.id).toBe(id)
+    expect(Number.isNaN(Date.parse(body.startedAt))).toBe(false)
+    expect(body.entries).toEqual([
+      { speaker: 'interviewer', text: 'Tell me about a disagreement.', at: 0 },
+    ])
+    expect(body.awaitingRetry).toBe(false)
+  })
+
+  // A reopened session must land in the same error state it was left in, or
+  // Andre loses the retained audio's retry without ever being offered it.
+  it('reports awaitingRetry when a turn failed transcription and its audio is retained', async () => {
+    const { port } = await listen(
+      baseDeps({
+        transcode: async () => {
+          throw new Error('ffmpeg: invalid data found')
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    const failed = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('fake webm bytes'),
+    })
+    expect(failed.status).toBe(422)
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}`)
+    expect(((await res.json()) as { awaitingRetry: boolean }).awaitingRetry).toBe(true)
+  })
+
+  it('404s an unknown session id', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/nope`)
+    expect(res.status).toBe(404)
+  })
+
+  // The whole point of reopening: the entries survive so a reattached client can
+  // render the transcript it missed, and reattaching does not disturb them.
+  it('keeps reporting the full transcript across a reconnect', async () => {
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* () {
+          yield 'Tell me more.'
+        },
+        transcriber: { transcribe: async () => ({ text: 'answer' }) },
+        transcode: async (_input, output) => {
+          writeFileSync(output, Buffer.from('fake wav bytes'))
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const first = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(first)
+    await readSSE(first)
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, { method: 'POST', body: Buffer.from('webm') })
+    await readSSE(first) // Andre's entry
+    await readSSE(first) // the reply's sentence
+    await readSSE(first) // the interviewer's entry
+
+    // Reattach, exactly as "Open that session" does.
+    const second = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    expect(second.status).toBe(200)
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}`)
+    const { entries } = (await res.json()) as { entries: { speaker: string }[] }
+    expect(entries.map((e) => e.speaker)).toEqual(['interviewer', 'andre', 'interviewer'])
+  })
 })
 
 // The recovery path for the 409 above: POST /api/session's 409 body never

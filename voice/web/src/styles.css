@@ -429,6 +429,23 @@ body {
   margin-top: 14px;
 }
 
+/* The "Show me where" expansion. Numbered because it is a sequence of steps to
+   follow, and set in mono to match the rest of the app's instructional text. */
+.error-banner__details {
+  margin: 14px 0 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 68ch;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+  list-style: decimal;
+  text-wrap: pretty;
+}
+
 /* Pacing bar */
 
 .pacing {

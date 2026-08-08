@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Entry, ErrorKind, MicDevice, Mode, OutputDevice } from './types'
+import type { Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
 
 export interface VoiceSession {
   mode: Mode
@@ -39,6 +39,21 @@ export interface VoiceSession {
   transcriptFailed: boolean
   /** One computed banner selector for the presentation layer — see `ErrorKind`. */
   errorKind: ErrorKind | null
+  /**
+   * The session a 409 refused to start alongside, as reported by that 409's
+   * body. `null` when nothing is stuck, or when the server is an older build
+   * whose 409 carried no id.
+   */
+  stuckSession: StuckSession | null
+  /**
+   * The stuck-session banner's "Open that session" action: reads the session's
+   * committed entries back from `GET /api/session/:id`, restores them, and
+   * attaches to the live SSE stream — the handoff's "puts you back where you
+   * left off, mid-turn". A no-op when `stuckSession` is null. If the session
+   * ended in the meantime, clears the banner and leaves Andre at Idle rather
+   * than pretending to reopen it.
+   */
+  reopenStuckSession(): void
   /** Dismisses the currently-showing error banner without changing `mode`. */
   dismissError(): void
   /**
@@ -202,6 +217,9 @@ export function useVoiceSession(): VoiceSession {
   const [micUnsupported] = useState(mediaDevicesUnsupported)
   const [micFailureKind, setMicFailureKind] = useState<'denied' | 'nodevice' | null>(null)
   const [transcriptFailed, setTranscriptFailed] = useState(false)
+  // Set alongside `sessionConflict` from the 409's body: what the stuck session
+  // is, so the banner can name its start time and reopening has an id to use.
+  const [stuckSession, setStuckSession] = useState<StuckSession | null>(null)
   const [inputDevices, setInputDevices] = useState<MicDevice[]>([])
   const [selectedInputId, setSelectedInputId] = useState<string | null>(null)
   const [outputDevices, setOutputDevices] = useState<OutputDevice[]>([])
@@ -352,7 +370,11 @@ export function useVoiceSession(): VoiceSession {
     void (async () => {
       const res = await fetch('/api/session', { method: 'POST' })
       if (res.status === 409) {
+        // The 409 now names the session it refused, so the banner can report
+        // when it started and "Open that session" has something to open.
+        const conflict = (await res.json()) as { id?: string; startedAt?: string }
         setStatus('A session is already in progress.')
+        setStuckSession(conflict.id ? { id: conflict.id, startedAt: conflict.startedAt ?? null } : null)
         setSessionConflict(true)
         return
       }
@@ -381,11 +403,48 @@ export function useVoiceSession(): VoiceSession {
   // never carried one), so this hits a small addition to the API surface —
   // DELETE /api/session — that ends whichever session the server currently
   // considers active, no id required.
+  // The handoff's other recovery from the same banner: "opening it puts you
+  // back where you left off, mid-turn." SSE replays nothing, so catching up
+  // means reading the session's committed entries from `GET /api/session/:id`
+  // first, then attaching to the live stream. Everything after that is an
+  // ordinary in-progress session — including a turn whose transcription had
+  // failed, which is why `awaitingRetry` is carried over rather than dropped.
+  const reopenStuckSession = useCallback(() => {
+    const stuck = stuckSession
+    if (!stuck) return
+    setStatus('Reopening that session…')
+    void (async () => {
+      const res = await fetch(`/api/session/${stuck.id}`)
+      if (!res.ok) {
+        // It ended between the 409 and this click (idle reap, or another tab).
+        // Nothing to reopen and nothing stuck any more, so clear the banner and
+        // leave Andre at Idle, where the primary action starts a fresh session.
+        setStatus('That session is no longer open. Start a new one.')
+        setSessionConflict(false)
+        setStuckSession(null)
+        return
+      }
+      const state = (await res.json()) as { entries: Entry[]; awaitingRetry: boolean }
+      sessionIdRef.current = stuck.id
+      setEntries(state.entries)
+      setInterviewerSpeaking(false)
+      setInterimSentences([])
+      setSessionConflict(false)
+      setStuckSession(null)
+      setTranscriptFailed(state.awaitingRetry)
+      connectStream(stuck.id)
+      setMode('listening-to-interviewer')
+      setStatus(state.awaitingRetry ? 'Reopened — that last answer still needs transcribing.' : 'Reopened. Your turn.')
+      if (!mediaDevicesUnsupported()) void acquireStream()
+    })()
+  }, [stuckSession, connectStream, acquireStream])
+
   const forceEndStuckSession = useCallback(() => {
     setStatus('Ending the stuck session…')
     void (async () => {
       await fetch('/api/session', { method: 'DELETE' })
       setSessionConflict(false)
+      setStuckSession(null)
       // "End it and start fresh" is one action in the handoff, not two — chain
       // straight into `start` rather than leaving Andre back at Idle needing
       // a second press.
@@ -662,6 +721,8 @@ export function useVoiceSession(): VoiceSession {
     transcriptFailed,
     errorKind,
     dismissError,
+    stuckSession,
+    reopenStuckSession,
     retryTranscription,
     abandonTurn,
     start,

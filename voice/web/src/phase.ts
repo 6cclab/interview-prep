@@ -37,16 +37,12 @@ export interface ErrorCopy {
   body: string
 }
 
-// Titles and bodies are the handoff's exact copy (section "The four errors"),
-// with one remaining adjustment: the `stuck` body drops the fabricated
-// "07:12" start time. The handoff's prototype hardcodes that clock reading as
-// canned copy; the real 409 response from POST /api/session
-// (voice/http-server.ts, which this task does not modify) carries no
-// timestamp for the session it refused, so there is nothing honest to put
-// there. See the design report. `transcript`'s copy is now the handoff's
-// verbatim text — the server-side fix that makes "Retry transcription" and
-// "Answer again" real (voice/http-server.ts's turn/retry and turn/abandon
-// routes) removed the deviation that used to be noted here.
+// Titles and bodies are the handoff's exact copy (section "The four errors").
+// The `stuck` body is now the handoff's full text too, including the start time
+// and the "opening it puts you back where you left off" clause: the 409 from
+// POST /api/session carries the refused session's id and `startedAt`, so both
+// are real. `stuckBody` below is what fills the time in. The last remaining
+// deviation is the fallback for a 409 with no timestamp — see there.
 export const ERROR_COPY: Record<ErrorKind, ErrorCopy> = {
   denied: {
     title: 'The browser blocked microphone access',
@@ -62,8 +58,23 @@ export const ERROR_COPY: Record<ErrorKind, ErrorCopy> = {
   },
   stuck: {
     title: 'An earlier session is still open',
-    body: 'An earlier session was never ended, so a new one cannot start alongside it. Ending it now saves its transcript exactly as it stands.',
+    body: stuckBody(null),
   },
+}
+
+/**
+ * The stuck-session body, naming the session's start time when the 409 reported
+ * one. Without a timestamp it says "an earlier session" instead of inventing a
+ * clock reading — the handoff's "07:12" is canned prototype copy, and a wrong
+ * time is worse than no time when the whole point of the banner is to tell
+ * Andre which session he is about to end.
+ */
+export function stuckBody(startedAt: string | null): string {
+  const when = startedAt ? `A session started at ${wallClock(new Date(startedAt))}` : 'An earlier session'
+  return (
+    `${when} was never ended, so a new one cannot start alongside it. ` +
+    'Ending it now saves its transcript exactly as it stands; opening it puts you back where you left off, mid-turn.'
+  )
 }
 
 // Announcement sentences for the polite live region — the handoff's exact
