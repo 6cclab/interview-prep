@@ -46,6 +46,37 @@ pnpm voice:devices      # list microphones and speakers for local/voice.json
 pnpm typecheck          # covers voice/ and voice/web/ separately (different tsconfig)
 ```
 
+### Browser support for `mock:web`
+
+**Use Chrome.** The web drill needs `getUserMedia`, and browsers disagree about
+whether a plain-HTTP loopback origin is a secure context:
+
+| Browser | Plain HTTP on 127.0.0.1 | Notes |
+|---|---|---|
+| Chrome, Firefox | works | loopback is exempt |
+| Safari | needs HTTPS | no loopback exemption |
+| Arc | does not work | needs HTTPS, and still failed with a trusted cert — not worth chasing |
+
+The failure mode is nasty rather than obvious: `navigator.mediaDevices` is
+simply absent, or `getUserMedia` never settles — no prompt, no rejection, no
+console error. The page's **Mic check** button (top right) reports which of
+those is happening.
+
+For HTTPS, drop a mkcert pair in the gitignored `local/certs/` and the server
+picks it up automatically:
+
+```bash
+mkdir -p local/certs && cd local/certs
+mkcert -cert-file cert.pem -key-file key.pem localhost 127.0.0.1 ::1
+mkcert -install   # needs your password; run in a real terminal, not via `!`
+```
+
+Open `https://127.0.0.1:4174/`, **not** `localhost` — the server binds IPv4
+only and browsers try `::1` first.
+
+`VOICE_DEBUG=1` logs every request's method, path and status (never bodies —
+a turn body is recorded audio).
+
 ## Tests encode the insight
 
 A drill is only worth doing if a **correct but brute-force** solution fails it.
