@@ -9,7 +9,7 @@ import { buildSystemPrompt } from './context'
 import { createInterviewer, anthropicStream, type StreamFn } from './interviewer'
 import { claudeCliStream } from './claude-cli'
 import { createSession, finishSession } from './session'
-import { createSessionStore, type SessionStore } from './session-store'
+import { createSessionStore, type RetainedAudio, type SessionStore, type StoredSession } from './session-store'
 import { whisperTranscriber, saySpeaker, type Speaker, type Transcriber } from './speech'
 import { transcodeToWav } from './transcode'
 import { readStaticFile, resolveStaticFile } from './static'
@@ -102,6 +102,85 @@ function writeSSE(res: ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+type TranscriptionResult = { ok: true; text: string } | { ok: false; message: string; retain: { path: string; kind: 'wav' | 'webm' } }
+
+/**
+ * Transcodes (if needed) and transcribes one turn's audio, and decides which
+ * file — if any — is worth keeping for a retry on failure.
+ *
+ * `source.kind === 'webm'` covers both a fresh upload (`POST /turn`) and a
+ * retry of a previously-webm-only retained turn (transcode failed last time,
+ * so there is no wav yet); `'wav'` covers a retry of a turn whose transcode
+ * already succeeded last time, in which case this skips straight to
+ * transcription — the whole point of retaining the wav over the webm when
+ * both are available.
+ *
+ * On failure, retains whichever file is cheapest for the *next* attempt: the
+ * wav if one now exists (transcode succeeded, transcription didn't) — and in
+ * that case the webm this attempt started from, if any, is no longer needed
+ * and is deleted, not left behind. On success, both the webm (if any) and the
+ * intermediate wav are deleted — there is nothing left to retry.
+ */
+async function transcribeWithRetention(
+  transcode: (input: string, output: string) => Promise<void>,
+  transcriber: Transcriber,
+  source: { path: string; kind: 'wav' | 'webm' },
+  wavScratchPath: string,
+): Promise<TranscriptionResult> {
+  let wavPath: string
+  let transcodedThisAttempt = false
+  if (source.kind === 'wav') {
+    wavPath = source.path
+  } else {
+    wavPath = wavScratchPath
+    try {
+      await transcode(source.path, wavPath)
+      transcodedThisAttempt = true
+    } catch (error) {
+      // Transcode itself failed — nothing better than the original webm exists yet.
+      return { ok: false, message: errorMessage(error), retain: { path: source.path, kind: 'webm' } }
+    }
+  }
+  try {
+    const { text } = await transcriber.transcribe(wavPath)
+    if (source.kind === 'webm') await unlink(source.path).catch(() => {})
+    await unlink(wavPath).catch(() => {})
+    return { ok: true, text }
+  } catch (error) {
+    if (transcodedThisAttempt) {
+      // The wav this attempt just produced is cheaper to retry from than the
+      // webm it came from — keep the wav, drop the now-superseded webm.
+      await unlink(source.path).catch(() => {})
+      return { ok: false, message: errorMessage(error), retain: { path: wavPath, kind: 'wav' } }
+    }
+    // Already started from a wav (a retry of a wav-stage failure) — nothing new to swap in.
+    return { ok: false, message: errorMessage(error), retain: { path: source.path, kind: 'wav' } }
+  }
+}
+
+/**
+ * Records a failed turn's retained audio against the session, replacing (and
+ * deleting) whatever was retained before — per the recovery design, only the
+ * most recent failed turn's audio is ever kept.
+ */
+async function setRetainedAudio(stored: StoredSession, retain: Pick<RetainedAudio, 'path' | 'kind'>, at: number): Promise<void> {
+  if (stored.retainedAudio && stored.retainedAudio.path !== retain.path) {
+    await unlink(stored.retainedAudio.path).catch(() => {})
+  }
+  stored.retainedAudio = { ...retain, at }
+}
+
+/** Drops whatever audio is currently retained for a session, if any. Idempotent. */
+async function clearRetainedAudio(stored: StoredSession): Promise<void> {
+  if (!stored.retainedAudio) return
+  await unlink(stored.retainedAudio.path).catch(() => {})
+  stored.retainedAudio = undefined
+}
+
 // Speaks one sentence through the server-side TTS, if any was configured.
 // Swallows and logs a failure rather than propagating it: `say` failing, or
 // the chosen output device having vanished, must degrade to silent-but-
@@ -189,6 +268,12 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   // reply-stream in flight) — guards against a second /turn for the same
   // session landing before the first has finished.
   const turnsInFlight = new Set<string>()
+  // A monotonic tiebreaker for scratch-file names. `Date.now()` alone can
+  // repeat within the same millisecond (two turns landing back to back, or
+  // a retry's own scratch wav) and produce a filename collision — harmless
+  // for a normal turn (the file is deleted immediately after), but fatal
+  // for retained audio, which must survive under a name nothing else reuses.
+  let turnFileSeq = 0
   // Per-session elapsed clock for `Entry.at`, keyed by session id. When a
   // caller injects `deps.now` (every test in this repo), all sessions share
   // that one clock, same as before. When nothing is injected (production),
@@ -377,80 +462,11 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       return
     }
 
-    const turnMatch = /^\/api\/session\/([^/]+)\/turn$/.exec(url.pathname)
-    if (req.method === 'POST' && turnMatch) {
-      const id = turnMatch[1]!
-      const stored = store.get(id)
-      if (!stored) {
-        notFound(res)
-        return
-      }
-      if (stored.session.endedEarly()) {
-        sendJson(res, 409, { error: 'session already ended' })
-        return
-      }
-      if (turnsInFlight.has(id)) {
-        sendJson(res, 409, { error: 'a turn is already in progress for this session' })
-        return
-      }
-      turnsInFlight.add(id)
-      store.touch(id, idleClock())
-
-      // The moment the upload arrived is the moment Andre's turn actually
-      // ended — sample it before transcode/transcription latency has a
-      // chance to leak into the pacing analytics `submitTurn`/`reportFailure`
-      // stamp entries with. Uses this session's own entry clock, not the
-      // idle-bookkeeping one — see the comment above `entryClocks`.
-      const entryClock = entryClocks.get(id)!
-      const at = entryClock()
-
-      const chunks: Buffer[] = []
-      let total = 0
-      let tooLarge = false
-      for await (const chunk of req) {
-        const buf = chunk as Buffer
-        total += buf.length
-        if (total > MAX_TURN_AUDIO_BYTES) {
-          tooLarge = true
-          break
-        }
-        chunks.push(buf)
-      }
-      if (tooLarge) {
-        turnsInFlight.delete(id)
-        sendJson(res, 413, { error: 'audio upload too large' })
-        req.destroy()
-        return
-      }
-      const audio = Buffer.concat(chunks)
-
-      const inputPath = join(stored.scratchDir, `turn-${Date.now()}.webm`)
-      const outputPath = join(stored.scratchDir, `turn-${Date.now()}.wav`)
-      await writeFile(inputPath, audio)
-
-      let text: string
-      try {
-        try {
-          await transcode(inputPath, outputPath)
-          text = (await deps.transcriber.transcribe(outputPath)).text
-        } finally {
-          // Never leave uploaded/transcoded audio behind, success or failure.
-          await Promise.all([
-            unlink(inputPath).catch(() => {}),
-            unlink(outputPath).catch(() => {}),
-          ])
-        }
-      } catch (error) {
-        turnsInFlight.delete(id)
-        const message = error instanceof Error ? error.message : String(error)
-        stored.session.reportFailure(message, at)
-        sendJson(res, 422, { error: message })
-        endAndPersist(deps, store, entryClocks, id)
-        return
-      }
-
+    // Shared by a normal turn's success path and a retry's success path:
+    // commits the Andre entry, then streams the interviewer's reply exactly
+    // as a normal turn would. Owns clearing `turnsInFlight` for both callers.
+    function proceedTurn(id: string, stored: StoredSession, text: string, at: number): void {
       sendJson(res, 202, { text })
-
       void (async () => {
         // `submitTurn` commits the Andre entry synchronously, before the
         // interviewer's reply streams — mirror that ordering on the wire so
@@ -477,6 +493,156 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         .finally(() => {
           turnsInFlight.delete(id)
         })
+    }
+
+    const turnMatch = /^\/api\/session\/([^/]+)\/turn$/.exec(url.pathname)
+    if (req.method === 'POST' && turnMatch) {
+      const id = turnMatch[1]!
+      const stored = store.get(id)
+      if (!stored) {
+        notFound(res)
+        return
+      }
+      if (stored.session.endedEarly()) {
+        sendJson(res, 409, { error: 'session already ended' })
+        return
+      }
+      if (turnsInFlight.has(id)) {
+        sendJson(res, 409, { error: 'a turn is already in progress for this session' })
+        return
+      }
+      turnsInFlight.add(id)
+      store.touch(id, idleClock())
+
+      // The moment the upload arrived is the moment Andre's turn actually
+      // ended — sample it before transcode/transcription latency has a
+      // chance to leak into the pacing analytics `submitTurn` stamps entries
+      // with. Uses this session's own entry clock, not the idle-bookkeeping
+      // one — see the comment above `entryClocks`. Also the timestamp a later
+      // retry of this same turn must reuse — see `RetainedAudio.at`.
+      const entryClock = entryClocks.get(id)!
+      const at = entryClock()
+
+      const chunks: Buffer[] = []
+      let total = 0
+      let tooLarge = false
+      for await (const chunk of req) {
+        const buf = chunk as Buffer
+        total += buf.length
+        if (total > MAX_TURN_AUDIO_BYTES) {
+          tooLarge = true
+          break
+        }
+        chunks.push(buf)
+      }
+      if (tooLarge) {
+        turnsInFlight.delete(id)
+        sendJson(res, 413, { error: 'audio upload too large' })
+        req.destroy()
+        return
+      }
+      const audio = Buffer.concat(chunks)
+
+      const inputPath = join(stored.scratchDir, `turn-${Date.now()}-${++turnFileSeq}.webm`)
+      const outputPath = join(stored.scratchDir, `turn-${Date.now()}-${++turnFileSeq}.wav`)
+      await writeFile(inputPath, audio)
+
+      const result = await transcribeWithRetention(transcode, deps.transcriber, { path: inputPath, kind: 'webm' }, outputPath)
+      if (!result.ok) {
+        turnsInFlight.delete(id)
+        // A transcription failure is recoverable — see the module comment on
+        // `transcribeWithRetention` — so unlike before, this no longer calls
+        // `session.reportFailure` (that writes a synthetic "[Session ended
+        // early — ...]" entry into the transcript for a turn the interviewer
+        // genuinely never heard, which would corrupt the record the drill is
+        // graded on) and no longer ends the session. The audio is retained
+        // instead, and the session stays alive for a retry/abandon.
+        await setRetainedAudio(stored, result.retain, at)
+        sendJson(res, 422, { error: result.message })
+        return
+      }
+
+      // A fresh answer supersedes whatever an earlier failed turn retained.
+      // The primary "Start answer" action stays live under the error banner by
+      // design, so recording again *without* going through "Answer again" is an
+      // ordinary path — and if that left the old audio retained, a later
+      // "Retry transcription" would append a second entry stamped with the
+      // earlier turn's `at`, landing out of order in the graded record.
+      await clearRetainedAudio(stored)
+      proceedTurn(id, stored, result.text, at)
+      return
+    }
+
+    const retryMatch = /^\/api\/session\/([^/]+)\/turn\/retry$/.exec(url.pathname)
+    if (req.method === 'POST' && retryMatch) {
+      const id = retryMatch[1]!
+      const stored = store.get(id)
+      if (!stored) {
+        notFound(res)
+        return
+      }
+      if (stored.session.endedEarly()) {
+        sendJson(res, 409, { error: 'session already ended' })
+        return
+      }
+      if (turnsInFlight.has(id)) {
+        sendJson(res, 409, { error: 'a turn is already in progress for this session' })
+        return
+      }
+      const retained = stored.retainedAudio
+      if (!retained) {
+        sendJson(res, 409, { error: 'no retained audio to retry' })
+        return
+      }
+      turnsInFlight.add(id)
+      store.touch(id, idleClock())
+
+      const outputPath = join(stored.scratchDir, `retry-${Date.now()}-${++turnFileSeq}.wav`)
+      const result = await transcribeWithRetention(transcode, deps.transcriber, { path: retained.path, kind: retained.kind }, outputPath)
+      if (!result.ok) {
+        turnsInFlight.delete(id)
+        // Stay recoverable, not escalate: same shape as a first-attempt
+        // failure, just with the retained file possibly having changed (e.g.
+        // a webm that finally transcoded to a wav this time, but then failed
+        // to transcribe).
+        await setRetainedAudio(stored, result.retain, retained.at)
+        sendJson(res, 422, { error: result.message })
+        return
+      }
+
+      stored.retainedAudio = undefined
+      // Reuse the *original* turn's `at`, not this retry's — a retry can
+      // happen much later (Andre troubleshooting a mic or a whisper install),
+      // and `Entry.at` grades pacing off when he actually finished speaking,
+      // not when transcription finally succeeded. See `RetainedAudio.at`.
+      proceedTurn(id, stored, result.text, retained.at)
+      return
+    }
+
+    const abandonMatch = /^\/api\/session\/([^/]+)\/turn\/abandon$/.exec(url.pathname)
+    if (req.method === 'POST' && abandonMatch) {
+      const id = abandonMatch[1]!
+      const stored = store.get(id)
+      if (!stored) {
+        notFound(res)
+        return
+      }
+      if (turnsInFlight.has(id)) {
+        sendJson(res, 409, { error: 'a turn is already in progress for this session' })
+        return
+      }
+      // "Answer again" and "Skip this turn" are the same server-side
+      // operation: drop the retained audio and leave the session exactly
+      // where a turn that never failed would leave it — ready for the next
+      // recording. The two only differ in what the client does next (record
+      // a fresh answer to the same still-standing question, vs. moving on
+      // without one), which needs no server involvement either way. See the
+      // design report for why this collapsed into one endpoint rather than
+      // two. Idempotent: abandoning with nothing retained is a no-op, not an
+      // error, since a client shouldn't have to track whether it already won
+      // this race.
+      await clearRetainedAudio(stored)
+      sendJson(res, 200, { abandoned: true })
       return
     }
 

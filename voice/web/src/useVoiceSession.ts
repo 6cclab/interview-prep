@@ -29,17 +29,37 @@ export interface VoiceSession {
    */
   micFailureKind: 'denied' | 'nodevice' | null
   /**
-   * True after a 422 from `POST /turn`. The server (`voice/http-server.ts`,
-   * off-limits to modify here) unconditionally ends and persists the session
-   * on a transcription failure — so unlike the handoff's "parks in Ready"
-   * description, this always lands in `mode === 'ended'`. See the deviation
-   * note in the design report.
+   * True after a 422 from `POST /turn` or `POST /turn/retry`. The server
+   * (`voice/http-server.ts`) keeps the session alive on a transcription
+   * failure and retains the audio for a retry — matching the handoff's
+   * "parks in Ready" description exactly: `mode` stays
+   * `'listening-to-interviewer'`, so `derivePhase` reports `'ready'`, and the
+   * question that was being answered still stands.
    */
   transcriptFailed: boolean
   /** One computed banner selector for the presentation layer — see `ErrorKind`. */
   errorKind: ErrorKind | null
   /** Dismisses the currently-showing error banner without changing `mode`. */
   dismissError(): void
+  /**
+   * The transcript error's "Retry transcription" action: re-runs
+   * transcription on the audio already uploaded for the failed turn
+   * (`POST /api/session/:id/turn/retry`), server-side, no re-recording. On
+   * success, proceeds exactly like a normal turn — the existing `entry`/
+   * `sentence` SSE listeners in `connectStream` pick it up with no extra
+   * wiring needed. On failure, stays in the same recoverable error state.
+   */
+  retryTranscription(): void
+  /**
+   * The transcript error's "Answer again" and "Skip this turn" actions.
+   * Both resolve to the same server call (`POST .../turn/abandon`), which
+   * drops the retained audio and leaves the session exactly where a turn
+   * that never failed would — see the design report for why the
+   * distinction doesn't reach the server. The client-visible difference is
+   * only what happens next: pressing the primary action records a fresh
+   * answer to the same still-standing question either way.
+   */
+  abandonTurn(): void
   start(): void
   record(): void
   stopAndSubmit(): void
@@ -469,19 +489,61 @@ export function useVoiceSession(): VoiceSession {
       if (res.status === 422) {
         const { error } = (await res.json()) as { error: string }
         setStatus(`Turn failed: ${error}`)
-        // The server (voice/http-server.ts) unconditionally ends and persists
-        // the session on a transcription failure, so there is no live
-        // session left to return the question to — `mode` must follow it to
-        // 'ended' rather than the handoff's 'ready'. See the design report.
-        setMode('ended')
+        // The server (voice/http-server.ts) keeps the session alive and
+        // retains the audio on a transcription failure — the question still
+        // stands, so this parks in the same 'listening-to-interviewer'/ready
+        // state a normal turn's success would, not 'ended'. The mic stream
+        // stays held (see mediaStreamRef) so "Answer again" can re-record
+        // without a fresh permission prompt.
+        setMode('listening-to-interviewer')
         setTranscriptFailed(true)
-        releaseMicStream()
         return
       }
       setMode('listening-to-interviewer')
+      // Clears a prior turn's transcription error: recording again is one of
+      // the ways out of that state (the primary action stays live under the
+      // banner), so a success here has resolved it just as "Answer again" would.
+      setTranscriptFailed(false)
       setStatus('Your turn was received.')
     })()
-  }, [clearElapsedTimer, releaseMicStream])
+  }, [clearElapsedTimer])
+
+  // "Retry transcription": re-runs transcription on the audio the failed
+  // turn already uploaded, server-side — no re-recording. On success, the
+  // server proceeds exactly like a normal turn (commits the Andre entry,
+  // streams the interviewer's reply) over the existing SSE connection, which
+  // `connectStream`'s `entry`/`sentence` listeners already handle with no
+  // change needed here. On failure, the session stays recoverable — same
+  // error, updated message — rather than escalating.
+  const retryTranscription = useCallback(() => {
+    const id = sessionIdRef.current
+    if (!id) return
+    setStatus('Retrying transcription…')
+    void (async () => {
+      const res = await fetch(`/api/session/${id}/turn/retry`, { method: 'POST' })
+      if (res.status === 422) {
+        const { error } = (await res.json()) as { error: string }
+        setStatus(`Retry failed: ${error}`)
+        return
+      }
+      setTranscriptFailed(false)
+      setStatus('Your turn was received.')
+    })()
+  }, [])
+
+  // "Answer again" / "Skip this turn": both drop the retained audio
+  // (`POST .../turn/abandon`) and clear the error, leaving the session ready
+  // for the next recording — see the interface comment on `abandonTurn` for
+  // why one server call covers both client actions.
+  const abandonTurn = useCallback(() => {
+    const id = sessionIdRef.current
+    if (!id) return
+    void (async () => {
+      await fetch(`/api/session/${id}/turn/abandon`, { method: 'POST' })
+      setTranscriptFailed(false)
+      setStatus('Ready for your answer.')
+    })()
+  }, [])
 
   // `''` from the <select>'s own "system default" option means "no explicit
   // choice" — normalized to `null` here so the rest of the hook only ever
@@ -600,6 +662,8 @@ export function useVoiceSession(): VoiceSession {
     transcriptFailed,
     errorKind,
     dismissError,
+    retryTranscription,
+    abandonTurn,
     start,
     record,
     stopAndSubmit,
