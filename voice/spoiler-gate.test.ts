@@ -115,6 +115,63 @@ describe('spoiler gate', () => {
     }
   })
 
+  // Covers the two turn-recovery routes added for transcription-failure
+  // recovery: a retry's success response and the reply it triggers must be as
+  // spoiler-free as a normal turn's, and abandon's response body too.
+  it('no response body from the turn/retry or turn/abandon routes ever contains denied-file content or the raw trailer', async () => {
+    let transcodeCalls = 0
+    const { port } = await listen({
+      root,
+      createTransport: () => async function* () {
+        yield `Good critique. ${TRAILER}`
+      },
+      transcriber: { transcribe: async () => ({ text: 'A story about a migration.' }) },
+      store: createSessionStore(() => 'session-5'),
+      now: () => 0,
+      transcode: async (_input: string, output: string) => {
+        transcodeCalls++
+        if (transcodeCalls === 1) throw new Error('ffmpeg: invalid data found')
+        writeFileSync(output, Buffer.from('fake wav'))
+      },
+    })
+
+    const responses: string[] = []
+
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(stream) // opening sentence
+    await readSSE(stream) // opening entry
+
+    const failedTurn = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('audio'),
+    })
+    expect(failedTurn.status).toBe(422)
+    responses.push(await failedTurn.clone().text())
+
+    const retryRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn/retry`, { method: 'POST' })
+    expect(retryRes.status).toBe(202)
+    responses.push(await retryRes.clone().text())
+    responses.push(JSON.stringify(await readSSE(stream))) // andre entry
+    responses.push(JSON.stringify(await readSSE(stream))) // interviewer sentence — trailer must be stripped here
+
+    const abandonRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn/abandon`, { method: 'POST' })
+    responses.push(await abandonRes.clone().text())
+
+    // Ends the session so its SSE connection closes on its own — otherwise
+    // this file's afterEach (which, unlike http-server.test.ts's, doesn't
+    // call closeAllConnections) would hang waiting for it.
+    const endRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    responses.push(await endRes.clone().text())
+
+    for (const body of responses) {
+      expect(body).not.toContain(DENIED_STRING)
+      expect(body).not.toContain('story-log')
+      expect(body).not.toContain('competency: Conflict')
+    }
+  })
+
   // The sweep above never exercises an error path (every request it makes
   // succeeds) or the static file routes — this covers both, so a future
   // change that puts debug context into an error body or a template have a
@@ -138,6 +195,8 @@ describe('spoiler gate', () => {
       fetch(`http://127.0.0.1:${port}/does-not-exist`),
       fetch(`http://127.0.0.1:${port}/api/session/nope/stream`),
       fetch(`http://127.0.0.1:${port}/api/session/nope/turn`, { method: 'POST', body: Buffer.from('x') }),
+      fetch(`http://127.0.0.1:${port}/api/session/nope/turn/retry`, { method: 'POST' }),
+      fetch(`http://127.0.0.1:${port}/api/session/nope/turn/abandon`, { method: 'POST' }),
       fetch(`http://127.0.0.1:${port}/api/session/nope/end`, { method: 'POST' }),
     ])) {
       expect(res.status).toBe(404)
@@ -149,6 +208,11 @@ describe('spoiler gate', () => {
     const { id } = (await created.json()) as { id: string }
     const secondCreate = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
     expect(secondCreate.status).toBe(409)
+
+    // 409: no retained audio to retry
+    const retryNothing = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn/retry`, { method: 'POST' })
+    expect(retryNothing.status).toBe(409)
+    responses.push(await retryNothing.text())
     responses.push(await secondCreate.text())
 
     // 413: oversized turn upload — just over the 25MB limit, not a full extra

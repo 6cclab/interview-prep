@@ -273,6 +273,269 @@ describe('POST /api/session/:id/turn', () => {
   })
 })
 
+describe('transcription failure recovery', () => {
+  it('retry after a transcode failure re-transcodes, succeeds, and produces exactly one entry', async () => {
+    const store = createSessionStore(() => 'session-1')
+    let transcodeCalls = 0
+    const { port } = await listen(
+      baseDeps({
+        store,
+        createTransport: () => async function* () {
+          yield 'Tell me more.'
+        },
+        transcriber: { transcribe: async () => ({ text: 'I would shard by tenant.' }) },
+        transcode: async (_input, output) => {
+          transcodeCalls++
+          if (transcodeCalls === 1) throw new Error('ffmpeg: invalid data found')
+          writeFileSync(output, Buffer.from('fake wav bytes'))
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(stream) // opening sentence
+    await readSSE(stream) // opening entry
+
+    const failed = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('fake webm bytes'),
+    })
+    expect(failed.status).toBe(422)
+    expect(((await failed.json()) as { error: string }).error).toMatch(/ffmpeg/i)
+
+    // The failed turn's webm is retained (transcode never succeeded, so
+    // there's no wav to prefer), and the session is still usable.
+    const retained = store.get(id)!.retainedAudio
+    expect(retained?.kind).toBe('webm')
+    expect(existsSync(retained!.path)).toBe(true)
+
+    const retryRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn/retry`, { method: 'POST' })
+    expect(retryRes.status).toBe(202)
+    expect(await retryRes.json()).toEqual({ text: 'I would shard by tenant.' })
+    expect(transcodeCalls).toBe(2)
+
+    const andreEntry = await readSSE(stream)
+    expect(andreEntry).toEqual({ event: 'entry', data: { speaker: 'andre', text: 'I would shard by tenant.', at: 0 } })
+    const replySentence = await readSSE(stream)
+    expect(replySentence).toEqual({ event: 'sentence', data: { speaker: 'interviewer', text: 'Tell me more.' } })
+    await readSSE(stream) // interviewer entry
+
+    // Exactly one Andre entry landed, not two (the failed attempt) and not
+    // zero — and the retained audio is gone now that the retry succeeded.
+    const entries = store.get(id)!.session.entries()
+    expect(entries.filter((e) => e.speaker === 'andre')).toHaveLength(1)
+    expect(store.get(id)!.retainedAudio).toBeUndefined()
+    expect(existsSync(retained!.path)).toBe(false)
+  })
+
+  it('a transcribe failure (transcode already succeeded) retains the wav, and retry skips re-transcoding', async () => {
+    const store = createSessionStore(() => 'session-1')
+    let transcodeCalls = 0
+    let transcribeCalls = 0
+    const { port } = await listen(
+      baseDeps({
+        store,
+        createTransport: () => async function* () {
+          yield 'Tell me more.'
+        },
+        transcriber: {
+          transcribe: async () => {
+            transcribeCalls++
+            if (transcribeCalls === 1) throw new Error('whisper-cli: model not found')
+            return { text: 'I would shard by tenant.' }
+          },
+        },
+        transcode: async (_input, output) => {
+          transcodeCalls++
+          writeFileSync(output, Buffer.from('fake wav bytes'))
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    const failed = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('fake webm bytes'),
+    })
+    expect(failed.status).toBe(422)
+    expect(((await failed.json()) as { error: string }).error).toMatch(/whisper/i)
+
+    const retained = store.get(id)!.retainedAudio
+    expect(retained?.kind).toBe('wav')
+    expect(transcodeCalls).toBe(1)
+
+    const retryRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn/retry`, { method: 'POST' })
+    expect(retryRes.status).toBe(202)
+    // Retrying from an already-transcoded wav must not re-invoke transcode.
+    expect(transcodeCalls).toBe(1)
+    expect(transcribeCalls).toBe(2)
+  })
+
+  it('a retry that fails again stays recoverable — 422, session alive, still retryable', async () => {
+    const store = createSessionStore(() => 'session-1')
+    const { port } = await listen(
+      baseDeps({
+        store,
+        transcriber: { transcribe: async () => { throw new Error('whisper-cli: crashed') } },
+        transcode: async (_input, output) => writeFileSync(output, Buffer.from('fake wav bytes')),
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    const failed = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('fake webm bytes'),
+    })
+    expect(failed.status).toBe(422)
+
+    const retryRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn/retry`, { method: 'POST' })
+    expect(retryRes.status).toBe(422)
+    expect(store.get(id)).toBeDefined()
+    expect(store.get(id)!.retainedAudio).toBeDefined()
+
+    // Not an escalation: a second retry is still possible, and a normal
+    // /end still works.
+    const endRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    expect(endRes.status).toBe(200)
+  })
+
+  it('a second failed turn replaces the first retained audio, deleting the old file', async () => {
+    const store = createSessionStore(() => 'session-1')
+    const { port } = await listen(
+      baseDeps({
+        store,
+        transcode: async () => { throw new Error('ffmpeg: first failure') },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, { method: 'POST', body: Buffer.from('first webm') })
+    const firstRetained = store.get(id)!.retainedAudio!
+    expect(existsSync(firstRetained.path)).toBe(true)
+
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, { method: 'POST', body: Buffer.from('second webm') })
+    const secondRetained = store.get(id)!.retainedAudio!
+    expect(secondRetained.path).not.toBe(firstRetained.path)
+    expect(existsSync(firstRetained.path)).toBe(false)
+    expect(existsSync(secondRetained.path)).toBe(true)
+  })
+
+  it('POST .../turn/retry 409s when nothing is retained', async () => {
+    const { port } = await listen(baseDeps())
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn/retry`, { method: 'POST' })
+    expect(res.status).toBe(409)
+  })
+
+  it('POST .../turn/retry 404s an unknown session id', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/nope/turn/retry`, { method: 'POST' })
+    expect(res.status).toBe(404)
+  })
+
+  it('POST .../turn/abandon drops the retained audio and leaves the session usable for a fresh recording', async () => {
+    const store = createSessionStore(() => 'session-1')
+    const { port } = await listen(
+      baseDeps({
+        store,
+        transcode: async () => { throw new Error('ffmpeg: invalid data found') },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, { method: 'POST', body: Buffer.from('webm') })
+    const retained = store.get(id)!.retainedAudio!
+    expect(existsSync(retained.path)).toBe(true)
+
+    const abandonRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn/abandon`, { method: 'POST' })
+    expect(abandonRes.status).toBe(200)
+    expect(store.get(id)!.retainedAudio).toBeUndefined()
+    expect(existsSync(retained.path)).toBe(false)
+
+    // A fresh recording ("Answer again") is a normal turn, nothing special.
+    const normalTurn = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, { method: 'POST', body: Buffer.from('x') })
+    expect(normalTurn.status).not.toBe(404)
+  })
+
+  it('POST .../turn/abandon is idempotent when nothing is retained', async () => {
+    const { port } = await listen(baseDeps())
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn/abandon`, { method: 'POST' })
+    expect(res.status).toBe(200)
+  })
+
+  it('POST .../turn/abandon 404s an unknown session id', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/nope/turn/abandon`, { method: 'POST' })
+    expect(res.status).toBe(404)
+  })
+
+  // Retained audio must not accumulate past a session's lifetime, however it
+  // ends — normal /end, an SSE disconnect, and the idle reap sweep are three
+  // independently-coded exit paths (see endAndPersist's callers).
+  it('retained audio does not survive a normal session end', async () => {
+    const store = createSessionStore(() => 'session-1')
+    const { port } = await listen(
+      baseDeps({ store, transcode: async () => { throw new Error('ffmpeg: fail') } }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, { method: 'POST', body: Buffer.from('x') })
+    const retained = store.get(id)!.retainedAudio!
+    expect(existsSync(retained.path)).toBe(true)
+
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    expect(existsSync(retained.path)).toBe(false)
+  })
+
+  it('retained audio does not survive an SSE disconnect ending the session', async () => {
+    const store = createSessionStore(() => 'session-1')
+    const { port } = await listen(
+      baseDeps({ store, transcode: async () => { throw new Error('ffmpeg: fail') } }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, { method: 'POST', body: Buffer.from('x') })
+    const retained = store.get(id)!.retainedAudio!
+    expect(existsSync(retained.path)).toBe(true)
+
+    const controller = new AbortController()
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`, { signal: controller.signal })
+    await readSSE(stream) // opening sentence
+    controller.abort()
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(existsSync(retained.path)).toBe(false)
+  })
+
+  it('retained audio does not survive an idle reap', async () => {
+    const store = createSessionStore(() => 'session-1')
+    let clock = 0
+    const { port } = await listen(
+      baseDeps({ store, now: () => clock, idleMs: 1000, transcode: async () => { throw new Error('ffmpeg: fail') } }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, { method: 'POST', body: Buffer.from('x') })
+    const retained = store.get(id)!.retainedAudio!
+    expect(existsSync(retained.path)).toBe(true)
+
+    clock = 5000
+    const deadline = Date.now() + 2000
+    while (Date.now() < deadline && store.get(id)) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    expect(store.get(id)).toBeUndefined()
+    expect(existsSync(retained.path)).toBe(false)
+  })
+})
+
 describe('scratch directory cleanup', () => {
   it('removes the session scratch directory on POST /end', async () => {
     const store = createSessionStore(() => 'session-1')

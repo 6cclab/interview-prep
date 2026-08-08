@@ -268,6 +268,12 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   // reply-stream in flight) — guards against a second /turn for the same
   // session landing before the first has finished.
   const turnsInFlight = new Set<string>()
+  // A monotonic tiebreaker for scratch-file names. `Date.now()` alone can
+  // repeat within the same millisecond (two turns landing back to back, or
+  // a retry's own scratch wav) and produce a filename collision — harmless
+  // for a normal turn (the file is deleted immediately after), but fatal
+  // for retained audio, which must survive under a name nothing else reuses.
+  let turnFileSeq = 0
   // Per-session elapsed clock for `Entry.at`, keyed by session id. When a
   // caller injects `deps.now` (every test in this repo), all sessions share
   // that one clock, same as before. When nothing is injected (production),
@@ -537,8 +543,8 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       }
       const audio = Buffer.concat(chunks)
 
-      const inputPath = join(stored.scratchDir, `turn-${Date.now()}.webm`)
-      const outputPath = join(stored.scratchDir, `turn-${Date.now()}.wav`)
+      const inputPath = join(stored.scratchDir, `turn-${Date.now()}-${++turnFileSeq}.webm`)
+      const outputPath = join(stored.scratchDir, `turn-${Date.now()}-${++turnFileSeq}.wav`)
       await writeFile(inputPath, audio)
 
       const result = await transcribeWithRetention(transcode, deps.transcriber, { path: inputPath, kind: 'webm' }, outputPath)
@@ -584,7 +590,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       turnsInFlight.add(id)
       store.touch(id, idleClock())
 
-      const outputPath = join(stored.scratchDir, `retry-${Date.now()}.wav`)
+      const outputPath = join(stored.scratchDir, `retry-${Date.now()}-${++turnFileSeq}.wav`)
       const result = await transcribeWithRetention(transcode, deps.transcriber, { path: retained.path, kind: retained.kind }, outputPath)
       if (!result.ok) {
         turnsInFlight.delete(id)
