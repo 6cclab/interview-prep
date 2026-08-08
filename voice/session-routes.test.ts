@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Server } from 'node:http'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
@@ -153,9 +153,15 @@ describe('POST /api/session/:id/turn', () => {
     expect(replySentence).toEqual({ event: 'sentence', data: { speaker: 'interviewer', text: 'Tell me more.' } })
   })
 
-  it('ends the session on a transcode failure and reports it over SSE', async () => {
+  // A transcription failure is recoverable, not session-ending: whisper.cpp
+  // hiccuping on turn 6 of a drill must not cost Andre the whole session. See
+  // the "transcription failure recovery" describe block below for the full
+  // retry/abandon surface.
+  it('a transcode failure does not end the session, and does not add a phantom transcript entry', async () => {
+    const store = createSessionStore(() => 'session-1')
     const { port } = await listen(
       baseDeps({
+        store,
         transcode: async () => {
           throw new Error('ffmpeg: invalid data found')
         },
@@ -165,17 +171,28 @@ describe('POST /api/session/:id/turn', () => {
     const { id } = (await created.json()) as { id: string }
     const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
     await readSSE(stream)
-    await readSSE(stream)
+    const openingEntry = await readSSE(stream)
 
     const turnRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
       method: 'POST',
       body: Buffer.from('garbage'),
     })
     expect(turnRes.status).toBe(422)
+    expect(((await turnRes.json()) as { error: string }).error).toMatch(/ffmpeg/i)
 
-    const ended = await readSSE(stream)
-    expect(ended.event).toBe('ended')
-    expect((ended.data as { endedEarly: string | null }).endedEarly).toMatch(/ffmpeg/i)
+    // No 'ended' event, and no synthetic entry landed on the still-open
+    // stream — the interviewer's question still stands and the transcript
+    // is exactly what it was before the failed turn.
+    expect(store.get(id)).toBeDefined()
+    void openingEntry
+
+    // The session is still usable: a normal /end still works, and produces a
+    // transcript with no synthetic "[Session ended early — ...]" entry.
+    const endRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    expect(endRes.status).toBe(200)
+    const { relPath } = (await endRes.json()) as { relPath: string }
+    const transcript = readFileSync(join(root, relPath), 'utf8')
+    expect(transcript).not.toContain('Session ended early')
   })
 
   it('404s an unknown session id', async () => {
