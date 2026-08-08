@@ -773,21 +773,50 @@ body {
 }
 
 .device-settings__row label {
-  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
   color: var(--muted-foreground);
 }
 
+/* `appearance: none` is load-bearing, not tidying: a native macOS select
+   ignores `border`, `background` and `border-radius` entirely, so without it
+   this renders as a stock system control in the middle of a screen built
+   from 2px borders and hard shadows. Resetting it means supplying the
+   chevron too — an inline data URI, since the handoff ships no icon package
+   and adding one is not worth a caret. */
 .device-settings__row select {
-  font: inherit;
-  font-size: 0.9rem;
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: var(--font-mono);
+  font-size: 13px;
   color: var(--foreground);
-  background: var(--background);
+  background-color: var(--background);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 10px 6px;
   border: 2px solid var(--border);
-  padding: 0.4rem 0.6rem;
+  border-radius: 0;
+  box-shadow: var(--shadow-brutal, 4px 4px 0 0 var(--shadow-color));
+  padding: 0.5rem 2.25rem 0.5rem 0.7rem;
   max-width: 28rem;
+  width: 100%;
+  cursor: pointer;
+}
+
+.device-settings__row select:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* The press affordance used on every other control here: the element moves
+   into its own shadow rather than lifting. */
+.device-settings__row select:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 0 var(--shadow-color);
 }
 
 .device-settings__hint {
