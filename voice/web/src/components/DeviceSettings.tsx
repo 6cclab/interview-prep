@@ -41,11 +41,6 @@ export function DeviceSettings({
             </option>
           ))}
         </select>
-        {inputDevices.length === 0 && (
-          <p className="device-settings__hint">
-            No named microphones yet — grant microphone access (press "Start session") to see them listed here.
-          </p>
-        )}
       </div>
 
       <div className="device-settings__row">
@@ -62,11 +57,20 @@ export function DeviceSettings({
             </option>
           ))}
         </select>
-        <p className="device-settings__hint">
-          The interviewer is spoken through the server, on this machine — the browser has no way to route audio to a
-          chosen speaker on its own.
-        </p>
       </div>
+
+      {/* Both hints live here rather than inside a row, so they span the full
+          width beneath the two selects instead of narrowing one column and
+          knocking the pair out of alignment. */}
+      <p className="device-settings__hint">
+        {inputDevices.length === 0 && (
+          <>
+            No named microphones yet — grant access (press &ldquo;Start session&rdquo;) to see them listed.{' '}
+          </>
+        )}
+        The interviewer is spoken through the server, on this machine — the browser has no way to route audio to a
+        chosen speaker on its own.
+      </p>
     </section>
   )
 }
