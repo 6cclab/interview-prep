@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Entry, ErrorKind, Mode } from './types'
+import type { Entry, ErrorKind, MicDevice, Mode, OutputDevice } from './types'
 
 export interface VoiceSession {
   mode: Mode
@@ -51,15 +51,76 @@ export interface VoiceSession {
    * "stuck" banner's "End it and start fresh" action do what it says.
    */
   forceEndStuckSession(): void
+  /**
+   * Named microphones, per `navigator.mediaDevices.enumerateDevices()`.
+   * Empty until permission has been granted at least once — device labels
+   * are blank before that, and a list of blank options isn't a real choice,
+   * so unnamed entries are filtered out entirely rather than shown. Refreshed
+   * on `devicechange` (a headset plugged in) and right after a successful
+   * `getUserMedia` call.
+   */
+  inputDevices: MicDevice[]
+  /** The chosen microphone's `deviceId`, or `null` for "system default". */
+  selectedInputId: string | null
+  /**
+   * Selects a microphone. Persists the choice (`POST /api/devices/config`,
+   * `webInput` field) so it survives a reload, and — since `record()` reuses
+   * a cached stream across turns — releases that cached stream and
+   * re-acquires on the new device immediately if a session is live, so the
+   * change actually takes effect rather than waiting for the next `start()`.
+   */
+  selectInput(deviceId: string): void
+  /** Speakers, from the server's `GET /api/devices/output` (see `voice/devices.ts`). */
+  outputDevices: OutputDevice[]
+  /** The chosen speaker's id, or `null` for "system default". */
+  selectedOutputId: string | null
+  /**
+   * Selects a speaker the *server* should speak through — the browser has no
+   * API to route `SpeechSynthesis` to a chosen output device, so speech
+   * happens server-side (see `voice/http-server.ts`'s `deps.speaker`) and
+   * this only needs to persist the choice (`POST /api/devices/config`,
+   * `output` field); no local audio pipeline to restart.
+   */
+  selectOutput(id: string): void
 }
 
-function speak(text: string): Promise<void> {
-  return new Promise((resolve) => {
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.onend = () => resolve()
-    utterance.onerror = () => resolve()
-    window.speechSynthesis.speak(utterance)
-  })
+// Blank labels mean "a microphone exists, but permission hasn't been granted
+// yet" (see MicCheck.tsx's identical comment) — presenting those as a real
+// choice would be presenting indistinguishable "Microphone" entries as if
+// they were meaningfully different options. Filtered out entirely rather
+// than shown disabled/greyed, per the spec: don't present a list of blank
+// options as if it were a real choice.
+async function listNamedMicDevices(): Promise<MicDevice[]> {
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  return devices
+    .filter((d) => d.kind === 'audioinput' && d.label !== '')
+    .map((d) => ({ deviceId: d.deviceId, label: d.label }))
+}
+
+interface DeviceConfigResponse {
+  input?: string
+  output?: string
+  webInput?: string
+}
+
+async function fetchDeviceConfig(): Promise<DeviceConfigResponse | null> {
+  try {
+    const res = await fetch('/api/devices/config')
+    if (!res.ok) return null
+    return (await res.json()) as DeviceConfigResponse
+  } catch {
+    return null
+  }
+}
+
+// Best-effort: a failed persist just means the choice won't survive a
+// reload, not a reason to interrupt whatever the user was doing.
+function persistDeviceConfig(patch: { output?: string; webInput?: string }): void {
+  void fetch('/api/devices/config', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  }).catch(() => {})
 }
 
 // Safari does not treat `http://localhost` as a secure context, so
@@ -121,6 +182,10 @@ export function useVoiceSession(): VoiceSession {
   const [micUnsupported] = useState(mediaDevicesUnsupported)
   const [micFailureKind, setMicFailureKind] = useState<'denied' | 'nodevice' | null>(null)
   const [transcriptFailed, setTranscriptFailed] = useState(false)
+  const [inputDevices, setInputDevices] = useState<MicDevice[]>([])
+  const [selectedInputId, setSelectedInputId] = useState<string | null>(null)
+  const [outputDevices, setOutputDevices] = useState<OutputDevice[]>([])
+  const [selectedOutputId, setSelectedOutputId] = useState<string | null>(null)
 
   const sessionIdRef = useRef<string | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -134,6 +199,12 @@ export function useVoiceSession(): VoiceSession {
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const modeRef = useRef<Mode>(mode)
   modeRef.current = mode
+  // Mirrors `selectedInputId` for `acquireStream`, which needs the value at
+  // call time, not whatever it closed over — same pattern as `modeRef`.
+  // Updated synchronously wherever the state itself is set (not via an
+  // effect) so `selectInput`'s own immediate re-acquisition below never races
+  // a stale read of its own selection.
+  const selectedInputIdRef = useRef<string | null>(null)
 
   const clearElapsedTimer = useCallback(() => {
     if (elapsedTimerRef.current !== null) {
@@ -159,15 +230,46 @@ export function useVoiceSession(): VoiceSession {
   // never abandoned or raced against a fabricated rejection — if the user
   // grants access late, this still resolves normally and the caller
   // proceeds as if nothing happened.
+  // Repopulates `inputDevices` from `navigator.mediaDevices.enumerateDevices()`.
+  // Safe to call regardless of permission state: unnamed (unlabeled) entries
+  // are filtered out by `listNamedMicDevices`, so calling this before a grant
+  // just yields an empty list rather than a list of blank options. Also the
+  // fallback path when the previously selected device has vanished (e.g. a
+  // headset was unplugged) — rather than leaving a dangling id that the next
+  // `getUserMedia({ deviceId: { exact } })` would reject with
+  // `OverconstrainedError`, drop back to `null` ("system default").
+  const refreshInputDevices = useCallback(async () => {
+    if (mediaDevicesUnsupported()) return
+    try {
+      const named = await listNamedMicDevices()
+      setInputDevices(named)
+      if (selectedInputIdRef.current && !named.some((d) => d.deviceId === selectedInputIdRef.current)) {
+        selectedInputIdRef.current = null
+        setSelectedInputId(null)
+      }
+    } catch {
+      // enumerateDevices() failing is rare and not worth its own error
+      // banner — the selector just stays empty/stale until the next
+      // successful refresh.
+    }
+  }, [])
+
   const acquireStream = useCallback(async (): Promise<MediaStream | null> => {
     if (mediaDevicesUnsupported()) return null
 
     setMicFailureKind(null)
     const watchdog = setTimeout(() => setStatus(MIC_WATCHDOG_MESSAGE), MIC_WATCHDOG_MS)
+    const deviceId = selectedInputIdRef.current
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+      })
       clearTimeout(watchdog)
       mediaStreamRef.current = stream
+      // Labels are populated the moment permission is granted — refresh now
+      // so the selector shows real names instead of staying empty until some
+      // unrelated `devicechange` event happens to fire.
+      void refreshInputDevices()
       return stream
     } catch (error) {
       clearTimeout(watchdog)
@@ -176,7 +278,7 @@ export function useVoiceSession(): VoiceSession {
       setMicFailureKind(classifyMicError(error))
       return null
     }
-  }, [])
+  }, [refreshInputDevices])
 
   const connectStream = useCallback((id: string) => {
     eventSourceRef.current?.close()
@@ -192,7 +294,11 @@ export function useVoiceSession(): VoiceSession {
       // `entries`: this text originates from the same `sentence` payload the
       // server already sends, nothing new is exposed.
       setInterimSentences((prev) => [...prev, text])
-      void speak(text)
+      // Speech itself happens server-side now (`voice/http-server.ts`'s
+      // `deps.speaker`, via `saySpeaker`) — `SpeechSynthesis` has no API to
+      // route audio to a chosen output device, but the server is the same
+      // machine, so it speaks instead. The browser only renders the text;
+      // speaking it here too would double up two overlapping voices.
     })
 
     // Renders only the `speaker`/`text`/`at` fields carried by the `entry`
@@ -377,6 +483,74 @@ export function useVoiceSession(): VoiceSession {
     })()
   }, [clearElapsedTimer, releaseMicStream])
 
+  // `''` from the <select>'s own "system default" option means "no explicit
+  // choice" — normalized to `null` here so the rest of the hook only ever
+  // deals in `string | null`.
+  const selectInput = useCallback(
+    (deviceId: string) => {
+      const normalized = deviceId === '' ? null : deviceId
+      selectedInputIdRef.current = normalized
+      setSelectedInputId(normalized)
+      if (normalized) persistDeviceConfig({ webInput: normalized })
+      // The cached stream (see `mediaStreamRef`) is keyed to whatever device
+      // it was opened against — reused as-is, it would keep recording from
+      // the old microphone regardless of this selection. Releasing it here
+      // and re-acquiring immediately (when a session is actually live) is
+      // what makes the new choice take effect right away instead of on the
+      // next `start()`.
+      releaseMicStream()
+      if (modeRef.current !== 'idle' && modeRef.current !== 'ended') void acquireStream()
+    },
+    [releaseMicStream, acquireStream],
+  )
+
+  const selectOutput = useCallback((id: string) => {
+    const normalized = id === '' ? null : id
+    setSelectedOutputId(normalized)
+    // No local audio pipeline to restart — the server (`voice/http-server.ts`)
+    // re-reads `local/voice.json` on every sentence it speaks, so persisting
+    // here is the entire effect; the very next reply picks it up.
+    persistDeviceConfig({ output: normalized ?? '' })
+  }, [])
+
+  // Devices can change while the app is open (a headset plugged in) —
+  // `devicechange` is the browser's own signal for that. Also runs once on
+  // mount: Chrome persists per-origin microphone permission across reloads,
+  // so labels can already be available with no fresh gesture at all.
+  useEffect(() => {
+    if (mediaDevicesUnsupported()) return
+    void refreshInputDevices()
+    navigator.mediaDevices.addEventListener('devicechange', refreshInputDevices)
+    return () => navigator.mediaDevices.removeEventListener('devicechange', refreshInputDevices)
+  }, [refreshInputDevices])
+
+  // Restores the persisted device selection (see `readDeviceConfig` /
+  // `local/voice.json`, shared with `cli.ts` for the `output` field) and
+  // loads the speaker list the server can see (`GET /api/devices/output`) —
+  // the browser has no output-device enumeration API of its own, which is
+  // exactly why speech happens server-side at all.
+  useEffect(() => {
+    void (async () => {
+      const config = await fetchDeviceConfig()
+      if (config?.webInput) {
+        selectedInputIdRef.current = config.webInput
+        setSelectedInputId(config.webInput)
+      }
+      if (config?.output) setSelectedOutputId(config.output)
+    })()
+    void (async () => {
+      try {
+        const res = await fetch('/api/devices/output')
+        if (!res.ok) return
+        const { devices } = (await res.json()) as { devices: OutputDevice[] }
+        setOutputDevices(devices)
+      } catch {
+        // No speaker list is not fatal — the server still speaks through
+        // whatever the system default output is.
+      }
+    })()
+  }, [])
+
   useEffect(() => {
     const handler = (): void => {
       const id = sessionIdRef.current
@@ -431,5 +605,11 @@ export function useVoiceSession(): VoiceSession {
     stopAndSubmit,
     endSession,
     forceEndStuckSession,
+    inputDevices,
+    selectedInputId,
+    selectInput,
+    outputDevices,
+    selectedOutputId,
+    selectOutput,
   }
 }

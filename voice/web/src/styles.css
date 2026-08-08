@@ -189,6 +189,18 @@ body {
   overflow-y: auto;
 }
 
+/* The device-selection disclosure this header's "Devices" button opens —
+   same treatment as .mic-check-panel above and for the same reason: kept out
+   of the transcript column so it never disturbs the single-screen layout. */
+.device-settings-panel {
+  flex: none;
+  border-bottom: 2px solid var(--border);
+  background: var(--muted);
+  padding: 16px 28px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
 /* ---------------------------------------------------------------------- */
 /* Main / transcript column                                                */
 /* ---------------------------------------------------------------------- */
@@ -744,4 +756,43 @@ body {
   .mic-check__row {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Device selection (subordinated — see Header.tsx)                       */
+/* ---------------------------------------------------------------------- */
+
+.device-settings {
+  display: grid;
+  gap: 1rem;
+}
+
+.device-settings__row {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.device-settings__row label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+}
+
+.device-settings__row select {
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--foreground);
+  background: var(--background);
+  border: 2px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  max-width: 28rem;
+}
+
+.device-settings__hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted-foreground);
+  max-width: 60ch;
 }

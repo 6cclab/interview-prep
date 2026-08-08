@@ -28,3 +28,15 @@ export interface Entry {
   text: string
   at: number
 }
+
+/** A microphone as reported by `navigator.mediaDevices.enumerateDevices()`. */
+export interface MicDevice {
+  deviceId: string
+  label: string
+}
+
+/** A speaker as reported by the server's `GET /api/devices/output` (see `voice/devices.ts`). */
+export interface OutputDevice {
+  id: string
+  name: string
+}

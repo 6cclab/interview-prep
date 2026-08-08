@@ -8,6 +8,7 @@ import { ErrorBanner, type ErrorAction } from './components/ErrorBanner'
 import { RecordingChrome } from './components/RecordingChrome'
 import { LiveRegions } from './components/LiveRegions'
 import { MicCheck } from './components/MicCheck'
+import { DeviceSettings } from './components/DeviceSettings'
 import { useTheme } from './theme'
 import { derivePhase, fmt, wallClock, ERROR_COPY, ANNOUNCEMENTS } from './phase'
 import type { ErrorKind } from './types'
@@ -29,7 +30,6 @@ export default function App() {
     elapsedSeconds,
     interviewerSpeaking,
     interimSentences,
-    micUnsupported,
     errorKind,
     dismissError,
     start,
@@ -37,10 +37,17 @@ export default function App() {
     stopAndSubmit,
     endSession,
     forceEndStuckSession,
+    inputDevices,
+    selectedInputId,
+    selectInput,
+    outputDevices,
+    selectedOutputId,
+    selectOutput,
   } = useVoiceSession()
 
   const [dark, toggleTheme] = useTheme()
   const [micCheckOpen, setMicCheckOpen] = useState(false)
+  const [deviceSettingsOpen, setDeviceSettingsOpen] = useState(false)
 
   const phase = derivePhase(mode, interviewerSpeaking)
 
@@ -231,12 +238,6 @@ export default function App() {
     statusDetail = `Transcript saved — ${entries.length} turns, ${fmt(endedSessionSecondsRef.current)} total.`
   }
 
-  // `micUnsupported` (no `navigator.mediaDevices` at all — e.g. Safari over
-  // an insecure origin) is folded into the `nodevice` banner by
-  // useVoiceSession's `errorKind`: from the outside it's the same fact, "no
-  // usable input in this context."
-  void micUnsupported
-
   return (
     <>
       <LiveRegions announcement={announcement} alertText={alertText} />
@@ -250,7 +251,22 @@ export default function App() {
           onToggleTheme={toggleTheme}
           micCheckOpen={micCheckOpen}
           onToggleMicCheck={() => setMicCheckOpen((v) => !v)}
+          deviceSettingsOpen={deviceSettingsOpen}
+          onToggleDeviceSettings={() => setDeviceSettingsOpen((v) => !v)}
         />
+
+        {deviceSettingsOpen && (
+          <div className="device-settings-panel">
+            <DeviceSettings
+              inputDevices={inputDevices}
+              selectedInputId={selectedInputId}
+              onSelectInput={selectInput}
+              outputDevices={outputDevices}
+              selectedOutputId={selectedOutputId}
+              onSelectOutput={selectOutput}
+            />
+          </div>
+        )}
 
         {micCheckOpen && (
           <div className="mic-check-panel">
