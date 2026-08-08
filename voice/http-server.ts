@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
-import { mkdtempSync, existsSync, rmSync } from 'node:fs'
+import { createServer as createHttpsServer } from 'node:https'
+import { mkdtempSync, existsSync, rmSync, readFileSync } from 'node:fs'
 import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -30,6 +31,13 @@ export interface VoiceServerDeps {
    * small fixture directory instead of depending on a real `vite build`.
    */
   distDir?: string
+  /**
+   * PEM cert and key. When present the server speaks HTTPS instead of HTTP —
+   * required by Arc, which unlike Chrome does not treat plain-HTTP localhost
+   * as a secure context and so never exposes `navigator.mediaDevices`.
+   * Absent in every test, which keeps them on plain HTTP.
+   */
+  tls?: { cert: Buffer; key: Buffer } | null
 }
 
 // A recorded interview turn is at most a few minutes of audio; 25MB is a wide
@@ -142,7 +150,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   }, Math.min(idleMs, 30_000))
   sweep.unref()
 
-  return createServer((req: IncomingMessage, res: ServerResponse): void => {
+  const onRequest = (req: IncomingMessage, res: ServerResponse): void => {
     // Opt-in request log, for diagnosing a browser we cannot see. Off unless
     // VOICE_DEBUG is set, so default behaviour and the test suite are
     // untouched. Logs method, path and response status only — never a body,
@@ -155,7 +163,11 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       })
     }
     void handleRequest(req, res)
-  })
+  }
+
+  // `https.Server` extends `http.Server`, so the declared return type holds
+  // for both and no caller has to care which one it got.
+  return deps.tls ? createHttpsServer({ cert: deps.tls.cert, key: deps.tls.key }, onRequest) : createServer(onRequest)
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
@@ -422,6 +434,32 @@ function chooseTransport(): StreamFn {
   return claudeCliStream()
 }
 
+/**
+ * TLS material for the dev server, if it has been generated.
+ *
+ * Chromium's "localhost counts as a secure context" exemption is not
+ * universal across its forks — Arc requires real HTTPS before it will expose
+ * `navigator.mediaDevices` at all, so on Arc the drill's microphone request
+ * hangs forever over plain HTTP with no prompt and no error. Serving TLS is
+ * the only fix.
+ *
+ * Generated with mkcert so the certificate is trusted by the system CA and
+ * the browser raises no warning:
+ *
+ *   mkdir -p local/certs && cd local/certs
+ *   mkcert -cert-file cert.pem -key-file key.pem localhost 127.0.0.1 ::1
+ *
+ * Lives under `local/` because it is machine-specific and `local/` is
+ * gitignored — a private key must never be committed. Absent, the server
+ * falls back to HTTP, which is fine in Chrome and Firefox.
+ */
+function readTlsMaterial(root: string): { cert: Buffer; key: Buffer } | null {
+  const certPath = join(root, 'local/certs/cert.pem')
+  const keyPath = join(root, 'local/certs/key.pem')
+  if (!existsSync(certPath) || !existsSync(keyPath)) return null
+  return { cert: readFileSync(certPath), key: readFileSync(keyPath) }
+}
+
 function main(): void {
   const port = process.env.PORT ? Number(process.env.PORT) : 4173
   const root = process.cwd()
@@ -438,13 +476,29 @@ function main(): void {
     )
     process.exit(1)
   }
+  const tls = readTlsMaterial(root)
   const server = createVoiceServer({
     root,
     createTransport: chooseTransport,
     transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
+    tls,
   })
+  // Still `127.0.0.1` only — TLS changes the scheme, never the reach. A live
+  // microphone and a private story bank have no business on the network.
   server.listen(port, '127.0.0.1', () => {
-    console.log(`Voice mock drill: http://127.0.0.1:${port}/`)
+    const scheme = tls ? 'https' : 'http'
+    // `127.0.0.1`, not `localhost`: the listen above binds IPv4 only, and
+    // browsers resolve `localhost` to `::1` first — so a `localhost` URL
+    // fails to connect in Chrome even though curl silently falls back to
+    // IPv4. The certificate covers both names.
+    console.log(`Voice mock drill: ${scheme}://127.0.0.1:${port}/`)
+    if (!tls) {
+      console.log(
+        'Serving plain HTTP. Chrome and Firefox treat localhost as secure, but Arc and Safari do not —\n' +
+          'they will never prompt for the microphone. To serve HTTPS:\n' +
+          '  mkdir -p local/certs && cd local/certs && mkcert -cert-file cert.pem -key-file key.pem localhost 127.0.0.1 ::1',
+      )
+    }
   })
 }
 
