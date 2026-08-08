@@ -9,10 +9,12 @@ import { RecordingChrome } from './components/RecordingChrome'
 import { LiveRegions } from './components/LiveRegions'
 import { MicCheck } from './components/MicCheck'
 import { DeviceSettings } from './components/DeviceSettings'
-import { DrillPicker } from './components/DrillPicker'
+import { Home } from './components/Home'
+import { HomeHeader } from './components/HomeHeader'
 import { ProblemPane } from './components/ProblemPane'
+import { routeDrill, routeHash, useRoute, type Route } from './route'
 import { useTheme } from './theme'
-import { derivePhase, fmt, wallClock, stuckBody, ERROR_COPY, ANNOUNCEMENTS } from './phase'
+import { derivePhase, fmt, wallClock, stuckBody, DESIGN_BUDGET_MINUTES, ERROR_COPY, ANNOUNCEMENTS } from './phase'
 import type { ErrorKind } from './types'
 
 // Status title/detail for the dock's left-hand block. The `requesting`
@@ -34,7 +36,41 @@ const REQUESTING_LONG_COPY =
   'cannot see the prompt, it may be behind this window, or collapsed into the padlock icon in the address bar — ' +
   'open that and choose Allow. You can leave this sitting here.'
 
+/**
+ * The router shell. `home` is the drill chooser; every other route is the drill
+ * screen, which is one component for both tracks because all of it but the
+ * problem pane and the clock is shared — see `Home` for why the chooser is not.
+ *
+ * `key` on the drill screen is the route, so switching drills remounts it rather
+ * than carrying one track's session state into the other's screen.
+ */
 export default function App() {
+  const [route, navigate] = useRoute()
+  const [dark, toggleTheme] = useTheme()
+
+  if (route.view === 'home') {
+    // Both views share `.app-root`: it is the full-height flex column that makes
+    // a sticky header and a single scrolling region work, and #root is
+    // `height: 100vh; overflow: hidden`, so rendering outside it would leave the
+    // chooser with no height to scroll inside.
+    return (
+      <div className="app-root">
+        <HomeHeader dark={dark} onToggleTheme={toggleTheme} />
+        <Home onChoose={navigate} />
+      </div>
+    )
+  }
+  return <DrillScreen key={routeHash(route)} route={route} dark={dark} onToggleTheme={toggleTheme} onGoHome={() => navigate({ view: 'home' })} />
+}
+
+interface DrillScreenProps {
+  route: Route
+  dark: boolean
+  onToggleTheme(): void
+  onGoHome(): void
+}
+
+function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps) {
   const {
     mode,
     entries,
@@ -63,7 +99,10 @@ export default function App() {
     selectOutput,
   } = useVoiceSession()
 
-  const [dark, toggleTheme] = useTheme()
+  // The drill this screen runs, from the route rather than from a picker: the
+  // route is the single source of truth for which track this is, which is what
+  // lets a reload land back on the same drill.
+  const routed = routeDrill(route)
   const [micCheckOpen, setMicCheckOpen] = useState(false)
   const [deviceSettingsOpen, setDeviceSettingsOpen] = useState(false)
 
@@ -143,11 +182,18 @@ export default function App() {
 
   const onPrimaryAction = useCallback((): void => {
     if (phase === 'idle' || phase === 'ended') {
+      // `starting` guards the async gap: `start` is a request, and a second
+      // press before it settles would race its own session into a 409 against
+      // itself. Space triggers this handler too, so the guard has to live here
+      // rather than only on the button.
+      if (starting) return
       setSessionSeconds(0)
-      start()
+      // The routed drill, so this one button starts whichever track this screen
+      // is. `routed` is only null on `home`, which has no primary action.
+      start(routed ?? undefined)
     } else if (phase === 'ready') record()
     else if (phase === 'recording') onStopAndSubmit()
-  }, [phase, start, record, onStopAndSubmit])
+  }, [phase, start, record, onStopAndSubmit, routed, starting])
 
   // Space triggers the primary action from anywhere on the page, per the
   // handoff — suppressed when focus is on an interactive element (that
@@ -312,9 +358,17 @@ export default function App() {
         <Header
           sessionSeconds={sessionSeconds}
           remainingSeconds={remainingSeconds}
-          kicker={drill?.track === 'design' ? `System design · ${drill.problem ?? ''}` : 'Behavioral · voice'}
+          // Only before the countdown exists, and only on a timed track.
+          budgetMinutes={route.view === 'design' && remainingSeconds === null ? DESIGN_BUDGET_MINUTES : null}
+          // From the route, not the live drill: the header must name the track
+          // before a session exists, not just once one is running.
+          title={route.view === 'design' ? 'Design interview' : 'Mock interview'}
+          kicker={route.view === 'design' ? `System design · ${route.problem}` : 'Behavioral · voice'}
+          // Leaving a live session is `End session`'s job, not a navigation's —
+          // walking away silently would abandon a transcript.
+          onGoHome={phase === 'idle' || phase === 'ended' ? onGoHome : undefined}
           dark={dark}
-          onToggleTheme={toggleTheme}
+          onToggleTheme={onToggleTheme}
           micCheckOpen={micCheckOpen}
           onToggleMicCheck={() => setMicCheckOpen((v) => !v)}
           deviceSettingsOpen={deviceSettingsOpen}
@@ -342,10 +396,17 @@ export default function App() {
 
         {/* The design track's prompt stays up for the whole drill — the reason
             this track waited for a browser. Above the transcript so it reads as
-            the question the conversation is about, not as a note on it. */}
-        {drill?.track === 'design' && drill.problem && phase !== 'idle' && (
-          <div className="problem-pane-slot">
-            <ProblemPane problem={drill.problem} />
+            the question the conversation is about, not as a note on it. Driven
+            off the route, not off the live session, so it is on screen while
+            reading the prompt before starting rather than only once a session
+            exists — reading the question first is the point. */}
+        {/* `--roomy` before the drill starts: with an empty transcript the prompt
+            is the only thing on the page worth reading, and capping it to a
+            third of the screen left half of it blank. It shrinks back once the
+            conversation has something in it. */}
+        {route.view === 'design' && (
+          <div className={`problem-pane-slot${phase === 'idle' ? ' problem-pane-slot--roomy' : ''}`}>
+            <ProblemPane problem={route.problem} />
           </div>
         )}
 
@@ -354,18 +415,6 @@ export default function App() {
         </main>
 
         <div className="dock-stack">
-          {/* Idle only: choosing a drill is a pre-session act, and the handoff's
-              single-screen layout owns everything from the first question on. */}
-          {phase === 'idle' && (
-            <div className="dock-stack__row">
-              {/* `busy` once the press has been made: `start` is async, and a
-                  second press before the first resolves races its own session
-                  into a 409 against itself. `phase` leaves idle as soon as the
-                  session is created, so this only has to cover the gap in
-                  between — which is exactly what `status` reports. */}
-              <DrillPicker onStart={start} busy={starting} />
-            </div>
-          )}
           {errorKind && (
             <div className="dock-stack__row">
               <ErrorBanner

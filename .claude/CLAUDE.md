@@ -38,9 +38,10 @@ pnpm test               # everything, as a regression check
 pnpm reset <problem>    # restore stub.ts over solution.ts
 pnpm mock:voice         # spoken behavioral drill
 pnpm mock:web           # React browser client (127.0.0.1) — builds, then serves.
-                        # Serves BOTH spoken tracks: behavioral is the primary
-                        # action, and the Idle screen also offers a timed system
-                        # design drill with the prompt kept on screen.
+                        # Serves BOTH spoken tracks. The landing page chooses;
+                        # each drill then gets its own screen at its own URL
+                        # (#/mock, #/design/<problem>), so a reload comes back to
+                        # the same drill instead of the chooser.
 pnpm build:web          # build the React client only (voice/web -> voice/dist)
 pnpm dev:web            # Vite dev server with HMR for voice/web (proxies /api)
 pnpm dev:web:api        # the node:http API/session server alone, for use alongside dev:web
