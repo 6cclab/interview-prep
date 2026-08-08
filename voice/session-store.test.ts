@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { createSessionStore } from './session-store'
+import { createSessionStore, type Drill } from './session-store'
 import type { Interviewer } from './interviewer'
 import type { Session } from './session'
+
+/** Every test here is about store bookkeeping, not which drill is running. */
+const MOCK: Drill = { track: 'mock' }
 
 function fakeSession(): Session {
   return {
@@ -19,13 +22,13 @@ describe('createSessionStore', () => {
   it('assigns ids from the injected factory', () => {
     let n = 0
     const store = createSessionStore(() => `id-${++n}`)
-    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch-1')
+    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch-1', MOCK)
     expect(stored.id).toBe('id-1')
   })
 
   it('get() finds a stored session by id', () => {
     const store = createSessionStore(() => 'abc')
-    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch')
+    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
     expect(store.get('abc')).toBe(stored)
   })
 
@@ -40,13 +43,13 @@ describe('createSessionStore', () => {
 
   it('reports an active session once one exists', () => {
     const store = createSessionStore()
-    store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch')
+    store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
     expect(store.hasActive()).toBe(true)
   })
 
   it('remove() clears the session so hasActive() goes false again', () => {
     const store = createSessionStore(() => 'abc')
-    store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch')
+    store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
     store.remove('abc')
     expect(store.hasActive()).toBe(false)
     expect(store.get('abc')).toBeUndefined()
@@ -54,7 +57,7 @@ describe('createSessionStore', () => {
 
   it('touch() updates lastActivity', () => {
     const store = createSessionStore(() => 'abc')
-    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch')
+    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
     store.touch('abc', 9999)
     expect(stored.lastActivity).toBe(9999)
   })
@@ -68,7 +71,7 @@ describe('createSessionStore', () => {
   // being guarded against.
   it('create() stamps lastActivity from the injected clock, not the wall clock', () => {
     const store = createSessionStore(() => 'abc', () => 4242)
-    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch')
+    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
     expect(stored.lastActivity).toBe(4242)
   })
 
@@ -76,7 +79,7 @@ describe('createSessionStore', () => {
     // No pre-emptive touch(): create() itself must land lastActivity on the
     // injected clock for this timing to hold.
     const store = createSessionStore(() => 'abc', () => 1000)
-    store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch')
+    store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
     expect(store.reapIdle(1000 + 4_000, 5_000)).toEqual([])
     expect(store.reapIdle(1000 + 6_000, 5_000).map((s) => s.id)).toEqual(['abc'])
   })

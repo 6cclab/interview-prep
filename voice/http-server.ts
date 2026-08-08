@@ -1,15 +1,15 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
-import { mkdtempSync, existsSync, rmSync, readFileSync } from 'node:fs'
+import { mkdtempSync, existsSync, readdirSync, rmSync, readFileSync } from 'node:fs'
 import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
-import { buildSystemPrompt } from './context'
+import { assertNoSpoilers, buildSystemPrompt, designTimeCue, DESIGN_BUDGET_MS, type Track } from './context'
 import { createInterviewer, anthropicStream, type StreamFn } from './interviewer'
 import { claudeCliStream } from './claude-cli'
 import { createSession, finishSession } from './session'
-import { createSessionStore, type RetainedAudio, type SessionStore, type StoredSession } from './session-store'
+import { createSessionStore, type Drill, type RetainedAudio, type SessionStore, type StoredSession } from './session-store'
 import { whisperTranscriber, saySpeaker, type Speaker, type Transcriber } from './speech'
 import { transcodeToWav } from './transcode'
 import { readStaticFile, resolveStaticFile } from './static'
@@ -79,6 +79,71 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   } catch {
     return null
   }
+}
+
+/**
+ * Reads a `{ track, problem, budgetMinutes }` session request off the wire.
+ *
+ * An absent body means the behavioural mock, which is what every client sent
+ * before the design track existed and what the drill defaults to.
+ *
+ * This is the only client input on this server that reaches a filesystem path,
+ * so it validates rather than coerces: an unknown track, a design request with
+ * no problem, or a problem that is not a plain slug is a 400, not a
+ * best-effort guess. `buildSystemPrompt` independently re-validates the slug
+ * and re-runs `assertNoSpoilers` on the paths it derives, so the spoiler gate
+ * never rests on this function being right.
+ */
+export function parseDrill(body: Record<string, unknown> | null): Drill {
+  const track = body?.track ?? 'mock'
+  if (track !== 'mock' && track !== 'design') {
+    throw new Error(`Unknown track: ${String(track)}`)
+  }
+  if (track === 'mock') return { track }
+
+  const problem = body?.problem
+  if (typeof problem !== 'string' || problem === '') {
+    throw new Error('A design drill needs a problem name.')
+  }
+  if (!PROBLEM_SLUG.test(problem)) {
+    throw new Error(`Invalid problem name: ${problem}`)
+  }
+
+  // `design.md` says 45 minutes "unless he says otherwise", so the budget is
+  // overridable — bounded, because it drives a countdown the drill is graded
+  // against and a nonsense value would quietly make the timing meaningless.
+  const raw = body?.budgetMinutes
+  let budgetMs = DESIGN_BUDGET_MS
+  if (raw !== undefined) {
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 5 || raw > 180) {
+      throw new Error('budgetMinutes must be a number between 5 and 180.')
+    }
+    budgetMs = Math.round(raw) * 60_000
+  }
+  return { track, problem, budgetMs }
+}
+
+// Mirrors `context.ts`'s slug rule. Duplicated deliberately rather than
+// exported across: this is a wire-input guard and that one is a path guard, and
+// they should be able to tighten independently without one silently relaxing
+// the other.
+const PROBLEM_SLUG = /^[a-z0-9-]+$/
+
+/**
+ * The design problems available to drill — directory names under
+ * `system-design/`, nothing more.
+ *
+ * Names only, deliberately: the directory also holds `reference.md`, a worked
+ * design and an outright spoiler. Listing directories cannot read it, and
+ * `assertNoSpoilers` guards the one route that does read a file from here.
+ */
+function listDesignProblems(root: string): string[] {
+  const dir = join(root, 'system-design')
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && PROBLEM_SLUG.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
 }
 
 function serveStatic(distDir: string, pathname: string, res: ServerResponse): boolean {
@@ -224,7 +289,11 @@ function endAndPersist(
   if (!stored) return
   const { relPath } = finishSession(stored.session, stored.interviewer, {
     root: deps.root,
-    track: 'mock',
+    // The session's own drill, not a hardcoded 'mock' — a design session's
+    // transcript belongs under local/designs/<problem>-live-..., and naming it
+    // as a mock would file it in the wrong place under the wrong name.
+    track: stored.drill.track,
+    problem: stored.drill.problem,
     startedAt: stored.startedAt,
   })
   if (stored.sseClient) {
@@ -375,12 +444,40 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       return
     }
 
+    // The design track's problem picker. Names only — see `listDesignProblems`.
+    if (req.method === 'GET' && url.pathname === '/api/problems') {
+      sendJson(res, 200, { problems: listDesignProblems(deps.root) })
+      return
+    }
+
+    // The problem statement for the design pane: `README.md` and nothing else.
+    //
+    // Andre is *meant* to read this — it is the prompt, the design equivalent of
+    // hearing the behavioural question. `rubric.md` is not served even though it
+    // is not a DENIED file: it enumerates the dimensions being scored, so
+    // putting it on screen mid-drill would hand him the checklist the drill
+    // exists to see whether he reaches for unprompted. `reference.md` is a
+    // worked design and is DENIED outright — `assertNoSpoilers` below is what
+    // makes that structural rather than a matter of this route staying careful.
+    const problemMatch = /^\/api\/problems\/([^/]+)$/.exec(url.pathname)
+    if (req.method === 'GET' && problemMatch) {
+      const problem = decodeURIComponent(problemMatch[1]!)
+      if (!PROBLEM_SLUG.test(problem)) {
+        sendJson(res, 400, { error: `Invalid problem name: ${problem}` })
+        return
+      }
+      const relPath = `system-design/${problem}/README.md`
+      assertNoSpoilers([relPath])
+      const full = join(deps.root, relPath)
+      if (!existsSync(full)) {
+        notFound(res)
+        return
+      }
+      sendJson(res, 200, { problem, prompt: readFileSync(full, 'utf8') })
+      return
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/session') {
-      // Deliberately does not read the request body: the design track is out
-      // of scope, so there is no client-supplied `track` or `problem` for
-      // this boundary to validate. If `/design` is ever added here,
-      // `context.ts`'s `PROBLEM_SLUG` and `assertNoSpoilers` must run on
-      // whatever arrives in the body before it reaches `buildSystemPrompt`.
       if (store.hasActive()) {
         // The 409 carries the stuck session's id and start time so the client
         // can offer both recoveries the design calls for: end it, or open it.
@@ -394,14 +491,42 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         })
         return
       }
-      const system = buildSystemPrompt(deps.root, 'mock')
-      const interviewer = createInterviewer(system, deps.createTransport())
+      // The one route that takes client input which reaches the filesystem, so
+      // it is the one that has to be paranoid. `parseDrill` is where a `track`
+      // and `problem` from the wire are validated; `buildSystemPrompt` then runs
+      // `PROBLEM_SLUG` and `assertNoSpoilers` again on the paths it derives, so
+      // the spoiler gate does not depend on this parse being correct.
+      let drill: Drill
+      try {
+        drill = parseDrill(await readJsonBody(req))
+      } catch (error) {
+        sendJson(res, 400, { error: errorMessage(error) })
+        return
+      }
+
       const entryClock = makeEntryClock()
-      const session = createSession({ interviewer, now: () => entryClock() })
+      let system: string
+      try {
+        system = buildSystemPrompt(deps.root, drill.track, drill.problem)
+      } catch (error) {
+        // An unknown problem slug reaches here as a missing-file throw from
+        // buildSystemPrompt. That is the client asking for something that does
+        // not exist, not a server fault — 400, and no session is created.
+        sendJson(res, 400, { error: errorMessage(error) })
+        return
+      }
+      const interviewer = createInterviewer(system, deps.createTransport())
+      const session = createSession({
+        interviewer,
+        now: () => entryClock(),
+        // Only the timed track gets a cue; a behavioural mock has no budget and
+        // must not be told it has one.
+        turnCue: drill.budgetMs === undefined ? undefined : () => designTimeCue(entryClock(), drill.budgetMs),
+      })
       const scratchDir = mkdtempSync(join(tmpdir(), 'voice-web-'))
-      const stored = store.create(session, interviewer, new Date(), scratchDir)
+      const stored = store.create(session, interviewer, new Date(), scratchDir, drill)
       entryClocks.set(stored.id, entryClock)
-      sendJson(res, 201, { id: stored.id })
+      sendJson(res, 201, { id: stored.id, ...drill })
       return
     }
 
@@ -427,6 +552,9 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         startedAt: stored.startedAt.toISOString(),
         entries: stored.session.entries(),
         awaitingRetry: stored.retainedAudio !== undefined,
+        // So a reopened design session restores its problem pane and resumes
+        // its countdown from the right place rather than looking like a mock.
+        ...stored.drill,
       })
       return
     }
@@ -691,7 +819,8 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       }
       const { relPath, storyLogWritten } = finishSession(stored.session, stored.interviewer, {
         root: deps.root,
-        track: 'mock',
+        track: stored.drill.track,
+        problem: stored.drill.problem,
         startedAt: stored.startedAt,
       })
       if (stored.sseClient) {

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { allowedPaths, assertNoSpoilers, buildSystemPrompt, competencyCoverage } from './context'
+import { allowedPaths, assertNoSpoilers, buildSystemPrompt, competencyCoverage, designTimeCue } from './context'
 import { splitTrailer } from './transcript'
 
 let root: string
@@ -19,9 +19,9 @@ beforeEach(() => {
   seed('.claude/commands/design.md', 'DESIGN COMMAND')
   seed('behavioral/competencies.md', '# C\n\n## Conflict\n\nbody\n\n## Ambiguity\n\nbody\n')
   seed('behavioral/questions.md', 'QUESTIONS')
-  seed('system-design/rate-limiter/README.md', 'PROMPT')
+  seed('system-design/rate-limiter/README.md', 'Design a rate limiter.')
   seed('system-design/rate-limiter/rubric.md', 'RUBRIC')
-  seed('system-design/rate-limiter/reference.md', 'THE ANSWER')
+  seed('system-design/rate-limiter/reference.md', 'WORKED-DESIGN-SPOILER')
   seed('solutions/elimination/celebrity.md', 'THE ANSWER')
   seed('patterns.md', 'THE ANSWER')
 })
@@ -153,5 +153,59 @@ describe('buildSystemPrompt', () => {
     expect(log!.story.length).toBeGreaterThan(0)
     expect(log!.worked.length).toBeGreaterThan(0)
     expect(log!.fix.length).toBeGreaterThan(0)
+  })
+})
+
+describe('designTimeCue', () => {
+  it('reports the whole budget at the start', () => {
+    expect(designTimeCue(0)).toContain('45 minutes of the 45 remain')
+  })
+
+  it('rounds up, so it never claims zero minutes while time remains', () => {
+    // One second left is still "1 minute" — a cue saying "0 minutes remain"
+    // reads as the deadline, which is a different instruction entirely.
+    expect(designTimeCue(45 * 60 * 1000 - 1000)).toContain('1 minute of the 45 remain')
+    expect(designTimeCue(45 * 60 * 1000 - 1000)).not.toContain('minutes')
+  })
+
+  it('says plainly that time is up, so "at time, stop" has an unambiguous trigger', () => {
+    expect(designTimeCue(45 * 60 * 1000)).toContain('time is up')
+    expect(designTimeCue(60 * 60 * 1000)).toContain('time is up')
+  })
+
+  it('honours a custom budget', () => {
+    expect(designTimeCue(0, 30 * 60 * 1000)).toContain('30 minutes of the 30 remain')
+    expect(designTimeCue(20 * 60 * 1000, 30 * 60 * 1000)).toContain('10 minutes of the 30 remain')
+  })
+
+  // The cue arrives in the `user` slot, where everything else is Andre
+  // speaking. Marking it as an aside to the interviewer is the only thing
+  // standing between the drill and an interviewer reading the clock out loud as
+  // though it were part of the answer.
+  it('marks itself as an instruction to the interviewer, not as speech', () => {
+    for (const elapsed of [0, 35 * 60 * 1000, 45 * 60 * 1000]) {
+      expect(designTimeCue(elapsed)).toMatch(/^\[Time check, for you only:/)
+      expect(designTimeCue(elapsed)).toMatch(/\]$/)
+    }
+  })
+})
+
+describe('buildSystemPrompt on the design track', () => {
+  // The mock track shipped with exactly this bug: <voice-mode> never replaced
+  // the command file's "write to a file" step, so the step was unfollowable and
+  // silently skipped while every test still passed.
+  it('replaces design.md step 6 file write with speaking the score, and explains the clock', () => {
+    const prompt = buildSystemPrompt(root, 'design', 'rate-limiter')
+    expect(prompt).toContain('cannot write files')
+    expect(prompt).toContain('deliver the score out')
+    expect(prompt).toContain('time check')
+    // The story-log trailer is the mock track's mechanism and has no business here.
+    expect(prompt).not.toContain('story-log')
+  })
+
+  it('never includes the reference design', () => {
+    const prompt = buildSystemPrompt(root, 'design', 'rate-limiter')
+    expect(prompt).toContain('Design a rate limiter')
+    expect(prompt).not.toContain('WORKED-DESIGN-SPOILER')
   })
 })

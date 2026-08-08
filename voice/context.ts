@@ -123,8 +123,54 @@ export function buildSystemPrompt(root: string, track: Track, problem?: string):
     )
   }
 
+  if (track === 'design') {
+    // design.md's live mode step 6 ends by saving the transcript and score to
+    // local/designs/. You cannot write files, and the same gap on the mock
+    // track (a step whose file write was never replaced with anything) left the
+    // whole scoring step quietly undone. The server persists everything spoken,
+    // so the replacement is simply: say it.
+    voiceMode.push(
+      '',
+      'Step 6 above tells you to save the transcript and score to a file. You',
+      'cannot write files, and you do not need to — everything you say is being',
+      'recorded and saved for him. So when time is up, deliver the score out',
+      'loud as your final turn: each rubric dimension and its rating, the',
+      'evidence in his own words, the weakest dimension, and one next action.',
+      '',
+      'You have no clock of your own. Each turn you are given is preceded by a',
+      'time check telling you how long remains. Trust it over your own sense of',
+      'how long the conversation feels, and treat the time check as instruction',
+      'to you, not as something he said — never read it aloud or refer to being',
+      'told it.',
+    )
+  }
+
   voiceMode.push('</voice-mode>')
   sections.push(voiceMode.join('\n'))
 
   return sections.join('\n\n')
+}
+
+/** The live design track's budget, per `design.md`: "45 minutes unless he says otherwise." */
+export const DESIGN_BUDGET_MS = 45 * 60 * 1000
+
+/**
+ * The per-turn time check fed to a design interviewer (see `CreateSessionOptions.turnCue`).
+ *
+ * Phrased as an instruction to the interviewer rather than as data, because it
+ * arrives in the `user` slot where everything else is Andre speaking, and the
+ * one failure that would ruin a drill is the interviewer reading it out as
+ * though he had said it. `design.md` drives the behaviour — the warning at ten
+ * minutes and stopping at time — so this only supplies the number, and states
+ * the deadline plainly at zero so "at time, stop" has an unambiguous trigger.
+ */
+export function designTimeCue(elapsedMs: number, budgetMs: number = DESIGN_BUDGET_MS): string {
+  const remainingMs = budgetMs - elapsedMs
+  if (remainingMs <= 0) {
+    return '[Time check, for you only: time is up. Stop the interview now and deliver the score.]'
+  }
+  // Rounded up, so a cue never says "0 minutes remain" while time is still left.
+  const minutes = Math.ceil(remainingMs / 60_000)
+  const unit = minutes === 1 ? 'minute' : 'minutes'
+  return `[Time check, for you only: ${minutes} ${unit} of the ${Math.round(budgetMs / 60_000)} remain.]`
 }
