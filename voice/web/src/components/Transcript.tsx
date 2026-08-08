@@ -85,6 +85,22 @@ export function Transcript({ entries, interimSentences, streaming, meta }: Props
 
   const isEmpty = entries.length === 0 && interimSentences.length === 0
 
+  // "Newest interviewer turn" means the most recent entry with
+  // `speaker === 'interviewer'`, not merely the last entry overall — a
+  // candidate turn can land after it (the user has answered, but the next
+  // interviewer reply hasn't started streaming yet) without that question
+  // becoming eligible to collapse.
+  let newestInterviewerIndex = -1
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i]!.speaker === 'interviewer') {
+      newestInterviewerIndex = i
+      break
+    }
+  }
+  // A live streaming turn (interimSentences non-empty) is always the newest
+  // interviewer turn, so once one exists, no *earlier* entry qualifies.
+  if (interimSentences.length > 0) newestInterviewerIndex = -1
+
   return (
     <div className="transcript-region">
       {isEmpty && (
@@ -99,7 +115,7 @@ export function Transcript({ entries, interimSentences, streaming, meta }: Props
 
       <div className="transcript" ref={scrollRef} onScroll={handleScroll} role="log" aria-label="Interview transcript">
         {entries.map((entry, i) => {
-          const isNewest = i === entries.length - 1 && interimSentences.length === 0
+          const isNewest = i === newestInterviewerIndex
           if (entry.speaker === 'interviewer') {
             const words = wordCount(entry.text)
             const collapsible = !isNewest && words > COLLAPSE_WORD_THRESHOLD && !expanded.has(i)
