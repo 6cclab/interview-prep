@@ -37,7 +37,10 @@ pnpm test <problem>     # run one drill
 pnpm test               # everything, as a regression check
 pnpm reset <problem>    # restore stub.ts over solution.ts
 pnpm mock:voice         # spoken behavioral drill
-pnpm mock:web           # React browser client for the same drill (127.0.0.1) — builds, then serves
+pnpm mock:web           # React browser client (127.0.0.1) — builds, then serves.
+                        # Serves BOTH spoken tracks: behavioral is the primary
+                        # action, and the Idle screen also offers a timed system
+                        # design drill with the prompt kept on screen.
 pnpm build:web          # build the React client only (voice/web -> voice/dist)
 pnpm dev:web            # Vite dev server with HMR for voice/web (proxies /api)
 pnpm dev:web:api        # the node:http API/session server alone, for use alongside dev:web
@@ -45,6 +48,26 @@ pnpm design:voice <p>   # spoken live design drill
 pnpm voice:devices      # list microphones and speakers for local/voice.json
 pnpm typecheck          # covers voice/ and voice/web/ separately (different tsconfig)
 ```
+
+### The spoken design track
+
+`pnpm design:voice <problem>` is the terminal path; the browser path is the
+design drill on `mock:web`'s Idle screen. Two things the browser adds, and they
+are the reason the track waited for it: the **problem statement stays on screen**
+for the whole drill (in a terminal it scrolls away, and a 45-minute design
+interview where you cannot re-read the question tests the wrong thing), and the
+header shows **time remaining** rather than time elapsed.
+
+The interviewer has no clock of its own, so each turn it is fed a time check it
+never sees spoken and that never enters the transcript — that is what makes
+`design.md`'s "warn once at ten minutes, stop at time" followable at all. It
+closes the interview and delivers the score itself; the countdown hitting zero
+is a display, not a trigger, and nothing in the client ends the session on it.
+
+Served from `system-design/<problem>/`: `README.md` only. `reference.md` is a
+worked design and denied outright, and `rubric.md` — though not a denied file —
+is deliberately never put on screen mid-drill, because it enumerates the
+dimensions being scored.
 
 ### Browser support for `mock:web`
 

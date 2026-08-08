@@ -51,3 +51,18 @@ export interface StuckSession {
   id: string
   startedAt: string | null
 }
+
+/** Which drill a session runs. Mirrors the server's `Drill` (voice/session-store.ts). */
+export interface Drill {
+  track: 'mock' | 'design'
+  /** Required for `design`, absent for `mock`. */
+  problem?: string
+  /** The design track's budget in ms; absent when the drill is untimed. */
+  budgetMs?: number
+}
+
+/** A design problem and its prompt, from `GET /api/problems/:problem`. */
+export interface ProblemStatement {
+  problem: string
+  prompt: string
+}

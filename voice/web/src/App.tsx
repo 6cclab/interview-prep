@@ -9,6 +9,8 @@ import { RecordingChrome } from './components/RecordingChrome'
 import { LiveRegions } from './components/LiveRegions'
 import { MicCheck } from './components/MicCheck'
 import { DeviceSettings } from './components/DeviceSettings'
+import { DrillPicker } from './components/DrillPicker'
+import { ProblemPane } from './components/ProblemPane'
 import { useTheme } from './theme'
 import { derivePhase, fmt, wallClock, stuckBody, ERROR_COPY, ANNOUNCEMENTS } from './phase'
 import type { ErrorKind } from './types'
@@ -50,6 +52,9 @@ export default function App() {
     forceEndStuckSession,
     stuckSession,
     reopenStuckSession,
+    drill,
+    remainingSeconds,
+    starting,
     inputDevices,
     selectedInputId,
     selectInput,
@@ -280,7 +285,14 @@ export default function App() {
     statusDetail = 'The reply is being spoken and written out as it goes.'
   } else if (phase === 'ready') {
     statusTitle = 'Your turn'
-    statusDetail = 'Start when you are ready. There is no time limit and no countdown.'
+    // The behavioural drill deliberately promises no clock ("thinking time is
+    // the exercise"). A design drill is the opposite — it is timed by design, and
+    // repeating "no countdown" while a countdown runs in the header would be a
+    // straightforward lie.
+    statusDetail =
+      remainingSeconds === null
+        ? 'Start when you are ready. There is no time limit and no countdown.'
+        : 'Start when you are ready. Silence does not end a turn — the clock in the header is the only limit.'
   } else if (phase === 'ended') {
     statusTitle = 'Session ended'
     // "N turns" counts Andre's answers, not transcript entries: an entry is a
@@ -299,6 +311,8 @@ export default function App() {
       <div className="app-root">
         <Header
           sessionSeconds={sessionSeconds}
+          remainingSeconds={remainingSeconds}
+          kicker={drill?.track === 'design' ? `System design · ${drill.problem ?? ''}` : 'Behavioral · voice'}
           dark={dark}
           onToggleTheme={toggleTheme}
           micCheckOpen={micCheckOpen}
@@ -326,11 +340,32 @@ export default function App() {
           </div>
         )}
 
+        {/* The design track's prompt stays up for the whole drill — the reason
+            this track waited for a browser. Above the transcript so it reads as
+            the question the conversation is about, not as a note on it. */}
+        {drill?.track === 'design' && drill.problem && phase !== 'idle' && (
+          <div className="problem-pane-slot">
+            <ProblemPane problem={drill.problem} />
+          </div>
+        )}
+
         <main className="main-column">
           <Transcript entries={entries} interimSentences={interimSentences} streaming={interviewerSpeaking} meta={meta} />
         </main>
 
         <div className="dock-stack">
+          {/* Idle only: choosing a drill is a pre-session act, and the handoff's
+              single-screen layout owns everything from the first question on. */}
+          {phase === 'idle' && (
+            <div className="dock-stack__row">
+              {/* `busy` once the press has been made: `start` is async, and a
+                  second press before the first resolves races its own session
+                  into a 409 against itself. `phase` leaves idle as soon as the
+                  session is created, so this only has to cover the gap in
+                  between — which is exactly what `status` reports. */}
+              <DrillPicker onStart={start} busy={starting} />
+            </div>
+          )}
           {errorKind && (
             <div className="dock-stack__row">
               <ErrorBanner

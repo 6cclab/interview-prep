@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
 import { createSessionStore } from './session-store'
+import { connect } from 'node:net'
 import { readSSE } from './test-helpers/sse'
 
 let server: Server | undefined
@@ -19,6 +20,15 @@ function seedContext() {
   seed('.claude/commands/mock.md', 'MOCK COMMAND')
   seed('behavioral/competencies.md', '# C\n\n## Conflict\n\nbody\n')
   seed('behavioral/questions.md', 'QUESTIONS')
+  // The design track. `reference.md` is seeded on purpose: it is a DENIED
+  // spoiler, and a test root without one cannot show that it stays unread.
+  seed('.claude/commands/design.md', 'DESIGN COMMAND')
+  seed('system-design/rate-limiter/README.md', '# Rate limiter\n\nDesign a rate limiter.\n')
+  seed('system-design/rate-limiter/rubric.md', '## Estimation\n\nnumbers appear\n')
+  seed('system-design/rate-limiter/reference.md', 'WORKED-DESIGN-SPOILER token-bucket')
+  seed('system-design/notification-fanout/README.md', '# Fanout\n\nDesign a fanout.\n')
+  seed('system-design/notification-fanout/rubric.md', '## Estimation\n\nnumbers appear\n')
+  seed('system-design/notification-fanout/reference.md', 'WORKED-DESIGN-SPOILER')
 }
 
 function baseDeps(overrides: Partial<VoiceServerDeps> = {}): VoiceServerDeps {
@@ -74,7 +84,7 @@ describe('POST /api/session', () => {
     const { port } = await listen(baseDeps())
     const res = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
     expect(res.status).toBe(201)
-    expect(await res.json()).toEqual({ id: 'session-1' })
+    expect(await res.json()).toEqual({ id: 'session-1', track: 'mock' })
   })
 
   it('refuses a second session while one is already in progress', async () => {
@@ -815,22 +825,94 @@ describe('idle reap', () => {
 })
 
 describe('the track/problem boundary', () => {
+  // The design track is now in scope, so this boundary changed shape: the body
+  // IS read, which means a hostile `problem` reaches a path-building function
+  // and must be rejected outright rather than sanitised into something that
+  // happens to be harmless. A 400 with no session created is the contract; a
+  // 201 for any of these would mean a traversal attempt was tolerated.
   it.each([
-    { track: 'design', problem: 'rate-limiter' },
     { track: 'design', problem: '../../solutions/elimination/celebrity' },
-    { track: 'mock', problem: '/etc/passwd' },
-    { track: 'mock', problem: 'patterns.md' },
-  ])('ignores a client-supplied track/problem and always builds the mock prompt: %j', async (payload) => {
-    const { port } = await listen(baseDeps())
+    { track: 'design', problem: '/etc/passwd' },
+    { track: 'design', problem: 'patterns.md' },
+    { track: 'design', problem: 'rate-limiter/../../..' },
+    { track: 'design', problem: '' },
+    { track: 'design' },
+    { track: 'coding', problem: 'rate-limiter' },
+    { track: 'design', problem: 'rate-limiter', budgetMinutes: 0 },
+    { track: 'design', problem: 'rate-limiter', budgetMinutes: 'forty-five' },
+  ])('rejects an invalid drill request without creating a session: %j', async (payload) => {
+    const store = createSessionStore(() => 'session-1')
+    const { port } = await listen(baseDeps({ store }))
     const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     })
+    expect(res.status).toBe(400)
+    // Nothing was created, so a following valid request is not blocked by a
+    // half-built session sitting in the store.
+    expect(store.hasActive()).toBe(false)
+  })
+
+  // A slug that is well-formed but names nothing is the client asking for a
+  // problem that does not exist — a 400, not a 500, and no session either.
+  it('rejects a well-formed problem slug that does not exist', async () => {
+    const store = createSessionStore(() => 'session-1')
+    const { port } = await listen(baseDeps({ store }))
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'design', problem: 'no-such-problem' }),
+    })
+    expect(res.status).toBe(400)
+    expect(store.hasActive()).toBe(false)
+  })
+
+  // Reading the request body means yielding to the event loop for as long as
+  // the client takes to finish sending it. If the single-session check happens
+  // before that yield and the create after it, two concurrent requests can both
+  // pass the check — which is why the check and the create must sit in the same
+  // synchronous run. Driven over a raw socket because `fetch` will not let a
+  // body dribble out in two writes, and dribbling is exactly the case.
+  it('refuses a concurrent create even when the first request body arrives in pieces', async () => {
+    let n = 0
+    const store = createSessionStore(() => `session-${++n}`)
+    const { port } = await listen(baseDeps({ store }))
+
+    const body = JSON.stringify({ track: 'mock' })
+    const slow = connect(port, '127.0.0.1')
+    await new Promise<void>((resolve) => slow.once('connect', resolve))
+    const slowStatus = new Promise<string>((resolve) => {
+      slow.once('data', (chunk: Buffer) => resolve(chunk.toString('utf8').split('\r\n')[0]!))
+    })
+    // Headers plus the first byte of the body, then a pause: the server is now
+    // parked inside `readJsonBody` awaiting the rest.
+    slow.write(
+      `POST /api/session HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n` +
+        `Content-Length: ${body.length}\r\nConnection: close\r\n\r\n${body.slice(0, 1)}`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // A second, complete request lands while the first is still mid-body.
+    const second = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+
+    slow.write(body.slice(1))
+    const firstStatus = await slowStatus
+    slow.destroy()
+
+    // Exactly one of the two won; the other got a 409. Both winning would leave
+    // two live sessions, which every recovery path in this server assumes cannot
+    // happen.
+    const statuses = [firstStatus.includes('201'), second.status === 201]
+    expect(statuses.filter(Boolean)).toHaveLength(1)
+    expect(firstStatus.includes('409') || second.status === 409).toBe(true)
+  })
+
+  it('defaults to the mock track when no body is sent at all', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
     expect(res.status).toBe(201)
-    const { id } = (await res.json()) as { id: string }
-    expect(id).toBe('session-1')
-    // No 500, no path-traversal error surfaced — the body is simply never read.
+    expect(await res.json()).toEqual({ id: 'session-1', track: 'mock' })
   })
 })
 
@@ -1035,5 +1117,211 @@ describe('GET /api/session/:id/stream', () => {
     const transcript = readFileSync(join(root, relPath), 'utf8')
     expect(transcript).not.toContain('Session ended early')
     expect(transcript).toContain('What did it cost you?')
+  })
+})
+
+describe('the design track', () => {
+  it('creates a design session and reports the drill it started', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'design', problem: 'rate-limiter' }),
+    })
+    expect(res.status).toBe(201)
+    expect(await res.json()).toEqual({
+      id: 'session-1',
+      track: 'design',
+      problem: 'rate-limiter',
+      budgetMs: 45 * 60 * 1000,
+    })
+  })
+
+  it('honours a custom budget, per design.md 45 minutes "unless he says otherwise"', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'design', problem: 'rate-limiter', budgetMinutes: 30 }),
+    })
+    const { budgetMs } = (await res.json()) as { budgetMs: number }
+    expect(budgetMs).toBe(30 * 60 * 1000)
+  })
+
+  // The transcript has to land where `/design` looks for it. Filing a design
+  // session as `local/mock-...` would lose it from the track's own history,
+  // which is what a second attempt at the same problem reads to see what the
+  // first one missed.
+  it('files a design transcript under local/designs, named for the problem', async () => {
+    const { port } = await listen(baseDeps())
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'design', problem: 'rate-limiter' }),
+    })
+    const { id } = (await created.json()) as { id: string }
+
+    const ended = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    const { relPath } = (await ended.json()) as { relPath: string }
+    expect(relPath).toMatch(/^local\/designs\/rate-limiter-live-\d{4}-\d{2}-\d{2}-\d{4}\.md$/)
+    expect(existsSync(join(root, relPath))).toBe(true)
+  })
+
+  // The interviewer has no clock, and design.md tells it to warn at ten minutes
+  // and stop at time. Without the cue those instructions are unfollowable, so
+  // this asserts the cue actually reaches the model — and, just as importantly,
+  // that it does not reach the transcript.
+  it('feeds the interviewer a time check each turn, and keeps it out of the transcript', async () => {
+    const seen: string[] = []
+    const store = createSessionStore(() => 'session-1')
+    const { port } = await listen(
+      baseDeps({
+        store,
+        createTransport: () => async function* (_system, messages) {
+          seen.push(messages[messages.length - 1]!.content)
+          yield 'What are we optimising for?'
+        },
+        transcriber: { transcribe: async () => ({ text: 'Ten thousand writes a second.' }) },
+        transcode: async (_input, output) => {
+          writeFileSync(output, Buffer.from('fake wav bytes'))
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'design', problem: 'rate-limiter' }),
+    })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(stream) // opening sentence
+    await readSSE(stream) // opening entry
+
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('fake webm bytes'),
+    })
+    await readSSE(stream) // Andre's entry
+    await readSSE(stream) // the reply
+
+    // Both turns — the opening and Andre's answer — carried a time check.
+    expect(seen).toHaveLength(2)
+    for (const message of seen) expect(message).toMatch(/Time check, for you only: 45 minutes/)
+    // And Andre's own words reached the model intact alongside it.
+    expect(seen[1]).toContain('Ten thousand writes a second.')
+
+    // The transcript is a record of what was said. The cue was never said.
+    const entries = store.get(id)!.session.entries()
+    for (const entry of entries) expect(entry.text).not.toContain('Time check')
+    expect(entries.find((e) => e.speaker === 'andre')!.text).toBe('Ten thousand writes a second.')
+  })
+
+  it('does not feed a time check on the untimed mock track', async () => {
+    const seen: string[] = []
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* (_system, messages) {
+          seen.push(messages[messages.length - 1]!.content)
+          yield 'Tell me about a disagreement.'
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(stream)
+    await readSSE(stream)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).not.toContain('Time check')
+  })
+
+  // A custom budget has to reach the *cue*, not just the response body. If it
+  // only reached the body, the header would count down the right thing while the
+  // interviewer paced against 45 minutes regardless — a disagreement invisible
+  // from either side alone.
+  it('paces the interviewer against a custom budget, not the default', async () => {
+    const seen: string[] = []
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* (_system, messages) {
+          seen.push(messages[messages.length - 1]!.content)
+          yield 'What are we optimising for?'
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'design', problem: 'rate-limiter', budgetMinutes: 20 }),
+    })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(stream)
+    await readSSE(stream)
+
+    expect(seen[0]).toContain('20 minutes of the 20 remain')
+    expect(seen[0]).not.toContain('45')
+  })
+
+  it('reports the drill back on GET /api/session/:id, so a reopen restores the pane and clock', async () => {
+    const { port } = await listen(baseDeps())
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'design', problem: 'notification-fanout', budgetMinutes: 20 }),
+    })
+    const { id } = (await created.json()) as { id: string }
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}`)
+    const body = (await res.json()) as { track: string; problem: string; budgetMs: number }
+    expect(body.track).toBe('design')
+    expect(body.problem).toBe('notification-fanout')
+    expect(body.budgetMs).toBe(20 * 60 * 1000)
+  })
+})
+
+describe('GET /api/problems', () => {
+  it('lists the design problems by name', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/problems`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ problems: ['notification-fanout', 'rate-limiter'] })
+  })
+
+  it('serves a problem statement for the design pane', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/problems/rate-limiter`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { problem: string; prompt: string }
+    expect(body.problem).toBe('rate-limiter')
+    expect(body.prompt).toContain('Design a rate limiter.')
+  })
+
+  // The problem directory also holds `reference.md` — a worked design, and a
+  // DENIED spoiler. The prompt route reads one named file from that directory,
+  // so it is exactly where a mistake would surface the answer.
+  it('never serves the reference design or the rubric', async () => {
+    const { port } = await listen(baseDeps())
+    const prompt = await fetch(`http://127.0.0.1:${port}/api/problems/rate-limiter`)
+    const body = await prompt.text()
+    expect(body).not.toContain('WORKED-DESIGN-SPOILER')
+    expect(body).not.toContain('numbers appear')
+
+    for (const path of [
+      '/api/problems/rate-limiter/reference.md',
+      '/api/problems/rate-limiter%2Freference.md',
+      '/api/problems/..%2F..%2Fpatterns.md',
+      '/api/problems/rate-limiter%2F..%2F..%2Fsolutions',
+    ]) {
+      const res = await fetch(`http://127.0.0.1:${port}${path}`)
+      expect(res.status).not.toBe(200)
+      expect(await res.text()).not.toContain('WORKED-DESIGN-SPOILER')
+    }
+  })
+
+  it('404s a problem that does not exist', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/problems/no-such-problem`)
+    expect(res.status).toBe(404)
   })
 })

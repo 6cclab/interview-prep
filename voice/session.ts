@@ -56,6 +56,18 @@ export interface CreateSessionOptions {
   interviewer: Interviewer
   /** Milliseconds since the session started. */
   now(): number
+  /**
+   * Optional per-turn note the interviewer sees, prepended to what it is fed —
+   * and deliberately **never** part of the transcript `Entry`.
+   *
+   * The design track needs this: `design.md` tells the interviewer to warn once
+   * around the ten-minutes-left mark and to stop at time, but a language model
+   * has no clock, so without being told the remaining time on each turn those
+   * instructions are unfollowable. Keeping the note out of the entry is the
+   * point — the saved transcript is a record of what was *said*, and a
+   * scaffolding line Andre never heard has no business in it.
+   */
+  turnCue?(): string | undefined
 }
 
 export function createSession(opts: CreateSessionOptions): Session {
@@ -71,8 +83,12 @@ export function createSession(opts: CreateSessionOptions): Session {
   async function* runInterviewerTurn(said: string): AsyncIterable<string> {
     const at = opts.now()
     const spoken: string[] = []
+    // The cue is sampled here, not at entry-push time, so it reflects the clock
+    // at the moment this turn actually reached the interviewer.
+    const cue = opts.turnCue?.()
+    const fed = cue ? `${cue}\n\n${said}` : said
     try {
-      for await (const sentence of opts.interviewer.turn(said)) {
+      for await (const sentence of opts.interviewer.turn(fed)) {
         spoken.push(sentence)
         yield sentence
       }
@@ -147,6 +163,8 @@ export interface SessionDeps {
   nextTurn(): Promise<'speak' | 'end'>
   /** Milliseconds since the session started. */
   now(): number
+  /** Passed straight through to `createSession` — see `CreateSessionOptions.turnCue`. */
+  turnCue?(): string | undefined
 }
 
 export type SessionOutcome = Entry[] & { endedEarly?: string }
@@ -166,7 +184,7 @@ function outcomeOf(session: Session): SessionOutcome {
  * modified by this refactor.
  */
 export async function runSession(deps: SessionDeps): Promise<SessionOutcome> {
-  const session = createSession({ interviewer: deps.interviewer, now: deps.now })
+  const session = createSession({ interviewer: deps.interviewer, now: deps.now, turnCue: deps.turnCue })
 
   for await (const sentence of session.begin()) {
     await deps.speaker.speak(sentence)

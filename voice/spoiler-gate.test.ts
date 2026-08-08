@@ -25,6 +25,13 @@ function seed() {
   seedFile('behavioral/questions.md', 'QUESTIONS')
   // A denied file present in the checkout, exactly as it would be in the real repo.
   seedFile('patterns.md', DENIED_STRING)
+  // The design track. `reference.md` is a worked design and a DENIED file, so
+  // it is seeded with the same marker — a design drill reads two files out of
+  // this directory and must never touch the third.
+  seedFile('.claude/commands/design.md', 'DESIGN COMMAND')
+  seedFile('system-design/rate-limiter/README.md', 'Design a rate limiter.')
+  seedFile('system-design/rate-limiter/rubric.md', 'RUBRIC-DIMENSIONS estimation, failure modes')
+  seedFile('system-design/rate-limiter/reference.md', DENIED_STRING)
 }
 
 function listen(deps: VoiceServerDeps): Promise<{ port: number }> {
@@ -281,6 +288,55 @@ describe('spoiler gate', () => {
     expect(JSON.parse(retryBody)).toHaveProperty('error')
     expect(retryBody).not.toContain('story-log')
     expect(retryBody).not.toContain('competency: Conflict')
+  })
+
+  // The design track adds three routes and a second file-reading path, so it
+  // gets its own sweep rather than riding on the mock track's. `reference.md`
+  // is the whole reason: it sits in the same directory as the two files a
+  // design drill legitimately reads.
+  it('no response body from the design routes ever contains the reference design or the rubric', async () => {
+    const { port } = await listen({
+      root,
+      createTransport: () => async function* () {
+        yield 'What are we optimising for?'
+      },
+      transcriber: { transcribe: async () => ({ text: 'Ten thousand a second.' }) },
+      store: createSessionStore(() => 'session-6'),
+      now: () => 0,
+      transcode: async (_input: string, output: string) => writeFileSync(output, Buffer.from('fake wav')),
+    })
+
+    const responses: string[] = []
+
+    const problems = await fetch(`http://127.0.0.1:${port}/api/problems`)
+    responses.push(await problems.text())
+    const prompt = await fetch(`http://127.0.0.1:${port}/api/problems/rate-limiter`)
+    responses.push(await prompt.text())
+
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'design', problem: 'rate-limiter' }),
+    })
+    responses.push(await created.clone().text())
+    const { id } = (await created.json()) as { id: string }
+
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    responses.push(JSON.stringify(await readSSE(stream))) // opening sentence
+    responses.push(JSON.stringify(await readSSE(stream))) // opening entry
+
+    const read = await fetch(`http://127.0.0.1:${port}/api/session/${id}`)
+    responses.push(await read.text())
+
+    const endRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    responses.push(await endRes.text())
+
+    for (const body of responses) {
+      expect(body).not.toContain(DENIED_STRING)
+      // The rubric is not a DENIED file, but it enumerates what is being scored
+      // and must not be on screen during the drill — see the prompt route.
+      expect(body).not.toContain('RUBRIC-DIMENSIONS')
+    }
   })
 
   it('every static asset in the real build never contains denied-file content or the raw trailer', async () => {

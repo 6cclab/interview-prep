@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
+import type { Drill, Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
 
 export interface VoiceSession {
   mode: Mode
@@ -75,7 +75,32 @@ export interface VoiceSession {
    * answer to the same still-standing question either way.
    */
   abandonTurn(): void
-  start(): void
+  /**
+   * Starts a session. Defaults to the behavioural mock when given no drill, so
+   * the primary action stays a single no-argument press; the design track is an
+   * explicit choice. A drill the server rejects (unknown problem, bad budget)
+   * leaves the app at Idle with the reason in `status` — nothing half-starts.
+   */
+  start(drill?: Drill): void
+  /**
+   * The drill the live session is running, or `null` when nothing is live. The
+   * design track needs it on screen: the problem pane reads `problem`, and the
+   * countdown reads `budgetMs`.
+   */
+  drill: Drill | null
+  /**
+   * Seconds left of a timed drill's budget, or `null` when the drill is untimed.
+   * Floors at zero and keeps counting no further — the interviewer is told when
+   * time is up (see `designTimeCue`) and closes the interview itself, so the
+   * clock hitting zero is not the client's cue to end anything.
+   */
+  remainingSeconds: number | null
+  /**
+   * True from the moment `start` is called until the request settles. `start` is
+   * async, so without this a second press lands while the first is still in
+   * flight and races its own session into a 409 against itself.
+   */
+  starting: boolean
   record(): void
   stopAndSubmit(): void
   /** The dock's "End session" action — ends the current session, wherever it is in its turn cycle. */
@@ -220,6 +245,29 @@ export function useVoiceSession(): VoiceSession {
   // Set alongside `sessionConflict` from the 409's body: what the stuck session
   // is, so the banner can name its start time and reopening has an id to use.
   const [stuckSession, setStuckSession] = useState<StuckSession | null>(null)
+  const [drill, setDrill] = useState<Drill | null>(null)
+  // The countdown is driven off an absolute deadline rather than a decrementing
+  // counter, so it stays honest across a backgrounded tab, a throttled timer or
+  // a sleeping laptop — all of which stall interval callbacks and would
+  // otherwise leave the clock reading long after the time was actually gone.
+  const [starting, setStarting] = useState(false)
+  const [deadlineAt, setDeadlineAt] = useState<number | null>(null)
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null)
+  useEffect(() => {
+    if (deadlineAt === null) {
+      setRemainingSeconds(null)
+      return
+    }
+    // Floors at zero: the interviewer is told when time is up and closes the
+    // interview itself (see `designTimeCue`), so this display must not race it
+    // by ending anything, and a negative number would just be noise.
+    const tick = () => setRemainingSeconds(Math.max(0, Math.ceil((deadlineAt - Date.now()) / 1000)))
+    tick()
+    // Twice a second, so the visible second neither lags nor skips as the
+    // interval drifts against the wall clock.
+    const id = setInterval(tick, 500)
+    return () => clearInterval(id)
+  }, [deadlineAt])
   const [inputDevices, setInputDevices] = useState<MicDevice[]>([])
   const [selectedInputId, setSelectedInputId] = useState<string | null>(null)
   const [outputDevices, setOutputDevices] = useState<OutputDevice[]>([])
@@ -358,17 +406,49 @@ export function useVoiceSession(): VoiceSession {
       setInterimSentences([])
       es.close()
       setMode('ended')
+      // The countdown stops with the session. `drill` is deliberately kept, so
+      // the Ended screen can still say which problem this was.
+      setDeadlineAt(null)
       releaseMicStream()
     })
   }, [releaseMicStream])
 
-  const start = useCallback(() => {
+  const start = useCallback((requested?: Drill) => {
+    // Defaults to the behavioural mock, so the primary action needs no argument
+    // and the design track is an explicit choice rather than a mode to fall into.
+    const wanted: Drill = requested ?? { track: 'mock' }
     setSessionConflict(false)
     setMicFailureKind(null)
     setTranscriptFailed(false)
     setStatus('Starting session…')
+    setStarting(true)
     void (async () => {
-      const res = await fetch('/api/session', { method: 'POST' })
+      let res: Response
+      try {
+        res = await fetch('/api/session', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(wanted),
+        })
+      } catch {
+        // The server is not there. Report it and clear `starting`, so the
+        // picker is usable again rather than locked with nothing running.
+        setStatus('Could not reach the drill server.')
+        setStarting(false)
+        return
+      }
+      // Cleared here rather than in a `finally`: the request has settled, which
+      // is exactly what `starting` tracks, and every branch below is
+      // synchronous state-setting from this point on.
+      setStarting(false)
+      if (res.status === 400) {
+        // The server refused the drill itself — an unknown problem, say. Nothing
+        // started, so this reports and stays at Idle rather than half-entering a
+        // session that does not exist.
+        const { error } = (await res.json()) as { error: string }
+        setStatus(`Cannot start that drill: ${error}`)
+        return
+      }
       if (res.status === 409) {
         // The 409 now names the session it refused, so the banner can report
         // when it started and "Open that session" has something to open.
@@ -378,12 +458,14 @@ export function useVoiceSession(): VoiceSession {
         setSessionConflict(true)
         return
       }
-      const { id } = (await res.json()) as { id: string }
-      sessionIdRef.current = id
+      const started = (await res.json()) as { id: string } & Drill
+      sessionIdRef.current = started.id
+      setDrill({ track: started.track, problem: started.problem, budgetMs: started.budgetMs })
+      setDeadlineAt(started.budgetMs === undefined ? null : Date.now() + started.budgetMs)
       setEntries([])
       setInterviewerSpeaking(false)
       setInterimSentences([])
-      connectStream(id)
+      connectStream(started.id)
       setMode('listening-to-interviewer')
 
       // Acquire the microphone here, on this call's real user gesture
@@ -424,8 +506,13 @@ export function useVoiceSession(): VoiceSession {
         setStuckSession(null)
         return
       }
-      const state = (await res.json()) as { entries: Entry[]; awaitingRetry: boolean }
+      const state = (await res.json()) as { entries: Entry[]; awaitingRetry: boolean; startedAt: string } & Drill
       sessionIdRef.current = stuck.id
+      setDrill({ track: state.track, problem: state.problem, budgetMs: state.budgetMs })
+      // Resumed from the session's real start, not from now — reopening a timed
+      // drill twenty minutes in must show twenty-five minutes left, not a fresh
+      // forty-five. That is the whole difference between resuming and restarting.
+      setDeadlineAt(state.budgetMs === undefined ? null : Date.parse(state.startedAt) + state.budgetMs)
       setEntries(state.entries)
       setInterviewerSpeaking(false)
       setInterimSentences([])
@@ -721,6 +808,9 @@ export function useVoiceSession(): VoiceSession {
     transcriptFailed,
     errorKind,
     dismissError,
+    drill,
+    remainingSeconds,
+    starting,
     stuckSession,
     reopenStuckSession,
     retryTranscription,

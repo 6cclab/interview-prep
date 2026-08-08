@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { ServerResponse } from 'node:http'
 import type { Interviewer } from './interviewer'
 import type { Session } from './session'
+import type { Track } from './context'
 
 /**
  * A failed turn's audio, kept around so a retry doesn't have to ask Andre to
@@ -21,10 +22,24 @@ export interface RetainedAudio {
   at: number
 }
 
+/**
+ * Which drill a session is running. `finishSession` needs both to name the
+ * transcript (`local/mock-...` vs `local/designs/<problem>-live-...`), and the
+ * client needs them back on reopen to restore the problem pane and the clock.
+ */
+export interface Drill {
+  track: Track
+  /** Required for `design`, absent for `mock` — see `allowedPaths`. */
+  problem?: string
+  /** The design track's time budget in ms; absent when the drill is untimed. */
+  budgetMs?: number
+}
+
 export interface StoredSession {
   id: string
   session: Session
   interviewer: Interviewer
+  drill: Drill
   startedAt: Date
   /** This session's temp directory for uploaded/transcoded audio; removed on `remove()`'s caller's cleanup. */
   scratchDir: string
@@ -36,7 +51,7 @@ export interface StoredSession {
 }
 
 export interface SessionStore {
-  create(session: Session, interviewer: Interviewer, startedAt: Date, scratchDir: string): StoredSession
+  create(session: Session, interviewer: Interviewer, startedAt: Date, scratchDir: string, drill: Drill): StoredSession
   get(id: string): StoredSession | undefined
   remove(id: string): void
   /** True once any session is live — the web path allows exactly one at a time. */
@@ -55,11 +70,12 @@ export function createSessionStore(
   const sessions = new Map<string, StoredSession>()
 
   return {
-    create(session, interviewer, startedAt, scratchDir) {
+    create(session, interviewer, startedAt, scratchDir, drill) {
       const stored: StoredSession = {
         id: idFactory(),
         session,
         interviewer,
+        drill,
         startedAt,
         scratchDir,
         lastActivity: now(),
