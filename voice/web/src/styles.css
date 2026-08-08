@@ -177,6 +177,21 @@ body {
   white-space: nowrap;
 }
 
+/* A timed drill's countdown reads louder than the elapsed clock it replaces —
+   it is a limit, not a statistic. It goes destructive only once actually spent,
+   and never blinks or animates: a design interview's last minutes are when
+   concentration matters most, and movement in the corner of the eye is exactly
+   the wrong thing then. */
+.app-header__clock--remaining {
+  color: var(--foreground);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-header__clock--remaining[data-spent='true'] {
+  color: var(--destructive);
+}
+
 /* The mic-check disclosure this header's "Mic check" button opens — kept out
    of the transcript column entirely so a long diagnostic result never
    disturbs the single-screen layout. */
@@ -860,4 +875,142 @@ body {
   font-size: 0.8rem;
   color: var(--muted-foreground);
   max-width: 60ch;
+}
+
+/* The design track's problem statement (ProblemPane). Sits between the header
+   and the transcript, capped so a long prompt scrolls inside itself rather than
+   pushing the conversation off screen. */
+.problem-pane-slot {
+  flex: none;
+  border-bottom: 2px solid var(--border);
+  background: var(--muted);
+}
+
+.problem-pane {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 0 28px;
+}
+
+.problem-pane__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.problem-pane__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-foreground);
+}
+
+.problem-pane__name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.problem-pane__toggle {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  line-height: 1;
+  color: var(--muted-foreground);
+}
+
+.problem-pane__body {
+  max-height: 32vh;
+  overflow-y: auto;
+  padding-bottom: 16px;
+}
+
+.problem-pane__prompt {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  /* The prompt is a committed markdown file, shown as written. Wrapped rather
+     than side-scrolling: a horizontally scrolling problem statement is unusable
+     mid-interview. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.problem-pane__note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+/* The Idle-only drill chooser (DrillPicker). Shares the dock's measure so it
+   lines up with everything else in that stack. */
+.drill-picker {
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px 20px;
+}
+
+.drill-picker__row {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.drill-picker__row label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+}
+
+/* Native selects on macOS ignore border and background, so the appearance has
+   to be reset before any of this applies — same reason as DeviceSettings. */
+.drill-picker__row select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  padding: 9px 34px 9px 12px;
+  border: 2px solid var(--border);
+  border-radius: 0;
+  background-color: var(--background);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23888' stroke-width='1.75'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 11px;
+  box-shadow: var(--shadow-brutal, 4px 4px 0 0 var(--shadow-color, currentColor));
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.drill-picker__row select:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 0 var(--shadow-color, currentColor);
+}
+
+.drill-picker__hint {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted-foreground);
+  max-width: 68ch;
+  text-wrap: pretty;
 }
