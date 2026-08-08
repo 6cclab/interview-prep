@@ -40,3 +40,14 @@ export interface OutputDevice {
   id: string
   name: string
 }
+
+/**
+ * The session a `POST /api/session` 409 refused to start alongside, from that
+ * 409's body. `startedAt` is an ISO string, or `null` if the server did not
+ * report one — the banner names the time when it can and stays silent about it
+ * when it cannot, rather than inventing one.
+ */
+export interface StuckSession {
+  id: string
+  startedAt: string | null
+}

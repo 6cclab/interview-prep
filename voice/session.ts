@@ -119,8 +119,13 @@ export interface FinishResult {
 }
 
 export function finishSession(session: Session, interviewer: Interviewer, opts: FinishOptions): FinishResult {
-  const relPath = sessionPath(opts.track, opts.startedAt, opts.problem)
-  writeSession(opts.root, relPath, formatSession(session.entries(), opts.startedAt))
+  // The path written may differ from the one asked for — `writeSession` will not
+  // overwrite an existing transcript — so report back what it actually used.
+  const relPath = writeSession(
+    opts.root,
+    sessionPath(opts.track, opts.startedAt, opts.problem),
+    formatSession(session.entries(), opts.startedAt),
+  )
 
   let storyLogWritten = false
   if (opts.track === 'mock') {

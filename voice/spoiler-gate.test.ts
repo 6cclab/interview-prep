@@ -91,6 +91,14 @@ describe('spoiler gate', () => {
     responses.push(JSON.stringify(await readSSE(stream))) // andre entry
     responses.push(JSON.stringify(await readSSE(stream))) // interviewer sentence — trailer must be stripped here
 
+    // The highest-risk route in this sweep: `GET /api/session/:id` exists to
+    // hand session content back to a reopening client, so it is the one place
+    // most likely to over-share. It must expose exactly what the `entry` SSE
+    // events already do — never the assembled system prompt, never
+    // `interviewer.lastRaw()` with its unstripped story-log trailer.
+    const readRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}`)
+    responses.push(await readRes.clone().text())
+
     const endRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
     responses.push(await endRes.clone().text())
 
@@ -193,6 +201,7 @@ describe('spoiler gate', () => {
     // 404s
     for (const res of await Promise.all([
       fetch(`http://127.0.0.1:${port}/does-not-exist`),
+      fetch(`http://127.0.0.1:${port}/api/session/nope`),
       fetch(`http://127.0.0.1:${port}/api/session/nope/stream`),
       fetch(`http://127.0.0.1:${port}/api/session/nope/turn`, { method: 'POST', body: Buffer.from('x') }),
       fetch(`http://127.0.0.1:${port}/api/session/nope/turn/retry`, { method: 'POST' }),

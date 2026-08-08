@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Server } from 'node:http'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
@@ -86,6 +86,150 @@ describe('POST /api/session', () => {
     const second = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
     expect(second.status).toBe(409)
     expect(((await second.json()) as { error: string }).error).toMatch(/already in progress/i)
+  })
+
+  // Without these two fields the 409 is a dead end for "Open that session":
+  // there is no id to reopen, and the banner has no honest start time to name.
+  it('names the session it refused, with its start time, so the client can reopen it', async () => {
+    let n = 0
+    const store = createSessionStore(() => `session-${++n}`)
+    const { port } = await listen(baseDeps({ store }))
+    const first = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await first.json()) as { id: string }
+
+    const conflict = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    expect(conflict.status).toBe(409)
+    const body = (await conflict.json()) as { id: string; startedAt: string }
+    expect(body.id).toBe(id)
+    // A real ISO instant for the refused session, not the time of the refusal.
+    expect(Number.isNaN(Date.parse(body.startedAt))).toBe(false)
+    expect(body.startedAt).toBe(store.get(id)!.startedAt.toISOString())
+  })
+})
+
+// Reopening a session the browser lost track of. SSE replays nothing, so
+// reattaching to the stream alone would show an empty transcript for a session
+// several turns deep — this is where the client catches up from.
+describe('GET /api/session/:id', () => {
+  it('reports the session identity and its committed entries', async () => {
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* () {
+          yield 'Tell me about a disagreement.'
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(stream) // opening sentence
+    await readSSE(stream) // opening entry, so an entry is definitely committed
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      id: string
+      startedAt: string
+      entries: { speaker: string; text: string; at: number }[]
+      awaitingRetry: boolean
+    }
+    expect(body.id).toBe(id)
+    expect(Number.isNaN(Date.parse(body.startedAt))).toBe(false)
+    expect(body.entries).toEqual([
+      { speaker: 'interviewer', text: 'Tell me about a disagreement.', at: 0 },
+    ])
+    expect(body.awaitingRetry).toBe(false)
+  })
+
+  // A reopened session must land in the same error state it was left in, or
+  // Andre loses the retained audio's retry without ever being offered it.
+  it('reports awaitingRetry when a turn failed transcription and its audio is retained', async () => {
+    const { port } = await listen(
+      baseDeps({
+        transcode: async () => {
+          throw new Error('ffmpeg: invalid data found')
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    const failed = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('fake webm bytes'),
+    })
+    expect(failed.status).toBe(422)
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}`)
+    expect(((await res.json()) as { awaitingRetry: boolean }).awaitingRetry).toBe(true)
+  })
+
+  it('404s an unknown session id', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/nope`)
+    expect(res.status).toBe(404)
+  })
+
+  // The naming scheme separates transcripts by start time to the minute, which
+  // is not a uniqueness guarantee: "End it and start fresh" (the stuck-session
+  // banner) ends one session and immediately starts another, so two can share a
+  // stamp. `writeSession`'s refusal to overwrite is what keeps that safe, and
+  // this drives the whole flow through the real routes rather than trusting the
+  // unit test of the fallback in isolation.
+  it('keeps both transcripts when a session is ended and restarted inside the same minute', async () => {
+    let n = 0
+    const store = createSessionStore(() => `session-${++n}`)
+    const { port } = await listen(baseDeps({ store }))
+
+    const firstCreate = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id: firstId } = (await firstCreate.json()) as { id: string }
+    const firstEnd = await fetch(`http://127.0.0.1:${port}/api/session/${firstId}/end`, { method: 'POST' })
+    const { relPath: firstPath } = (await firstEnd.json()) as { relPath: string }
+
+    const secondCreate = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    expect(secondCreate.status).toBe(201)
+    const { id: secondId } = (await secondCreate.json()) as { id: string }
+    const secondEnd = await fetch(`http://127.0.0.1:${port}/api/session/${secondId}/end`, { method: 'POST' })
+    const { relPath: secondPath } = (await secondEnd.json()) as { relPath: string }
+
+    // Two distinct files, both still on disk, and each reported path is the one
+    // that actually exists — a reported path that isn't there is the specific
+    // way this fix could half-work.
+    expect(secondPath).not.toBe(firstPath)
+    expect(existsSync(join(root, firstPath))).toBe(true)
+    expect(existsSync(join(root, secondPath))).toBe(true)
+  })
+
+  // The whole point of reopening: the entries survive so a reattached client can
+  // render the transcript it missed, and reattaching does not disturb them.
+  it('keeps reporting the full transcript across a reconnect', async () => {
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* () {
+          yield 'Tell me more.'
+        },
+        transcriber: { transcribe: async () => ({ text: 'answer' }) },
+        transcode: async (_input, output) => {
+          writeFileSync(output, Buffer.from('fake wav bytes'))
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const first = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(first)
+    await readSSE(first)
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, { method: 'POST', body: Buffer.from('webm') })
+    await readSSE(first) // Andre's entry
+    await readSSE(first) // the reply's sentence
+    await readSSE(first) // the interviewer's entry
+
+    // Reattach, exactly as "Open that session" does.
+    const second = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    expect(second.status).toBe(200)
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}`)
+    const { entries } = (await res.json()) as { entries: { speaker: string }[] }
+    expect(entries.map((e) => e.speaker)).toEqual(['interviewer', 'andre', 'interviewer'])
   })
 })
 
@@ -625,7 +769,7 @@ describe('POST /api/session/:id/end', () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
     expect(res.status).toBe(200)
     const body = (await res.json()) as { relPath: string; storyLogWritten: boolean }
-    expect(body.relPath).toMatch(/^local\/mock-\d{4}-\d{2}-\d{2}\.md$/)
+    expect(body.relPath).toMatch(/^local\/mock-\d{4}-\d{2}-\d{2}-\d{4}\.md$/)
     expect(existsSync(join(root, body.relPath))).toBe(true)
   })
 
@@ -733,8 +877,12 @@ describe('GET /api/session/:id/stream', () => {
 
     // Give the server's 'close' handler a tick to run and persist.
     await new Promise((resolve) => setTimeout(resolve, 50))
-    const relPath = join(root, 'local/mock-' + new Date().toISOString().slice(0, 10) + '.md')
-    expect(existsSync(relPath)).toBe(true)
+    // Matched by prefix rather than by exact name: the transcript is named from
+    // the session's real start time down to the minute, which this test does not
+    // control. What it is asserting is that a disconnect persisted *something*.
+    const today = new Date().toISOString().slice(0, 10)
+    const written = readdirSync(join(root, 'local')).filter((name) => name.startsWith(`mock-${today}`))
+    expect(written).toHaveLength(1)
   })
 
   it('a second connection ends the previous response instead of leaving it open', async () => {

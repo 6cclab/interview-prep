@@ -10,7 +10,7 @@ import { LiveRegions } from './components/LiveRegions'
 import { MicCheck } from './components/MicCheck'
 import { DeviceSettings } from './components/DeviceSettings'
 import { useTheme } from './theme'
-import { derivePhase, fmt, wallClock, ERROR_COPY, ANNOUNCEMENTS } from './phase'
+import { derivePhase, fmt, wallClock, stuckBody, ERROR_COPY, ANNOUNCEMENTS } from './phase'
 import type { ErrorKind } from './types'
 
 // Status title/detail for the dock's left-hand block. The `requesting`
@@ -18,6 +18,15 @@ import type { ErrorKind } from './types'
 // useVoiceSession.ts (`MIC_WATCHDOG_MS`/`MIC_WATCHDOG_MESSAGE`) — see
 // `requestingLong` below for how the ~4s threshold is reconciled with that
 // hook-owned status string instead of duplicating a second timer.
+// The "Show me where" expansion for a blocked microphone. Chrome is named
+// because .claude/CLAUDE.md makes it the supported browser for this drill; the
+// second line covers the macOS layer, which is a separate grant from the site
+// permission and the one that actually bites (see the same file's notes).
+const PERMISSION_HELP = [
+  'In Chrome: click the padlock (or the sliders icon) at the left of the address bar, find Microphone, and set it to Allow. The page does not need reloading.',
+  'If it is already set to Allow, the block is one level up: System Settings › Privacy & Security › Microphone, and switch Chrome on there.',
+]
+
 const REQUESTING_LONG_COPY =
   'The browser is still asking. Nothing is being recorded yet, and this will wait as long as it needs to. If you ' +
   'cannot see the prompt, it may be behind this window, or collapsed into the padlock icon in the address bar — ' +
@@ -39,6 +48,8 @@ export default function App() {
     stopAndSubmit,
     endSession,
     forceEndStuckSession,
+    stuckSession,
+    reopenStuckSession,
     inputDevices,
     selectedInputId,
     selectInput,
@@ -171,26 +182,51 @@ export default function App() {
   // Assertive live-region text: the error's title, per the handoff.
   const alertText = errorKind ? ERROR_COPY[errorKind].title : ''
 
-  // Recovery actions per error kind. Every action here does something real —
-  // see the design report for the one the handoff specifies that has no
-  // honest counterpart (a resumable "stuck" session to open) and was dropped
-  // rather than shipped as a dead button.
+  // "Show me where" (error 1): the handoff's second action for a blocked
+  // microphone. It cannot open the browser's permission UI — no web API can —
+  // so it expands the concrete steps for this browser inline instead of
+  // navigating somewhere that does not exist.
+  const [showPermissionHelp, setShowPermissionHelp] = useState(false)
+  useEffect(() => {
+    if (errorKind !== 'denied') setShowPermissionHelp(false)
+  }, [errorKind])
+
+  // Recovery actions per error kind. Every action here does something real.
   const errorActions = useMemo((): ErrorAction[] => {
     if (!errorKind) return []
     const kind: ErrorKind = errorKind
     switch (kind) {
       case 'denied':
-      case 'nodevice':
         return [
           {
-            label: kind === 'denied' ? 'Try again' : 'Check again',
+            label: 'Try again',
             variant: 'brand',
             onClick: () => {
               dismissError()
               if (phase === 'ready' || phase === 'recording') record()
             },
           },
-          { label: 'Dismiss', variant: 'outline', onClick: dismissError },
+          {
+            label: showPermissionHelp ? 'Hide the steps' : 'Show me where',
+            variant: 'outline',
+            onClick: () => setShowPermissionHelp((open) => !open),
+          },
+        ]
+      case 'nodevice':
+        return [
+          {
+            label: 'Check again',
+            variant: 'brand',
+            onClick: () => {
+              dismissError()
+              if (phase === 'ready' || phase === 'recording') record()
+            },
+          },
+          // The handoff's "Read transcript": the banner's own copy promises
+          // "you can keep reading the transcript in the meantime", and the
+          // banner is what covers it. Dismissing is exactly that — the session
+          // is untouched and the transcript is already on screen behind it.
+          { label: 'Read transcript', variant: 'outline', onClick: dismissError },
         ]
       case 'transcript':
         // All three of the handoff's actions are real now that the server
@@ -206,12 +242,30 @@ export default function App() {
           { label: 'Skip this turn', variant: 'ghost', onClick: abandonTurn },
         ]
       case 'stuck':
-        // "Open that session" has no server-side counterpart — there is no
-        // API to resume a stuck session's in-progress turn, only to end it —
-        // so it is omitted rather than shipped inert.
-        return [{ label: 'End it and start fresh', variant: 'brand', onClick: forceEndStuckSession }]
+        return [
+          { label: 'End it and start fresh', variant: 'brand', onClick: forceEndStuckSession },
+          // Real now that `GET /api/session/:id` can hand back the session's
+          // committed entries — reopening restores the transcript and attaches
+          // to the live stream. Offered only when the 409 named a session to
+          // open; a server build whose 409 carries no id leaves this out rather
+          // than rendering a button with nothing to act on.
+          ...(stuckSession
+            ? [{ label: 'Open that session', variant: 'outline' as const, onClick: reopenStuckSession }]
+            : []),
+        ]
     }
-  }, [errorKind, phase, dismissError, record, retryTranscription, abandonTurn, forceEndStuckSession])
+  }, [
+    errorKind,
+    phase,
+    dismissError,
+    record,
+    retryTranscription,
+    abandonTurn,
+    forceEndStuckSession,
+    stuckSession,
+    reopenStuckSession,
+    showPermissionHelp,
+  ])
 
   let statusTitle = 'Not started'
   let statusDetail = 'The first question is asked out loud. Nothing is recorded until you start a turn.'
@@ -229,7 +283,11 @@ export default function App() {
     statusDetail = 'Start when you are ready. There is no time limit and no countdown.'
   } else if (phase === 'ended') {
     statusTitle = 'Session ended'
-    statusDetail = `Transcript saved — ${entries.length} turns, ${fmt(endedSessionSecondsRef.current)} total.`
+    // "N turns" counts Andre's answers, not transcript entries: an entry is a
+    // single speaker's block, so `entries.length` counted the interviewer's
+    // questions too and roughly doubled the real figure.
+    const turns = entries.filter((entry) => entry.speaker === 'andre').length
+    statusDetail = `Transcript saved — ${turns} turns, ${fmt(endedSessionSecondsRef.current)} total.`
   }
 
   return (
@@ -275,7 +333,14 @@ export default function App() {
         <div className="dock-stack">
           {errorKind && (
             <div className="dock-stack__row">
-              <ErrorBanner title={ERROR_COPY[errorKind].title} body={ERROR_COPY[errorKind].body} actions={errorActions} />
+              <ErrorBanner
+                title={ERROR_COPY[errorKind].title}
+                // The stuck body is built per-409 so it can name the session's
+                // real start time; every other kind is static copy.
+                body={errorKind === 'stuck' ? stuckBody(stuckSession?.startedAt ?? null) : ERROR_COPY[errorKind].body}
+                actions={errorActions}
+                details={errorKind === 'denied' && showPermissionHelp ? PERMISSION_HELP : undefined}
+              />
             </div>
           )}
           {phase === 'recording' && (

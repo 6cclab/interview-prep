@@ -382,7 +382,16 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // `context.ts`'s `PROBLEM_SLUG` and `assertNoSpoilers` must run on
       // whatever arrives in the body before it reaches `buildSystemPrompt`.
       if (store.hasActive()) {
-        sendJson(res, 409, { error: 'a session is already in progress' })
+        // The 409 carries the stuck session's id and start time so the client
+        // can offer both recoveries the design calls for: end it, or open it.
+        // Without the id there was nothing to reopen and nothing honest to put
+        // in the banner's "a session started at 07:12" — see ERROR_COPY.stuck.
+        const active = store.get(store.activeId()!)!
+        sendJson(res, 409, {
+          error: 'a session is already in progress',
+          id: active.id,
+          startedAt: active.startedAt.toISOString(),
+        })
         return
       }
       const system = buildSystemPrompt(deps.root, 'mock')
@@ -393,6 +402,32 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       const stored = store.create(session, interviewer, new Date(), scratchDir)
       entryClocks.set(stored.id, entryClock)
       sendJson(res, 201, { id: stored.id })
+      return
+    }
+
+    // Reopening a session the browser lost track of (a reload, a crash, a
+    // closed tab). SSE replays nothing, so a client that reconnects to
+    // `/stream` alone would show an empty transcript for a session that is
+    // several turns deep. This hands back the state it needs to catch up.
+    //
+    // `entries` is the same shape the SSE `entry` events carry and, like them,
+    // never includes `interviewer.lastRaw()` — the raw reply can hold a
+    // story-log trailer, which is transcript-only and must not reach the
+    // browser. See voice/spoiler-gate.test.ts.
+    const readMatch = /^\/api\/session\/([^/]+)$/.exec(url.pathname)
+    if (req.method === 'GET' && readMatch) {
+      const id = readMatch[1]!
+      const stored = store.get(id)
+      if (!stored) {
+        notFound(res)
+        return
+      }
+      sendJson(res, 200, {
+        id: stored.id,
+        startedAt: stored.startedAt.toISOString(),
+        entries: stored.session.entries(),
+        awaitingRetry: stored.retainedAudio !== undefined,
+      })
       return
     }
 

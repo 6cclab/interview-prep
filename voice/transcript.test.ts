@@ -160,14 +160,27 @@ describe('formatSession', () => {
 describe('sessionPath', () => {
   it('puts a design session where design.md says it goes', () => {
     expect(sessionPath('design', new Date('2026-08-07T10:00:00Z'), 'rate-limiter')).toBe(
-      'local/designs/rate-limiter-live-2026-08-07.md',
+      'local/designs/rate-limiter-live-2026-08-07-1000.md',
     )
   })
 
   it('puts a mock session under local/', () => {
     expect(sessionPath('mock', new Date('2026-08-07T10:00:00Z'))).toBe(
-      'local/mock-2026-08-07.md',
+      'local/mock-2026-08-07-1000.md',
     )
+  })
+
+  // The name used to be the date alone, so a second drill on the same day
+  // resolved to the same path — and `writeSession` overwrites, so it destroyed
+  // the first one's transcript. Both tracks are named the same way and both
+  // had the bug.
+  it.each([
+    ['mock', undefined],
+    ['design', 'rate-limiter'],
+  ] as const)('gives two %s sessions on the same day different paths', (track, problem) => {
+    const morning = sessionPath(track, new Date('2026-08-07T10:00:00Z'), problem)
+    const evening = sessionPath(track, new Date('2026-08-07T19:32:00Z'), problem)
+    expect(morning).not.toBe(evening)
   })
 })
 
@@ -177,6 +190,34 @@ describe('writeSession', () => {
     expect(
       readFileSync(join(root, 'local/designs/rate-limiter-live-2026-08-07.md'), 'utf8'),
     ).toBe('BODY')
+  })
+
+  it('returns the path it wrote', () => {
+    expect(writeSession(root, 'local/mock-2026-08-07-1000.md', 'BODY')).toBe('local/mock-2026-08-07-1000.md')
+  })
+
+  // `local/` is gitignored, so an overwritten transcript is gone for good. This
+  // is the backstop behind the unique naming in `sessionPath`, not a substitute
+  // for it.
+  it('never overwrites an existing transcript, and reports the path it used instead', () => {
+    writeSession(root, 'local/mock-2026-08-07-1000.md', 'FIRST')
+    const second = writeSession(root, 'local/mock-2026-08-07-1000.md', 'SECOND')
+    expect(second).toBe('local/mock-2026-08-07-1000-2.md')
+    expect(readFileSync(join(root, 'local/mock-2026-08-07-1000.md'), 'utf8')).toBe('FIRST')
+    expect(readFileSync(join(root, 'local/mock-2026-08-07-1000-2.md'), 'utf8')).toBe('SECOND')
+
+    const third = writeSession(root, 'local/mock-2026-08-07-1000.md', 'THIRD')
+    expect(third).toBe('local/mock-2026-08-07-1000-3.md')
+  })
+
+  // A dotfile's leading dot is not an extension. Not reachable from any current
+  // caller, but this function's whole job is protecting data that cannot be
+  // recovered, so it should not have a shape that quietly produces nonsense.
+  it('suffixes a name with no extension, and a dotfile, without mangling it', () => {
+    writeSession(root, 'local/notes', 'FIRST')
+    expect(writeSession(root, 'local/notes', 'SECOND')).toBe('local/notes-2')
+    writeSession(root, 'local/.hidden', 'FIRST')
+    expect(writeSession(root, 'local/.hidden', 'SECOND')).toBe('local/.hidden-2')
   })
 })
 

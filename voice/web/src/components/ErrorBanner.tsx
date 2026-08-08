@@ -10,6 +10,13 @@ interface Props {
   title: string
   body: string
   actions: ErrorAction[]
+  /**
+   * Extra steps revealed by an action rather than shown up front — currently
+   * only the blocked-microphone error's "Show me where". Rendered below the
+   * actions so revealing them grows the banner downward instead of pushing the
+   * buttons out from under the cursor that just pressed one.
+   */
+  details?: string[]
 }
 
 // Errors are never silent and never dead ends: each states what happened and
@@ -17,7 +24,7 @@ interface Props {
 // App.tsx's `errorActions` for what each of the four real failure paths can
 // and cannot offer). The title is pushed to the assertive live region by the
 // caller — this component only renders it.
-export function ErrorBanner({ title, body, actions }: Props) {
+export function ErrorBanner({ title, body, actions, details }: Props) {
   return (
     <div className="error-banner">
       <div className="error-banner__rule" aria-hidden="true" />
@@ -31,6 +38,13 @@ export function ErrorBanner({ title, body, actions }: Props) {
             </Button>
           ))}
         </div>
+        {details && details.length > 0 && (
+          <ol className="error-banner__details">
+            {details.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        )}
       </div>
     </div>
   )

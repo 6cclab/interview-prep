@@ -107,8 +107,11 @@ async function main(): Promise<void> {
       now: () => Date.now() - started,
     })
 
-    const relPath = sessionPath(track, startedAt, problem)
-    writeSession(root, relPath, formatSession(entries, startedAt))
+    // The path written may differ from the one asked for — `writeSession` will
+    // not overwrite an existing transcript — so print what it actually used,
+    // not what was requested. Otherwise a collision sends Andre looking for a
+    // file that isn't where the terminal said it was.
+    const relPath = writeSession(root, sessionPath(track, startedAt, problem), formatSession(entries, startedAt))
     console.log(`\nTranscript: ${relPath}`)
 
     const { log } = splitTrailer(interviewer.lastRaw())

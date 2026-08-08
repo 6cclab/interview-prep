@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
 import type { Track } from './context'
 
 export interface Entry {
@@ -60,8 +60,23 @@ function clock(ms: number): string {
   return `${minutes}:${seconds}`
 }
 
-function isoDate(at: Date): string {
-  return at.toISOString().slice(0, 10)
+/**
+ * `2026-08-08-1850` — the date plus the session's start time to the minute.
+ *
+ * The date alone is not a unique name: two drills on the same day resolved to
+ * the same path, and `writeSession` overwrites, so the second silently
+ * destroyed the first. Minute precision separates ordinary back-to-back drills
+ * while staying readable.
+ *
+ * It is not a uniqueness *guarantee*, and nothing here should be read as one:
+ * ending a session and starting another inside the same minute is a supported
+ * flow (the stuck-session banner's "End it and start fresh" does exactly that),
+ * so two sessions can legitimately share a stamp. `writeSession`'s refusal to
+ * overwrite is what makes that safe — this only keeps the common case tidy.
+ */
+function isoStamp(at: Date): string {
+  const iso = at.toISOString()
+  return `${iso.slice(0, 10)}-${iso.slice(11, 13)}${iso.slice(14, 16)}`
 }
 
 export function formatSession(entries: Entry[], startedAt: Date): string {
@@ -76,15 +91,42 @@ export function formatSession(entries: Entry[], startedAt: Date): string {
 export function sessionPath(track: Track, startedAt: Date, problem?: string): string {
   if (track === 'design') {
     if (!problem) throw new Error('A design session needs a problem name.')
-    return `local/designs/${problem}-live-${isoDate(startedAt)}.md`
+    return `local/designs/${problem}-live-${isoStamp(startedAt)}.md`
   }
-  return `local/mock-${isoDate(startedAt)}.md`
+  return `local/mock-${isoStamp(startedAt)}.md`
 }
 
-export function writeSession(root: string, relPath: string, body: string): void {
+/**
+ * Writes a session transcript, and **returns the path it actually used** — which
+ * may not be `relPath`.
+ *
+ * A transcript is the entire product of a drill and there is no undo: `local/` is
+ * gitignored, so an overwrite is unrecoverable. `sessionPath` now makes
+ * collisions essentially impossible, but "essentially impossible" is the wrong
+ * guarantee for unrecoverable data, so an occupied path gets a `-2`, `-3` suffix
+ * rather than being clobbered. Callers must use the returned path, not the one
+ * they passed in.
+ */
+export function writeSession(root: string, relPath: string, body: string): string {
   const full = join(root, relPath)
   mkdirSync(dirname(full), { recursive: true })
-  writeFileSync(full, body)
+  const free = firstFreePath(full)
+  writeFileSync(free, body)
+  return relative(root, free)
+}
+
+function firstFreePath(full: string): string {
+  if (!existsSync(full)) return full
+  // `> lastSep + 1`, not `> lastSep`: a leading dot makes a dotfile, not an
+  // extension, so `.hidden` must suffix to `.hidden-2` rather than splitting
+  // into an empty stem and a `.hidden` extension.
+  const dot = full.lastIndexOf('.')
+  const lastSep = full.lastIndexOf(sep)
+  const [stem, ext] = dot > lastSep + 1 ? [full.slice(0, dot), full.slice(dot)] : [full, '']
+  for (let n = 2; ; n++) {
+    const candidate = `${stem}-${n}${ext}`
+    if (!existsSync(candidate)) return candidate
+  }
 }
 
 export function appendStoryLog(root: string, log: StoryLog): void {
