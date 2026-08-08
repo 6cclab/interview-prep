@@ -562,6 +562,13 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         return
       }
 
+      // A fresh answer supersedes whatever an earlier failed turn retained.
+      // The primary "Start answer" action stays live under the error banner by
+      // design, so recording again *without* going through "Answer again" is an
+      // ordinary path — and if that left the old audio retained, a later
+      // "Retry transcription" would append a second entry stamped with the
+      // earlier turn's `at`, landing out of order in the graded record.
+      await clearRetainedAudio(stored)
       proceedTurn(id, stored, result.text, at)
       return
     }

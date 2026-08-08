@@ -263,6 +263,15 @@ describe('spoiler gate', () => {
     expect(JSON.parse(body)).toHaveProperty('error')
     expect(body).not.toContain('story-log')
     expect(body).not.toContain('competency: Conflict')
+
+    // The retry route builds its own 422 from a second failure, on a different
+    // code path — sweep that body too rather than assuming the shapes match.
+    const retryRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn/retry`, { method: 'POST' })
+    expect(retryRes.status).toBe(422)
+    const retryBody = await retryRes.text()
+    expect(JSON.parse(retryBody)).toHaveProperty('error')
+    expect(retryBody).not.toContain('story-log')
+    expect(retryBody).not.toContain('competency: Conflict')
   })
 
   it('every static asset in the real build never contains denied-file content or the raw trailer', async () => {

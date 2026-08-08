@@ -424,6 +424,55 @@ describe('transcription failure recovery', () => {
     expect(existsSync(secondRetained.path)).toBe(true)
   })
 
+  // Recording again is a way out of the error state that doesn't go through
+  // retry or abandon — the primary action stays live under the banner. If the
+  // superseded audio survived that, a later retry would append a second entry
+  // stamped with the *earlier* turn's `at`, landing out of order in the record
+  // the drill grades pacing off.
+  it('a normal turn succeeding after a failure clears the superseded retained audio', async () => {
+    const store = createSessionStore(() => 'session-1')
+    let transcodeCalls = 0
+    const { port } = await listen(
+      baseDeps({
+        store,
+        createTransport: () => async function* () {
+          yield 'Tell me more.'
+        },
+        transcriber: { transcribe: async () => ({ text: 'Second, better answer.' }) },
+        transcode: async (_input, output) => {
+          transcodeCalls++
+          if (transcodeCalls === 1) throw new Error('ffmpeg: invalid data found')
+          writeFileSync(output, Buffer.from('fake wav bytes'))
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+
+    const failed = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('first webm'),
+    })
+    expect(failed.status).toBe(422)
+    const stale = store.get(id)!.retainedAudio!
+    expect(existsSync(stale.path)).toBe(true)
+
+    const second = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      body: Buffer.from('second webm'),
+    })
+    expect(second.status).toBe(202)
+
+    expect(store.get(id)!.retainedAudio).toBeUndefined()
+    expect(existsSync(stale.path)).toBe(false)
+
+    // And so a retry has nothing to resurrect: exactly one Andre entry stands.
+    const retryRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn/retry`, { method: 'POST' })
+    expect(retryRes.status).toBe(409)
+    const entries = store.get(id)!.session.entries()
+    expect(entries.filter((e) => e.speaker === 'andre')).toHaveLength(1)
+  })
+
   it('POST .../turn/retry 409s when nothing is retained', async () => {
     const { port } = await listen(baseDeps())
     const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })

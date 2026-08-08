@@ -500,6 +500,10 @@ export function useVoiceSession(): VoiceSession {
         return
       }
       setMode('listening-to-interviewer')
+      // Clears a prior turn's transcription error: recording again is one of
+      // the ways out of that state (the primary action stays live under the
+      // banner), so a success here has resolved it just as "Answer again" would.
+      setTranscriptFailed(false)
       setStatus('Your turn was received.')
     })()
   }, [clearElapsedTimer])
