@@ -3,6 +3,24 @@ import type { ServerResponse } from 'node:http'
 import type { Interviewer } from './interviewer'
 import type { Session } from './session'
 
+/**
+ * A failed turn's audio, kept around so a retry doesn't have to ask Andre to
+ * record again. `path` always lives under this session's `scratchDir`, so
+ * `endAndPersist`'s recursive `rmSync` of that directory is sufficient
+ * cleanup on every session-exit path — nothing extra to unlink there. `kind`
+ * says how far the pipeline got: `'wav'` means transcode already succeeded
+ * (a retry can skip straight to transcription), `'webm'` means it didn't (a
+ * retry must transcode again). `at` is the *original* turn's elapsed-time
+ * stamp — see the comment on `Entry.at` in http-server.ts — preserved across
+ * retries so a retry's success doesn't stamp the entry with the (later,
+ * retry-time) moment instead of when Andre actually finished speaking.
+ */
+export interface RetainedAudio {
+  path: string
+  kind: 'wav' | 'webm'
+  at: number
+}
+
 export interface StoredSession {
   id: string
   session: Session
@@ -13,6 +31,8 @@ export interface StoredSession {
   /** The open SSE response for this session, once a client has connected. */
   sseClient?: ServerResponse
   lastActivity: number
+  /** The most recent failed turn's audio, if any — see `RetainedAudio`. At most one at a time. */
+  retainedAudio?: RetainedAudio
 }
 
 export interface SessionStore {
