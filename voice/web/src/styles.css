@@ -1,3 +1,29 @@
+/*
+ * Brutalkit, the design system this screen is specified against.
+ *
+ * Order matters: Tailwind first (Brutalkit's stylesheet expects it), then
+ * Brutalkit, then the theme family. Tailwind is present only as Brutalkit's
+ * peer requirement — the design itself is plain CSS over the tokens below.
+ *
+ * `sage` is the handoff's default family; `frost`, `ink`, `paper` and
+ * `midnight` are the other four Brutalkit ships, swappable on this one line.
+ * Each token carries its own light and dark value, so nothing here needs a
+ * `dark:` variant.
+ */
+@import 'tailwindcss';
+@import 'brutalkit/styles';
+@import 'brutalkit/themes/sage';
+
+/* The handoff's typography: Geist Sans for UI, JetBrains Mono for labels,
+   clocks and metadata. Bundled locally via Brutalkit's own dependencies —
+   no CDN, no network fetch at runtime. */
+@import '@fontsource/geist-sans/400.css';
+@import '@fontsource/geist-sans/500.css';
+@import '@fontsource/geist-sans/600.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+@import '@fontsource/jetbrains-mono/600.css';
+
 /* ---------------------------------------------------------------------- */
 /* Tokens                                                                  */
 /* ---------------------------------------------------------------------- */

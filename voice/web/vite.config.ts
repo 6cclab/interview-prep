@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
 // `vite`'s CLI defaults `root` to the current working directory, not the
 // directory of this config file — and `mock:web`/`build:web` are invoked
@@ -11,7 +12,10 @@ const root = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
   root,
-  plugins: [react()],
+  // Tailwind is here only because Brutalkit peer-depends on it: its
+  // stylesheet expects `@import "tailwindcss"` to have run first. The design
+  // itself is plain CSS over Brutalkit's tokens, per the handoff.
+  plugins: [react(), tailwindcss()],
   build: {
     // Outside `voice/web` on purpose: this is the build *output*, served by
     // `voice/http-server.ts`, not part of the source tree it's built from.
