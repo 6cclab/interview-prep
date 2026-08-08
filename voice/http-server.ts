@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { createServer as createHttpsServer } from 'node:https'
+import { mkdtempSync, existsSync, rmSync, readFileSync } from 'node:fs'
 import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,8 +10,10 @@ import { createInterviewer, anthropicStream, type StreamFn } from './interviewer
 import { claudeCliStream } from './claude-cli'
 import { createSession, finishSession } from './session'
 import { createSessionStore, type SessionStore } from './session-store'
-import { whisperTranscriber, type Transcriber } from './speech'
+import { whisperTranscriber, saySpeaker, type Speaker, type Transcriber } from './speech'
 import { transcodeToWav } from './transcode'
+import { readStaticFile, resolveStaticFile } from './static'
+import { listOutputDevices, readDeviceConfig, writeDeviceConfig, type Device, type DeviceConfig } from './devices'
 
 export interface VoiceServerDeps {
   root: string
@@ -23,6 +26,31 @@ export interface VoiceServerDeps {
   idleMs?: number
   /** Injectable so tests never spawn a real ffmpeg process. */
   transcode?(inputPath: string, outputPath: string): Promise<void>
+  /**
+   * Directory the built React client is served from (Vite's `build.outDir`).
+   * Defaults to `<root>/voice/dist`. Overridable so tests can point at a
+   * small fixture directory instead of depending on a real `vite build`.
+   */
+  distDir?: string
+  /**
+   * PEM cert and key. When present the server speaks HTTPS instead of HTTP —
+   * required by Arc, which unlike Chrome does not treat plain-HTTP localhost
+   * as a secure context and so never exposes `navigator.mediaDevices`.
+   * Absent in every test, which keeps them on plain HTTP.
+   */
+  tls?: { cert: Buffer; key: Buffer } | null
+  /**
+   * Speaks a sentence aloud through the server — the browser has no API to
+   * route `SpeechSynthesis` to a chosen output device, but the server runs on
+   * the same machine, so it can shell out to `say -a <id>` instead (see
+   * `voice/speech.ts`). Optional so no test ever invokes a real `say`; every
+   * test in this repo omits it, which makes `streamTurn` a no-op speaker and
+   * leaves the SSE `sentence`/`entry` events — the actual source of truth for
+   * the transcript — completely unaffected. `main()` wires the real one.
+   */
+  speaker?: Speaker
+  /** Injectable so tests never shell out to the real `say -a '?'`. */
+  listOutputDevices?(): Promise<Device[]>
 }
 
 // A recorded interview turn is at most a few minutes of audio; 25MB is a wide
@@ -30,19 +58,34 @@ export interface VoiceServerDeps {
 // straight into memory is a trivial way for a single request to exhaust it.
 const MAX_TURN_AUDIO_BYTES = 25 * 1024 * 1024
 
-const STATIC_FILES: Record<string, { file: string; contentType: string }> = {
-  '/': { file: 'index.html', contentType: 'text/html; charset=utf-8' },
-  '/app.js': { file: 'app.js', contentType: 'text/javascript; charset=utf-8' },
-  '/style.css': { file: 'style.css', contentType: 'text/css; charset=utf-8' },
+// A device-config PATCH body is a couple of short string fields — a few
+// hundred bytes at most. 4KB is a wide margin, not a guess, and rejecting
+// anything past it costs nothing a real client would ever hit.
+const MAX_DEVICE_CONFIG_BODY_BYTES = 4 * 1024
+
+/** Reads and JSON-parses a small request body. Malformed or oversized input yields `null`. */
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+  const chunks: Buffer[] = []
+  let total = 0
+  for await (const chunk of req) {
+    const buf = chunk as Buffer
+    total += buf.length
+    if (total > MAX_DEVICE_CONFIG_BODY_BYTES) return null
+    chunks.push(buf)
+  }
+  try {
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
 }
 
-function serveStatic(deps: VoiceServerDeps, pathname: string, res: ServerResponse): boolean {
-  const entry = STATIC_FILES[pathname]
-  if (!entry) return false
-  const full = join(deps.root, 'voice/public', entry.file)
-  if (!existsSync(full)) return false
-  res.writeHead(200, { 'content-type': entry.contentType })
-  res.end(readFileSync(full))
+function serveStatic(distDir: string, pathname: string, res: ServerResponse): boolean {
+  const resolved = resolveStaticFile(distDir, pathname)
+  if (!resolved) return false
+  res.writeHead(200, { 'content-type': resolved.contentType })
+  res.end(readStaticFile(resolved))
   return true
 }
 
@@ -59,13 +102,36 @@ function writeSSE(res: ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 }
 
+// Speaks one sentence through the server-side TTS, if any was configured.
+// Swallows and logs a failure rather than propagating it: `say` failing, or
+// the chosen output device having vanished, must degrade to silent-but-
+// visible — the sentence has already been delivered to the client over SSE
+// by the time this is called, so a dead speaker must not kill the session or
+// lose the transcript.
+async function speakSentence(speaker: Speaker | undefined, text: string): Promise<void> {
+  if (!speaker) return
+  try {
+    await speaker.speak(text)
+  } catch (error) {
+    console.error('voice TTS failed, continuing silently:', error)
+  }
+}
+
 // `res` is optional: a turn can be submitted with no live SSE connection (the
 // browser tab closed, or never reconnected), and the reply must still be
 // drained to completion so the session's entries/endedEarly state advances —
 // there is simply nowhere to write the sentence events.
-async function streamTurn(res: ServerResponse | undefined, turn: AsyncIterable<string>): Promise<void> {
+//
+// Sequencing: the `sentence` SSE event is written *before* awaiting playback,
+// so the transcript/caret keep updating live even though this generator only
+// advances to the next sentence once the current one has finished speaking.
+// Awaiting each `speakSentence` in turn — rather than firing them all — is
+// what prevents overlapping, gibberish-inducing calls to `say`; it does not
+// stall the SSE stream, because the write already happened.
+async function streamTurn(res: ServerResponse | undefined, turn: AsyncIterable<string>, speaker?: Speaker): Promise<void> {
   for await (const sentence of turn) {
     if (res) writeSSE(res, 'sentence', { speaker: 'interviewer', text: sentence })
+    await speakSentence(speaker, sentence)
   }
 }
 
@@ -118,6 +184,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   const idleClock = deps.now ?? Date.now
   const store = deps.store ?? createSessionStore(undefined, idleClock)
   const transcode = deps.transcode ?? transcodeToWav
+  const distDir = deps.distDir ?? join(deps.root, 'voice/dist')
   // Sessions whose POST /turn is still being processed (transcode/transcribe/
   // reply-stream in flight) — guards against a second /turn for the same
   // session landing before the first has finished.
@@ -142,14 +209,86 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   }, Math.min(idleMs, 30_000))
   sweep.unref()
 
-  return createServer((req: IncomingMessage, res: ServerResponse): void => {
+  const onRequest = (req: IncomingMessage, res: ServerResponse): void => {
+    // Opt-in request log, for diagnosing a browser we cannot see. Off unless
+    // VOICE_DEBUG is set, so default behaviour and the test suite are
+    // untouched. Logs method, path and response status only — never a body,
+    // because a turn body is captured audio and a response could carry
+    // transcribed speech.
+    if (process.env.VOICE_DEBUG) {
+      const started = Date.now()
+      res.once('finish', () => {
+        console.error(`[req] ${req.method} ${req.url} -> ${res.statusCode} (${Date.now() - started}ms)`)
+      })
+    }
     void handleRequest(req, res)
-  })
+  }
+
+  // `https.Server` extends `http.Server`, so the declared return type holds
+  // for both and no caller has to care which one it got.
+  return deps.tls ? createHttpsServer({ cert: deps.tls.cert, key: deps.tls.key }, onRequest) : createServer(onRequest)
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
 
-    if (req.method === 'GET' && serveStatic(deps, url.pathname, res)) return
+    if (req.method === 'GET' && serveStatic(distDir, url.pathname, res)) return
+
+    // Lists speaker/output devices for the client to render a selector.
+    // `SpeechSynthesis` exposes no output-device API, so the browser cannot
+    // route audio to a chosen speaker on its own — the server speaks instead
+    // (see `deps.speaker`/`streamTurn`), which is why this list needs to
+    // exist server-side at all.
+    if (req.method === 'GET' && url.pathname === '/api/devices/output') {
+      try {
+        const devices = await (deps.listOutputDevices ?? listOutputDevices)()
+        sendJson(res, 200, { devices })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        sendJson(res, 500, { error: message })
+      }
+      return
+    }
+
+    // The persisted device selection, shared with `cli.ts` via the same
+    // `local/voice.json` (see `devices.ts`). GET returns the current config;
+    // POST merges a partial update into it — e.g. the web client saving its
+    // speaker choice must not clobber `input`, which only `cli.ts` ever sets.
+    if (url.pathname === '/api/devices/config') {
+      if (req.method === 'GET') {
+        sendJson(res, 200, readDeviceConfig(deps.root))
+        return
+      }
+      if (req.method === 'POST') {
+        const body = await readJsonBody(req)
+        if (!body) {
+          sendJson(res, 400, { error: 'invalid request body' })
+          return
+        }
+        const patch: DeviceConfig = {}
+        // `output` is the only field the web client has any business writing
+        // — `input` is `cli.ts`'s ffmpeg-index space, not the browser's.
+        if (typeof body.output === 'string') patch.output = body.output
+        if (typeof body.webInput === 'string') patch.webInput = body.webInput
+        sendJson(res, 200, writeDeviceConfig(deps.root, patch))
+        return
+      }
+    }
+
+    // Recovery path for a 409 from POST /api/session below: the browser has
+    // no id for whatever session is stuck (the 409 body never carried one),
+    // so this ends whichever session the store currently considers active
+    // instead of requiring one. There is at most one, per `hasActive`'s
+    // invariant.
+    if (req.method === 'DELETE' && url.pathname === '/api/session') {
+      const id = store.activeId()
+      if (!id) {
+        sendJson(res, 404, { error: 'no active session' })
+        return
+      }
+      endAndPersist(deps, store, entryClocks, id)
+      sendJson(res, 200, { ended: true })
+      return
+    }
 
     if (req.method === 'POST' && url.pathname === '/api/session') {
       // Deliberately does not read the request body: the design track is out
@@ -226,7 +365,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       if (!alreadyBegun) {
         void (async () => {
           const before = stored.session.entries().length
-          await streamTurn(res, stored.session.begin())
+          await streamTurn(res, stored.session.begin(), deps.speaker)
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(res, 'entry', entry)
           }
@@ -324,7 +463,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // No live SSE connection is a normal state (a turn submitted between
         // reconnects, say), not a reason to stop draining the reply — the
         // session's entries/endedEarly state must still advance either way.
-        await streamTurn(stored.sseClient, iterable)
+        await streamTurn(stored.sseClient, iterable, deps.speaker)
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before + 1)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -386,6 +525,23 @@ export function startVoiceServer(deps: VoiceServerDeps, port = 0): Promise<Serve
 const WHISPER_BINARY = process.env.WHISPER_BINARY ?? 'whisper-cli'
 const WHISPER_MODEL = process.env.WHISPER_MODEL ?? 'models/ggml-large-v3-turbo.bin'
 
+/**
+ * The production `Speaker` for `deps.speaker`: re-reads `local/voice.json`
+ * on every sentence rather than baking `audioDevice` in once at startup, so
+ * picking a different speaker in the web client (which persists via
+ * `POST /api/devices/config`) takes effect on the very next sentence, no
+ * restart required. The read is a few bytes off disk — cheap enough to do
+ * per sentence.
+ */
+function configuredSpeaker(root: string): Speaker {
+  return {
+    async speak(text: string): Promise<void> {
+      const { output } = readDeviceConfig(root)
+      await saySpeaker({ audioDevice: output }).speak(text)
+    },
+  }
+}
+
 function chooseTransport(): StreamFn {
   if (process.env.ANTHROPIC_API_KEY) {
     console.log('Transport: Anthropic Messages API (spending Console credits)')
@@ -395,15 +551,72 @@ function chooseTransport(): StreamFn {
   return claudeCliStream()
 }
 
+/**
+ * TLS material for the dev server, if it has been generated.
+ *
+ * Chromium's "localhost counts as a secure context" exemption is not
+ * universal across its forks — Arc requires real HTTPS before it will expose
+ * `navigator.mediaDevices` at all, so on Arc the drill's microphone request
+ * hangs forever over plain HTTP with no prompt and no error. Serving TLS is
+ * the only fix.
+ *
+ * Generated with mkcert so the certificate is trusted by the system CA and
+ * the browser raises no warning:
+ *
+ *   mkdir -p local/certs && cd local/certs
+ *   mkcert -cert-file cert.pem -key-file key.pem localhost 127.0.0.1 ::1
+ *
+ * Lives under `local/` because it is machine-specific and `local/` is
+ * gitignored — a private key must never be committed. Absent, the server
+ * falls back to HTTP, which is fine in Chrome and Firefox.
+ */
+function readTlsMaterial(root: string): { cert: Buffer; key: Buffer } | null {
+  const certPath = join(root, 'local/certs/cert.pem')
+  const keyPath = join(root, 'local/certs/key.pem')
+  if (!existsSync(certPath) || !existsSync(keyPath)) return null
+  return { cert: readFileSync(certPath), key: readFileSync(keyPath) }
+}
+
 function main(): void {
   const port = process.env.PORT ? Number(process.env.PORT) : 4173
+  const root = process.cwd()
+  const distDir = join(root, 'voice/dist')
+  // `pnpm mock:web` builds before it starts this process (see package.json),
+  // so a missing dist here means the server was started some other way
+  // (directly via `tsx voice/http-server.ts`) without building first — fail
+  // with a clear instruction rather than a confusing string of 404s on every
+  // asset the page tries to load.
+  if (!existsSync(distDir)) {
+    console.error(
+      `Missing ${distDir} — build the web client first with \`pnpm build:web\`, ` +
+        'or just run `pnpm mock:web`, which does that for you.',
+    )
+    process.exit(1)
+  }
+  const tls = readTlsMaterial(root)
   const server = createVoiceServer({
-    root: process.cwd(),
+    root,
     createTransport: chooseTransport,
     transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
+    tls,
+    speaker: configuredSpeaker(root),
   })
+  // Still `127.0.0.1` only — TLS changes the scheme, never the reach. A live
+  // microphone and a private story bank have no business on the network.
   server.listen(port, '127.0.0.1', () => {
-    console.log(`Voice mock drill: http://127.0.0.1:${port}/`)
+    const scheme = tls ? 'https' : 'http'
+    // `127.0.0.1`, not `localhost`: the listen above binds IPv4 only, and
+    // browsers resolve `localhost` to `::1` first — so a `localhost` URL
+    // fails to connect in Chrome even though curl silently falls back to
+    // IPv4. The certificate covers both names.
+    console.log(`Voice mock drill: ${scheme}://127.0.0.1:${port}/`)
+    if (!tls) {
+      console.log(
+        'Serving plain HTTP. Chrome and Firefox treat localhost as secure, but Arc and Safari do not —\n' +
+          'they will never prompt for the microphone. To serve HTTPS:\n' +
+          '  mkdir -p local/certs && cd local/certs && mkcert -cert-file cert.pem -key-file key.pem localhost 127.0.0.1 ::1',
+      )
+    }
   })
 }
 

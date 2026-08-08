@@ -37,11 +37,45 @@ pnpm test <problem>     # run one drill
 pnpm test               # everything, as a regression check
 pnpm reset <problem>    # restore stub.ts over solution.ts
 pnpm mock:voice         # spoken behavioral drill
-pnpm mock:web           # browser client for the same drill (127.0.0.1)
+pnpm mock:web           # React browser client for the same drill (127.0.0.1) — builds, then serves
+pnpm build:web          # build the React client only (voice/web -> voice/dist)
+pnpm dev:web            # Vite dev server with HMR for voice/web (proxies /api)
+pnpm dev:web:api        # the node:http API/session server alone, for use alongside dev:web
 pnpm design:voice <p>   # spoken live design drill
 pnpm voice:devices      # list microphones and speakers for local/voice.json
-pnpm typecheck
+pnpm typecheck          # covers voice/ and voice/web/ separately (different tsconfig)
 ```
+
+### Browser support for `mock:web`
+
+**Use Chrome.** The web drill needs `getUserMedia`, and browsers disagree about
+whether a plain-HTTP loopback origin is a secure context:
+
+| Browser | Plain HTTP on 127.0.0.1 | Notes |
+|---|---|---|
+| Chrome, Firefox | works | loopback is exempt |
+| Safari | needs HTTPS | no loopback exemption |
+| Arc | does not work | needs HTTPS, and still failed with a trusted cert — not worth chasing |
+
+The failure mode is nasty rather than obvious: `navigator.mediaDevices` is
+simply absent, or `getUserMedia` never settles — no prompt, no rejection, no
+console error. The page's **Mic check** button (top right) reports which of
+those is happening.
+
+For HTTPS, drop a mkcert pair in the gitignored `local/certs/` and the server
+picks it up automatically:
+
+```bash
+mkdir -p local/certs && cd local/certs
+mkcert -cert-file cert.pem -key-file key.pem localhost 127.0.0.1 ::1
+mkcert -install   # needs your password; run in a real terminal, not via `!`
+```
+
+Open `https://127.0.0.1:4174/`, **not** `localhost` — the server binds IPv4
+only and browsers try `::1` first.
+
+`VOICE_DEBUG=1` logs every request's method, path and status (never bodies —
+a turn body is recorded audio).
 
 ## Tests encode the insight
 

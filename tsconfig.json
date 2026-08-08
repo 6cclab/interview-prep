@@ -11,5 +11,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["problems", "debugging", "feature", "scripts", "test-utils", "voice"]
+  "include": ["problems", "debugging", "feature", "scripts", "test-utils", "voice"],
+  "exclude": ["voice/web"]
 }

@@ -1,11 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Server } from 'node:http'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
 import { createSessionStore } from './session-store'
 import { readSSE } from './test-helpers/sse'
+import { buildWeb } from './test-helpers/build-web'
 
 let server: Server | undefined
 let root: string
@@ -37,6 +38,15 @@ function listen(deps: VoiceServerDeps): Promise<{ port: number }> {
   })
 }
 
+// Only the "real build" test below reads `voice/dist`, but it needs a fresh,
+// real `vite build` (not a stale or absent one) to assert anything meaningful
+// about what a real deploy serves. Building once per file run, rather than
+// per test, keeps the cost to a single build even though only one `it` uses
+// it.
+beforeAll(async () => {
+  await buildWeb()
+}, 30_000)
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'voice-spoiler-'))
   seed()
@@ -59,6 +69,8 @@ describe('spoiler gate', () => {
       store: createSessionStore(() => 'session-1'),
       now: () => 0,
       transcode: async (_input: string, output: string) => writeFileSync(output, Buffer.from('fake wav')),
+      // Never shell out to a real `say -a '?'` from a test.
+      listOutputDevices: async () => [{ id: '75', name: 'MacBook Pro Speakers' }],
     })
 
     const responses: string[] = []
@@ -81,6 +93,20 @@ describe('spoiler gate', () => {
 
     const endRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
     responses.push(await endRes.clone().text())
+
+    // The device routes never touch session/transcript state at all, but
+    // they're routes on this same server and the sweep's contract is every
+    // response body, from any route — so they're covered here too.
+    const devicesOutput = await fetch(`http://127.0.0.1:${port}/api/devices/output`)
+    responses.push(await devicesOutput.clone().text())
+    const devicesConfigGet = await fetch(`http://127.0.0.1:${port}/api/devices/config`)
+    responses.push(await devicesConfigGet.clone().text())
+    const devicesConfigPost = await fetch(`http://127.0.0.1:${port}/api/devices/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ output: '75' }),
+    })
+    responses.push(await devicesConfigPost.clone().text())
 
     for (const body of responses) {
       expect(body).not.toContain(DENIED_STRING)
@@ -175,11 +201,14 @@ describe('spoiler gate', () => {
     expect(body).not.toContain('competency: Conflict')
   })
 
-  it('the three static routes never contain denied-file content or the raw trailer', async () => {
+  it('every static asset in the real build never contains denied-file content or the raw trailer', async () => {
     // Rooted at the real project directory (not the synthetic `root` used
-    // above) so this exercises the actual shipped index.html/app.js/style.css
-    // — the files a real deploy serves — rather than a fixture that could
-    // pass for reasons unrelated to what's really on disk.
+    // above) and reading the actual `voice/dist` build (built fresh by this
+    // file's own `beforeAll`, see voice/test-helpers/build-web.ts) — the
+    // files a real deploy serves — rather than a fixture that could pass for
+    // reasons unrelated to what's really on disk. Vite emits content-hashed
+    // filenames, so the set of paths is discovered by walking the build
+    // output rather than hardcoded.
     const { port } = await listen({
       root: process.cwd(),
       createTransport: () => async function* () {},
@@ -188,7 +217,14 @@ describe('spoiler gate', () => {
       now: () => 0,
     })
 
-    for (const path of ['/', '/app.js', '/style.css']) {
+    const distDir = join(process.cwd(), 'voice/dist')
+    const relPaths = (readdirSync(distDir, { recursive: true }) as string[]).filter((name) =>
+      statSync(join(distDir, name)).isFile(),
+    )
+    const paths = ['/', ...relPaths.map((name) => '/' + name.split(sep).join('/'))]
+    expect(paths.length).toBeGreaterThan(1) // the build must have actually produced assets
+
+    for (const path of paths) {
       const res = await fetch(`http://127.0.0.1:${port}${path}`)
       expect(res.status).toBe(200)
       const body = await res.text()

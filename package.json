@@ -3,24 +3,41 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.28.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "bootstrap": "tsx scripts/bootstrap.ts",
     "reset": "tsx scripts/reset.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p voice/web/tsconfig.json",
     "mock:voice": "tsx voice/cli.ts mock",
-    "mock:web": "tsx voice/http-server.ts",
+    "build:web": "vite build --config voice/web/vite.config.ts",
+    "dev:web": "vite --config voice/web/vite.config.ts",
+    "dev:web:api": "tsx voice/http-server.ts",
+    "mock:web": "pnpm run build:web && tsx voice/http-server.ts",
     "design:voice": "tsx voice/cli.ts design",
     "voice:devices": "tsx voice/cli.ts devices"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
+    "vite": "^8.2.1",
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.115.0"
+    "@anthropic-ai/sdk": "^0.115.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "brutalkit": "^0.4.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwindcss": "^4.3.3"
   }
 }

@@ -21,6 +21,8 @@ export interface SessionStore {
   remove(id: string): void
   /** True once any session is live — the web path allows exactly one at a time. */
   hasActive(): boolean
+  /** The id of the one active session, if any — mirrors `hasActive`'s "at most one" invariant. */
+  activeId(): string | undefined
   touch(id: string, now: number): void
   /** Sessions whose lastActivity is more than idleMs behind now. Does not remove them. */
   reapIdle(now: number, idleMs: number): StoredSession[]
@@ -50,6 +52,7 @@ export function createSessionStore(
       sessions.delete(id)
     },
     hasActive: () => sessions.size > 0,
+    activeId: () => sessions.keys().next().value,
     touch(id, now) {
       const stored = sessions.get(id)
       if (stored) stored.lastActivity = now

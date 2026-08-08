@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -71,8 +71,23 @@ export async function listOutputDevices(): Promise<Device[]> {
 }
 
 export interface DeviceConfig {
+  /** `cli.ts`'s microphone selection — an avfoundation `ffmpeg` index (e.g. `:3`). */
   input?: string
+  /**
+   * The speaker/output device, shared by both front ends: `cli.ts`'s
+   * `saySpeaker` and the web client's server-side TTS (`http-server.ts`)
+   * both pass this straight through as `say -a <id>`, so it's the same id
+   * space either way.
+   */
   output?: string
+  /**
+   * The browser's own microphone selection — a `MediaDeviceInfo.deviceId`,
+   * a different id space from `input` above (that one is an `ffmpeg`
+   * avfoundation index; this one is whatever the browser assigns). Kept as
+   * a distinct field rather than overloading `input` so a value written by
+   * one front end is never fed to the other's device API by mistake.
+   */
+  webInput?: string
 }
 
 /**
@@ -87,12 +102,27 @@ export function readDeviceConfig(root: string): DeviceConfig {
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
     if (typeof parsed !== 'object' || parsed === null) return {}
-    const { input, output } = parsed as Record<string, unknown>
+    const { input, output, webInput } = parsed as Record<string, unknown>
     const config: DeviceConfig = {}
     if (typeof input === 'string') config.input = input
     if (typeof output === 'string') config.output = output
+    if (typeof webInput === 'string') config.webInput = webInput
     return config
   } catch {
     return {}
   }
+}
+
+/**
+ * Persist `local/voice.json`, merged with whatever's already there — a
+ * caller updating one field (e.g. the web client saving its speaker choice)
+ * must not clobber a field it doesn't know about (e.g. `cli.ts`'s `input`).
+ * `local/` is gitignored and gets created if this is the first write.
+ */
+export function writeDeviceConfig(root: string, patch: DeviceConfig): DeviceConfig {
+  const current = readDeviceConfig(root)
+  const next: DeviceConfig = { ...current, ...patch }
+  mkdirSync(join(root, 'local'), { recursive: true })
+  writeFileSync(join(root, 'local/voice.json'), JSON.stringify(next, null, 2))
+  return next
 }
