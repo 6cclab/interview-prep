@@ -69,6 +69,8 @@ describe('spoiler gate', () => {
       store: createSessionStore(() => 'session-1'),
       now: () => 0,
       transcode: async (_input: string, output: string) => writeFileSync(output, Buffer.from('fake wav')),
+      // Never shell out to a real `say -a '?'` from a test.
+      listOutputDevices: async () => [{ id: '75', name: 'MacBook Pro Speakers' }],
     })
 
     const responses: string[] = []
@@ -91,6 +93,20 @@ describe('spoiler gate', () => {
 
     const endRes = await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
     responses.push(await endRes.clone().text())
+
+    // The device routes never touch session/transcript state at all, but
+    // they're routes on this same server and the sweep's contract is every
+    // response body, from any route — so they're covered here too.
+    const devicesOutput = await fetch(`http://127.0.0.1:${port}/api/devices/output`)
+    responses.push(await devicesOutput.clone().text())
+    const devicesConfigGet = await fetch(`http://127.0.0.1:${port}/api/devices/config`)
+    responses.push(await devicesConfigGet.clone().text())
+    const devicesConfigPost = await fetch(`http://127.0.0.1:${port}/api/devices/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ output: '75' }),
+    })
+    responses.push(await devicesConfigPost.clone().text())
 
     for (const body of responses) {
       expect(body).not.toContain(DENIED_STRING)

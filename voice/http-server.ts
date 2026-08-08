@@ -10,9 +10,10 @@ import { createInterviewer, anthropicStream, type StreamFn } from './interviewer
 import { claudeCliStream } from './claude-cli'
 import { createSession, finishSession } from './session'
 import { createSessionStore, type SessionStore } from './session-store'
-import { whisperTranscriber, type Transcriber } from './speech'
+import { whisperTranscriber, saySpeaker, type Speaker, type Transcriber } from './speech'
 import { transcodeToWav } from './transcode'
 import { readStaticFile, resolveStaticFile } from './static'
+import { listOutputDevices, readDeviceConfig, writeDeviceConfig, type Device, type DeviceConfig } from './devices'
 
 export interface VoiceServerDeps {
   root: string
@@ -38,12 +39,47 @@ export interface VoiceServerDeps {
    * Absent in every test, which keeps them on plain HTTP.
    */
   tls?: { cert: Buffer; key: Buffer } | null
+  /**
+   * Speaks a sentence aloud through the server — the browser has no API to
+   * route `SpeechSynthesis` to a chosen output device, but the server runs on
+   * the same machine, so it can shell out to `say -a <id>` instead (see
+   * `voice/speech.ts`). Optional so no test ever invokes a real `say`; every
+   * test in this repo omits it, which makes `streamTurn` a no-op speaker and
+   * leaves the SSE `sentence`/`entry` events — the actual source of truth for
+   * the transcript — completely unaffected. `main()` wires the real one.
+   */
+  speaker?: Speaker
+  /** Injectable so tests never shell out to the real `say -a '?'`. */
+  listOutputDevices?(): Promise<Device[]>
 }
 
 // A recorded interview turn is at most a few minutes of audio; 25MB is a wide
 // margin over that even at a generous bitrate. Reading an unbounded body
 // straight into memory is a trivial way for a single request to exhaust it.
 const MAX_TURN_AUDIO_BYTES = 25 * 1024 * 1024
+
+// A device-config PATCH body is a couple of short string fields — a few
+// hundred bytes at most. 4KB is a wide margin, not a guess, and rejecting
+// anything past it costs nothing a real client would ever hit.
+const MAX_DEVICE_CONFIG_BODY_BYTES = 4 * 1024
+
+/** Reads and JSON-parses a small request body. Malformed or oversized input yields `null`. */
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+  const chunks: Buffer[] = []
+  let total = 0
+  for await (const chunk of req) {
+    const buf = chunk as Buffer
+    total += buf.length
+    if (total > MAX_DEVICE_CONFIG_BODY_BYTES) return null
+    chunks.push(buf)
+  }
+  try {
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
 
 function serveStatic(distDir: string, pathname: string, res: ServerResponse): boolean {
   const resolved = resolveStaticFile(distDir, pathname)
@@ -66,13 +102,36 @@ function writeSSE(res: ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 }
 
+// Speaks one sentence through the server-side TTS, if any was configured.
+// Swallows and logs a failure rather than propagating it: `say` failing, or
+// the chosen output device having vanished, must degrade to silent-but-
+// visible — the sentence has already been delivered to the client over SSE
+// by the time this is called, so a dead speaker must not kill the session or
+// lose the transcript.
+async function speakSentence(speaker: Speaker | undefined, text: string): Promise<void> {
+  if (!speaker) return
+  try {
+    await speaker.speak(text)
+  } catch (error) {
+    console.error('voice TTS failed, continuing silently:', error)
+  }
+}
+
 // `res` is optional: a turn can be submitted with no live SSE connection (the
 // browser tab closed, or never reconnected), and the reply must still be
 // drained to completion so the session's entries/endedEarly state advances —
 // there is simply nowhere to write the sentence events.
-async function streamTurn(res: ServerResponse | undefined, turn: AsyncIterable<string>): Promise<void> {
+//
+// Sequencing: the `sentence` SSE event is written *before* awaiting playback,
+// so the transcript/caret keep updating live even though this generator only
+// advances to the next sentence once the current one has finished speaking.
+// Awaiting each `speakSentence` in turn — rather than firing them all — is
+// what prevents overlapping, gibberish-inducing calls to `say`; it does not
+// stall the SSE stream, because the write already happened.
+async function streamTurn(res: ServerResponse | undefined, turn: AsyncIterable<string>, speaker?: Speaker): Promise<void> {
   for await (const sentence of turn) {
     if (res) writeSSE(res, 'sentence', { speaker: 'interviewer', text: sentence })
+    await speakSentence(speaker, sentence)
   }
 }
 
@@ -174,6 +233,47 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
 
     if (req.method === 'GET' && serveStatic(distDir, url.pathname, res)) return
 
+    // Lists speaker/output devices for the client to render a selector.
+    // `SpeechSynthesis` exposes no output-device API, so the browser cannot
+    // route audio to a chosen speaker on its own — the server speaks instead
+    // (see `deps.speaker`/`streamTurn`), which is why this list needs to
+    // exist server-side at all.
+    if (req.method === 'GET' && url.pathname === '/api/devices/output') {
+      try {
+        const devices = await (deps.listOutputDevices ?? listOutputDevices)()
+        sendJson(res, 200, { devices })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        sendJson(res, 500, { error: message })
+      }
+      return
+    }
+
+    // The persisted device selection, shared with `cli.ts` via the same
+    // `local/voice.json` (see `devices.ts`). GET returns the current config;
+    // POST merges a partial update into it — e.g. the web client saving its
+    // speaker choice must not clobber `input`, which only `cli.ts` ever sets.
+    if (url.pathname === '/api/devices/config') {
+      if (req.method === 'GET') {
+        sendJson(res, 200, readDeviceConfig(deps.root))
+        return
+      }
+      if (req.method === 'POST') {
+        const body = await readJsonBody(req)
+        if (!body) {
+          sendJson(res, 400, { error: 'invalid request body' })
+          return
+        }
+        const patch: DeviceConfig = {}
+        // `output` is the only field the web client has any business writing
+        // — `input` is `cli.ts`'s ffmpeg-index space, not the browser's.
+        if (typeof body.output === 'string') patch.output = body.output
+        if (typeof body.webInput === 'string') patch.webInput = body.webInput
+        sendJson(res, 200, writeDeviceConfig(deps.root, patch))
+        return
+      }
+    }
+
     // Recovery path for a 409 from POST /api/session below: the browser has
     // no id for whatever session is stuck (the 409 body never carried one),
     // so this ends whichever session the store currently considers active
@@ -265,7 +365,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       if (!alreadyBegun) {
         void (async () => {
           const before = stored.session.entries().length
-          await streamTurn(res, stored.session.begin())
+          await streamTurn(res, stored.session.begin(), deps.speaker)
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(res, 'entry', entry)
           }
@@ -363,7 +463,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // No live SSE connection is a normal state (a turn submitted between
         // reconnects, say), not a reason to stop draining the reply — the
         // session's entries/endedEarly state must still advance either way.
-        await streamTurn(stored.sseClient, iterable)
+        await streamTurn(stored.sseClient, iterable, deps.speaker)
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before + 1)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -425,6 +525,23 @@ export function startVoiceServer(deps: VoiceServerDeps, port = 0): Promise<Serve
 const WHISPER_BINARY = process.env.WHISPER_BINARY ?? 'whisper-cli'
 const WHISPER_MODEL = process.env.WHISPER_MODEL ?? 'models/ggml-large-v3-turbo.bin'
 
+/**
+ * The production `Speaker` for `deps.speaker`: re-reads `local/voice.json`
+ * on every sentence rather than baking `audioDevice` in once at startup, so
+ * picking a different speaker in the web client (which persists via
+ * `POST /api/devices/config`) takes effect on the very next sentence, no
+ * restart required. The read is a few bytes off disk — cheap enough to do
+ * per sentence.
+ */
+function configuredSpeaker(root: string): Speaker {
+  return {
+    async speak(text: string): Promise<void> {
+      const { output } = readDeviceConfig(root)
+      await saySpeaker({ audioDevice: output }).speak(text)
+    },
+  }
+}
+
 function chooseTransport(): StreamFn {
   if (process.env.ANTHROPIC_API_KEY) {
     console.log('Transport: Anthropic Messages API (spending Console credits)')
@@ -482,6 +599,7 @@ function main(): void {
     createTransport: chooseTransport,
     transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
     tls,
+    speaker: configuredSpeaker(root),
   })
   // Still `127.0.0.1` only — TLS changes the scheme, never the reach. A live
   // microphone and a private story bank have no business on the network.

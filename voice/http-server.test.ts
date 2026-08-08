@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Server } from 'node:http'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -159,5 +159,205 @@ describe('createVoiceServer', () => {
 
     expect(first).toBeLessThan(200)
     expect(second).toBeLessThan(200)
+  })
+})
+
+describe('device routes', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'voice-devices-http-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('GET /api/devices/output lists devices from the injected lister, never a real `say`', async () => {
+    server = createVoiceServer({
+      root,
+      createTransport: () => async function* () {},
+      transcriber: { transcribe: async () => ({ text: '' }) },
+      listOutputDevices: async () => [{ id: '75', name: 'MacBook Pro Speakers' }],
+    })
+    const { port } = await listen()
+    const res = await fetch(`http://127.0.0.1:${port}/api/devices/output`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ devices: [{ id: '75', name: 'MacBook Pro Speakers' }] })
+  })
+
+  it('GET /api/devices/output surfaces a lister failure as a 500 rather than crashing the server', async () => {
+    server = createVoiceServer({
+      root,
+      createTransport: () => async function* () {},
+      transcriber: { transcribe: async () => ({ text: '' }) },
+      listOutputDevices: async () => {
+        throw new Error('say -a ? failed')
+      },
+    })
+    const { port } = await listen()
+    const res = await fetch(`http://127.0.0.1:${port}/api/devices/output`)
+    expect(res.status).toBe(500)
+  })
+
+  it('GET /api/devices/config returns an empty config when nothing has been saved', async () => {
+    server = createVoiceServer({
+      root,
+      createTransport: () => async function* () {},
+      transcriber: { transcribe: async () => ({ text: '' }) },
+    })
+    const { port } = await listen()
+    const res = await fetch(`http://127.0.0.1:${port}/api/devices/config`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({})
+  })
+
+  it('POST /api/devices/config persists output and webInput, and a later GET reflects it', async () => {
+    server = createVoiceServer({
+      root,
+      createTransport: () => async function* () {},
+      transcriber: { transcribe: async () => ({ text: '' }) },
+    })
+    const { port } = await listen()
+    const post = await fetch(`http://127.0.0.1:${port}/api/devices/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ output: '75', webInput: 'browser-device-1' }),
+    })
+    expect(post.status).toBe(200)
+    expect(await post.json()).toEqual({ output: '75', webInput: 'browser-device-1' })
+
+    const get = await fetch(`http://127.0.0.1:${port}/api/devices/config`)
+    expect(await get.json()).toEqual({ output: '75', webInput: 'browser-device-1' })
+  })
+
+  it('POST /api/devices/config merges rather than clobbering a field it was not given (e.g. cli.ts\'s input)', async () => {
+    server = createVoiceServer({
+      root,
+      createTransport: () => async function* () {},
+      transcriber: { transcribe: async () => ({ text: '' }) },
+    })
+    const { port } = await listen()
+    await fetch(`http://127.0.0.1:${port}/api/devices/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ output: '75' }),
+    })
+    const second = await fetch(`http://127.0.0.1:${port}/api/devices/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ webInput: 'browser-device-1' }),
+    })
+    expect(await second.json()).toEqual({ output: '75', webInput: 'browser-device-1' })
+  })
+
+  it('POST /api/devices/config 400s on a malformed body rather than throwing', async () => {
+    server = createVoiceServer({
+      root,
+      createTransport: () => async function* () {},
+      transcriber: { transcribe: async () => ({ text: '' }) },
+    })
+    const { port } = await listen()
+    const res = await fetch(`http://127.0.0.1:${port}/api/devices/config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'not json',
+    })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('server-side TTS (deps.speaker)', () => {
+  // This deliberately does not assert ordering between a `speak` call and the
+  // client's own observation of the matching SSE event: `res.write()` is
+  // synchronous and `speaker.speak()` is called on the very next line, so a
+  // mock speaker's own bookkeeping runs *before* the written bytes have made
+  // it across a real loopback socket back to this test's `fetch` reader —
+  // asserting the client sees the SSE event first would be asserting away a
+  // real network hop, not testing this module. What's actually testable and
+  // load-bearing: (1) speak calls never overlap, (2) they happen in sentence
+  // order, and (3) the first sentence reaches the client without waiting for
+  // its own (slow) TTS call to finish — proof the write isn't gated on
+  // playback.
+  it('speaks each sentence in order, never overlapping, and delivers a sentence over SSE without waiting on its own TTS call', async () => {
+    const SPEAK_DELAY_MS = 300
+    const speakOrder: string[] = []
+    let inFlight = 0
+    let sawOverlap = false
+    const speaker = {
+      async speak(text: string): Promise<void> {
+        inFlight++
+        if (inFlight > 1) sawOverlap = true
+        speakOrder.push(text)
+        await new Promise((resolve) => setTimeout(resolve, SPEAK_DELAY_MS))
+        inFlight--
+      },
+    }
+
+    server = createVoiceServer({
+      root: process.cwd(),
+      createTransport: () => async function* () {
+        // Trailing spaces matter here: `SentenceBuffer` (chunk.ts) only
+        // confirms a sentence boundary once whitespace follows the
+        // terminator — concatenated deltas with no space between them would
+        // read as one run-on sentence and never separate into two `sentence`
+        // events at all.
+        yield 'First sentence. '
+        yield 'Second sentence.'
+      },
+      transcriber: { transcribe: async () => ({ text: '' }) },
+      speaker,
+    })
+    const { port } = await listen()
+
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const streamStartedAt = Date.now()
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+
+    const first = await readSSE(stream)
+    const firstReceivedMs = Date.now() - streamStartedAt
+    expect((first.data as { text: string }).text).toBe('First sentence.')
+    // A generous margin under SPEAK_DELAY_MS: if the write were gated behind
+    // `await speaker.speak(...)`, this would take at least 300ms, not a
+    // handful. Loose enough not to flake under CI load, tight enough to
+    // catch the write actually being stalled.
+    expect(firstReceivedMs).toBeLessThan(SPEAK_DELAY_MS / 2)
+
+    const second = await readSSE(stream)
+    expect((second.data as { text: string }).text).toBe('Second sentence.')
+    await readSSE(stream) // opening entry, once both sentences have been spoken
+
+    expect(sawOverlap).toBe(false)
+    expect(speakOrder).toEqual(['First sentence.', 'Second sentence.'])
+  })
+
+  it('a speaker that throws does not kill the session or drop the transcript', async () => {
+    const speaker = {
+      async speak(): Promise<void> {
+        throw new Error('say: device vanished')
+      },
+    }
+
+    server = createVoiceServer({
+      root: process.cwd(),
+      createTransport: () => async function* () {
+        yield 'Tell me about a time you disagreed with a decision.'
+      },
+      transcriber: { transcribe: async () => ({ text: '' }) },
+      speaker,
+    })
+    const { port } = await listen()
+
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    expect(created.status).toBe(201)
+    const { id } = (await created.json()) as { id: string }
+
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    const sentence = await readSSE(stream)
+    expect((sentence.data as { text: string }).text).toBe('Tell me about a time you disagreed with a decision.')
+    const entry = await readSSE(stream)
+    expect(entry.event).toBe('entry')
+    expect((entry.data as { text: string }).text).toBe('Tell me about a time you disagreed with a decision.')
   })
 })
