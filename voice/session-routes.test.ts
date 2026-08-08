@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
 import { createSessionStore } from './session-store'
+import { connect } from 'node:net'
 import { readSSE } from './test-helpers/sse'
 
 let server: Server | undefined
@@ -867,6 +868,46 @@ describe('the track/problem boundary', () => {
     expect(store.hasActive()).toBe(false)
   })
 
+  // Reading the request body means yielding to the event loop for as long as
+  // the client takes to finish sending it. If the single-session check happens
+  // before that yield and the create after it, two concurrent requests can both
+  // pass the check — which is why the check and the create must sit in the same
+  // synchronous run. Driven over a raw socket because `fetch` will not let a
+  // body dribble out in two writes, and dribbling is exactly the case.
+  it('refuses a concurrent create even when the first request body arrives in pieces', async () => {
+    let n = 0
+    const store = createSessionStore(() => `session-${++n}`)
+    const { port } = await listen(baseDeps({ store }))
+
+    const body = JSON.stringify({ track: 'mock' })
+    const slow = connect(port, '127.0.0.1')
+    await new Promise<void>((resolve) => slow.once('connect', resolve))
+    const slowStatus = new Promise<string>((resolve) => {
+      slow.once('data', (chunk: Buffer) => resolve(chunk.toString('utf8').split('\r\n')[0]!))
+    })
+    // Headers plus the first byte of the body, then a pause: the server is now
+    // parked inside `readJsonBody` awaiting the rest.
+    slow.write(
+      `POST /api/session HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n` +
+        `Content-Length: ${body.length}\r\nConnection: close\r\n\r\n${body.slice(0, 1)}`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // A second, complete request lands while the first is still mid-body.
+    const second = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+
+    slow.write(body.slice(1))
+    const firstStatus = await slowStatus
+    slow.destroy()
+
+    // Exactly one of the two won; the other got a 409. Both winning would leave
+    // two live sessions, which every recovery path in this server assumes cannot
+    // happen.
+    const statuses = [firstStatus.includes('201'), second.status === 201]
+    expect(statuses.filter(Boolean)).toHaveLength(1)
+    expect(firstStatus.includes('409') || second.status === 409).toBe(true)
+  })
+
   it('defaults to the mock track when no body is sent at all', async () => {
     const { port } = await listen(baseDeps())
     const res = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
@@ -1192,6 +1233,34 @@ describe('the design track', () => {
     await readSSE(stream)
     expect(seen).toHaveLength(1)
     expect(seen[0]).not.toContain('Time check')
+  })
+
+  // A custom budget has to reach the *cue*, not just the response body. If it
+  // only reached the body, the header would count down the right thing while the
+  // interviewer paced against 45 minutes regardless — a disagreement invisible
+  // from either side alone.
+  it('paces the interviewer against a custom budget, not the default', async () => {
+    const seen: string[] = []
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* (_system, messages) {
+          seen.push(messages[messages.length - 1]!.content)
+          yield 'What are we optimising for?'
+        },
+      }),
+    )
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'design', problem: 'rate-limiter', budgetMinutes: 20 }),
+    })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(stream)
+    await readSSE(stream)
+
+    expect(seen[0]).toContain('20 minutes of the 20 remain')
+    expect(seen[0]).not.toContain('45')
   })
 
   it('reports the drill back on GET /api/session/:id, so a reopen restores the pane and clock', async () => {

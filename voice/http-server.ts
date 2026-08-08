@@ -5,7 +5,7 @@ import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
-import { assertNoSpoilers, buildSystemPrompt, designTimeCue, DESIGN_BUDGET_MS, type Track } from './context'
+import { assertNoSpoilers, buildSystemPrompt, designTimeCue, DESIGN_BUDGET_MS, PROBLEM_SLUG, type Track } from './context'
 import { createInterviewer, anthropicStream, type StreamFn } from './interviewer'
 import { claudeCliStream } from './claude-cli'
 import { createSession, finishSession } from './session'
@@ -122,12 +122,6 @@ export function parseDrill(body: Record<string, unknown> | null): Drill {
   }
   return { track, problem, budgetMs }
 }
-
-// Mirrors `context.ts`'s slug rule. Duplicated deliberately rather than
-// exported across: this is a wire-input guard and that one is a path guard, and
-// they should be able to tighten independently without one silently relaxing
-// the other.
-const PROBLEM_SLUG = /^[a-z0-9-]+$/
 
 /**
  * The design problems available to drill — directory names under
@@ -478,6 +472,28 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/session') {
+      // Read the body FIRST, before the single-session check.
+      //
+      // This is the only `await` in this handler, and reading a body means
+      // yielding to the event loop for as long as the client takes to finish
+      // sending. Checking `hasActive()` before that await and creating after it
+      // leaves a window where two concurrent requests both see no active
+      // session and both create one — breaking the one invariant this route
+      // exists to hold. Ordering it this way puts the check and the create in
+      // the same synchronous run, which is what actually makes it atomic here.
+      //
+      // This route is also the only place client input reaches a filesystem
+      // path, so `parseDrill` validates rather than coerces; `buildSystemPrompt`
+      // then re-runs `PROBLEM_SLUG` and `assertNoSpoilers` on the paths it
+      // derives, so the spoiler gate never rests on this parse being correct.
+      let drill: Drill
+      try {
+        drill = parseDrill(await readJsonBody(req))
+      } catch (error) {
+        sendJson(res, 400, { error: errorMessage(error) })
+        return
+      }
+
       if (store.hasActive()) {
         // The 409 carries the stuck session's id and start time so the client
         // can offer both recoveries the design calls for: end it, or open it.
@@ -489,18 +505,6 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
           id: active.id,
           startedAt: active.startedAt.toISOString(),
         })
-        return
-      }
-      // The one route that takes client input which reaches the filesystem, so
-      // it is the one that has to be paranoid. `parseDrill` is where a `track`
-      // and `problem` from the wire are validated; `buildSystemPrompt` then runs
-      // `PROBLEM_SLUG` and `assertNoSpoilers` again on the paths it derives, so
-      // the spoiler gate does not depend on this parse being correct.
-      let drill: Drill
-      try {
-        drill = parseDrill(await readJsonBody(req))
-      } catch (error) {
-        sendJson(res, 400, { error: errorMessage(error) })
         return
       }
 

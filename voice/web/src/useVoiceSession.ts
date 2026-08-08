@@ -95,6 +95,12 @@ export interface VoiceSession {
    * clock hitting zero is not the client's cue to end anything.
    */
   remainingSeconds: number | null
+  /**
+   * True from the moment `start` is called until the request settles. `start` is
+   * async, so without this a second press lands while the first is still in
+   * flight and races its own session into a 409 against itself.
+   */
+  starting: boolean
   record(): void
   stopAndSubmit(): void
   /** The dock's "End session" action — ends the current session, wherever it is in its turn cycle. */
@@ -244,6 +250,7 @@ export function useVoiceSession(): VoiceSession {
   // counter, so it stays honest across a backgrounded tab, a throttled timer or
   // a sleeping laptop — all of which stall interval callbacks and would
   // otherwise leave the clock reading long after the time was actually gone.
+  const [starting, setStarting] = useState(false)
   const [deadlineAt, setDeadlineAt] = useState<number | null>(null)
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null)
   useEffect(() => {
@@ -414,12 +421,26 @@ export function useVoiceSession(): VoiceSession {
     setMicFailureKind(null)
     setTranscriptFailed(false)
     setStatus('Starting session…')
+    setStarting(true)
     void (async () => {
-      const res = await fetch('/api/session', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(wanted),
-      })
+      let res: Response
+      try {
+        res = await fetch('/api/session', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(wanted),
+        })
+      } catch {
+        // The server is not there. Report it and clear `starting`, so the
+        // picker is usable again rather than locked with nothing running.
+        setStatus('Could not reach the drill server.')
+        setStarting(false)
+        return
+      }
+      // Cleared here rather than in a `finally`: the request has settled, which
+      // is exactly what `starting` tracks, and every branch below is
+      // synchronous state-setting from this point on.
+      setStarting(false)
       if (res.status === 400) {
         // The server refused the drill itself — an unknown problem, say. Nothing
         // started, so this reports and stays at Idle rather than half-entering a
@@ -789,6 +810,7 @@ export function useVoiceSession(): VoiceSession {
     dismissError,
     drill,
     remainingSeconds,
+    starting,
     stuckSession,
     reopenStuckSession,
     retryTranscription,

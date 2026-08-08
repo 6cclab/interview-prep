@@ -32,7 +32,12 @@ export function assertNoSpoilers(paths: string[]): void {
   }
 }
 
-const PROBLEM_SLUG = /^[a-z0-9-]+$/
+/**
+ * A problem name is a plain slug and nothing else. Exported so every guard in
+ * the codebase tests against this exact rule: it is duplicated nowhere, because
+ * two copies of a security guard drift and only one of them gets tightened.
+ */
+export const PROBLEM_SLUG = /^[a-z0-9-]+$/
 
 export function allowedPaths(track: Track, problem?: string): string[] {
   if (track === 'mock') {

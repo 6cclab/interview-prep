@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { record } from './audio'
 import { claudeCliStream } from './claude-cli'
-import { buildSystemPrompt, type Track } from './context'
+import { designTimeCue, buildSystemPrompt, type Track } from './context'
 import { listInputDevices, listOutputDevices, readDeviceConfig } from './devices'
 import { anthropicStream, createInterviewer, type StreamFn } from './interviewer'
 import { runSession } from './session'
@@ -105,6 +105,11 @@ async function main(): Promise<void> {
       startRecording: () => record(scratch, devices.input),
       nextTurn: async () => ((await rl.question('')).trim() === 'end' ? 'end' : 'speak'),
       now: () => Date.now() - started,
+      // The live design drill is timed, and the interviewer has no clock of its
+      // own — without this each turn it is told nothing and design.md's "warn
+      // once at ten minutes, stop at time" is unfollowable. The web path does
+      // the same; this keeps the terminal from being the clockless one.
+      turnCue: track === 'design' ? () => designTimeCue(Date.now() - started) : undefined,
     })
 
     // The path written may differ from the one asked for — `writeSession` will

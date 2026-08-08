@@ -54,6 +54,7 @@ export default function App() {
     reopenStuckSession,
     drill,
     remainingSeconds,
+    starting,
     inputDevices,
     selectedInputId,
     selectInput,
@@ -357,7 +358,12 @@ export default function App() {
               single-screen layout owns everything from the first question on. */}
           {phase === 'idle' && (
             <div className="dock-stack__row">
-              <DrillPicker onStart={start} busy={false} />
+              {/* `busy` once the press has been made: `start` is async, and a
+                  second press before the first resolves races its own session
+                  into a 409 against itself. `phase` leaves idle as soon as the
+                  session is created, so this only has to cover the gap in
+                  between — which is exactly what `status` reports. */}
+              <DrillPicker onStart={start} busy={starting} />
             </div>
           )}
           {errorKind && (

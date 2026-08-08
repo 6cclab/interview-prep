@@ -163,6 +163,8 @@ export interface SessionDeps {
   nextTurn(): Promise<'speak' | 'end'>
   /** Milliseconds since the session started. */
   now(): number
+  /** Passed straight through to `createSession` — see `CreateSessionOptions.turnCue`. */
+  turnCue?(): string | undefined
 }
 
 export type SessionOutcome = Entry[] & { endedEarly?: string }
@@ -182,7 +184,7 @@ function outcomeOf(session: Session): SessionOutcome {
  * modified by this refactor.
  */
 export async function runSession(deps: SessionDeps): Promise<SessionOutcome> {
-  const session = createSession({ interviewer: deps.interviewer, now: deps.now })
+  const session = createSession({ interviewer: deps.interviewer, now: deps.now, turnCue: deps.turnCue })
 
   for await (const sentence of session.begin()) {
     await deps.speaker.speak(sentence)
