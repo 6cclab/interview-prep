@@ -32,6 +32,16 @@ export function wallClock(date: Date): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
+/**
+ * The design track's budget in minutes, for display before a session exists.
+ *
+ * Mirrors `DESIGN_BUDGET_MS` in voice/context.ts, which is the authority — the
+ * client cannot import server code. It is display only: once a drill starts the
+ * countdown runs off the `budgetMs` the server actually reported, so a drift
+ * here would show the wrong number on the Idle screen and nowhere else.
+ */
+export const DESIGN_BUDGET_MINUTES = 45
+
 export interface ErrorCopy {
   title: string
   body: string
