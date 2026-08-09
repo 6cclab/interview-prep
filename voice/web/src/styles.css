@@ -385,10 +385,26 @@ body {
   }
 }
 
+/* Centred on the transcript column, not the viewport.
+ *
+ * It was `position: fixed; left: 50%`, which centres on the viewport — fine on
+ * the behavioural screen, where the transcript IS the viewport, and wrong on the
+ * two split screens, where the transcript is only the right-hand column. Measured
+ * on the coding drill: the pill's centre landed at x=860 against a column centre
+ * of x=1152, so it sat 292px to the left of the list it belongs to.
+ *
+ * `absolute` against `.transcript-region` (already `position: relative`) also
+ * retires the `bottom: 204px` guess at the dock stack's height. That stack grows
+ * when the error banner or the pacing bar appear, and a taller dock would have
+ * covered the pill outright. The region's bottom edge is the dock's top edge, so
+ * a small offset here is correct at every dock height.
+ *
+ * Still floats over the scrolling list: the pill is a sibling of `.transcript`,
+ * which is the scroller, so it does not move with the content. */
 .jump-pill {
-  position: fixed;
+  position: absolute;
   left: 50%;
-  bottom: 204px;
+  bottom: 14px;
   transform: translateX(-50%);
   z-index: 30;
   border: 2px solid var(--border);
