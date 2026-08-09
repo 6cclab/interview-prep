@@ -93,6 +93,13 @@ export function sessionPath(track: Track, startedAt: Date, problem?: string): st
     if (!problem) throw new Error('A design session needs a problem name.')
     return `local/designs/${problem}-live-${isoStamp(startedAt)}.md`
   }
+  if (track === 'coding') {
+    if (!problem) throw new Error('A coding session needs a problem name.')
+    // By problem slug, never by `problems/<pattern>/<slug>` — the pattern is the
+    // answer, and a filename he sees in his own `local/` would spoil the drill
+    // as thoroughly as reading it off the screen mid-session.
+    return `local/drills/${problem}-live-${isoStamp(startedAt)}.md`
+  }
   return `local/mock-${isoStamp(startedAt)}.md`
 }
 

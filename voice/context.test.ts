@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { allowedPaths, assertNoSpoilers, buildSystemPrompt, competencyCoverage, designTimeCue } from './context'
+import { allowedPaths, assertNoSpoilers, buildSystemPrompt, competencyCoverage, timeCue } from './context'
 import { splitTrailer } from './transcript'
 
 let root: string
@@ -156,26 +156,26 @@ describe('buildSystemPrompt', () => {
   })
 })
 
-describe('designTimeCue', () => {
+describe('timeCue', () => {
   it('reports the whole budget at the start', () => {
-    expect(designTimeCue(0)).toContain('45 minutes of the 45 remain')
+    expect(timeCue(0)).toContain('45 minutes of the 45 remain')
   })
 
   it('rounds up, so it never claims zero minutes while time remains', () => {
     // One second left is still "1 minute" — a cue saying "0 minutes remain"
     // reads as the deadline, which is a different instruction entirely.
-    expect(designTimeCue(45 * 60 * 1000 - 1000)).toContain('1 minute of the 45 remain')
-    expect(designTimeCue(45 * 60 * 1000 - 1000)).not.toContain('minutes')
+    expect(timeCue(45 * 60 * 1000 - 1000)).toContain('1 minute of the 45 remain')
+    expect(timeCue(45 * 60 * 1000 - 1000)).not.toContain('minutes')
   })
 
   it('says plainly that time is up, so "at time, stop" has an unambiguous trigger', () => {
-    expect(designTimeCue(45 * 60 * 1000)).toContain('time is up')
-    expect(designTimeCue(60 * 60 * 1000)).toContain('time is up')
+    expect(timeCue(45 * 60 * 1000)).toContain('time is up')
+    expect(timeCue(60 * 60 * 1000)).toContain('time is up')
   })
 
   it('honours a custom budget', () => {
-    expect(designTimeCue(0, 30 * 60 * 1000)).toContain('30 minutes of the 30 remain')
-    expect(designTimeCue(20 * 60 * 1000, 30 * 60 * 1000)).toContain('10 minutes of the 30 remain')
+    expect(timeCue(0, 30 * 60 * 1000)).toContain('30 minutes of the 30 remain')
+    expect(timeCue(20 * 60 * 1000, 30 * 60 * 1000)).toContain('10 minutes of the 30 remain')
   })
 
   // The cue arrives in the `user` slot, where everything else is Andre
@@ -184,8 +184,8 @@ describe('designTimeCue', () => {
   // though it were part of the answer.
   it('marks itself as an instruction to the interviewer, not as speech', () => {
     for (const elapsed of [0, 35 * 60 * 1000, 45 * 60 * 1000]) {
-      expect(designTimeCue(elapsed)).toMatch(/^\[Time check, for you only:/)
-      expect(designTimeCue(elapsed)).toMatch(/\]$/)
+      expect(timeCue(elapsed)).toMatch(/^\[Time check, for you only:/)
+      expect(timeCue(elapsed)).toMatch(/\]$/)
     }
   })
 })

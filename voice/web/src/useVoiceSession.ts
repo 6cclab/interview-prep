@@ -91,7 +91,7 @@ export interface VoiceSession {
   /**
    * Seconds left of a timed drill's budget, or `null` when the drill is untimed.
    * Floors at zero and keeps counting no further — the interviewer is told when
-   * time is up (see `designTimeCue`) and closes the interview itself, so the
+   * time is up (see `timeCue`) and closes the interview itself, so the
    * clock hitting zero is not the client's cue to end anything.
    */
   remainingSeconds: number | null
@@ -259,7 +259,7 @@ export function useVoiceSession(): VoiceSession {
       return
     }
     // Floors at zero: the interviewer is told when time is up and closes the
-    // interview itself (see `designTimeCue`), so this display must not race it
+    // interview itself (see `timeCue`), so this display must not race it
     // by ending anything, and a negative number would just be noise.
     const tick = () => setRemainingSeconds(Math.max(0, Math.ceil((deadlineAt - Date.now()) / 1000)))
     tick()
