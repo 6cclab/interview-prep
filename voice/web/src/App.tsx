@@ -131,6 +131,9 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   const timed = route.view === 'design' || route.view === 'coding'
   // Narrowing once, so the header and the pane do not each re-derive it.
   const problem = 'problem' in route ? route.problem : ''
+  // Whether this track has a problem statement to show — the same two tracks that
+  // are timed, but derived separately because they are different questions.
+  const hasPane = route.view === 'design' || route.view === 'coding'
   // A session exists to act on. Withheld before and after, because a live button
   // that 404s is worse than a disabled one.
   const live = phase !== 'idle' && phase !== 'ended'
@@ -382,7 +385,12 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
 
       {phase === 'recording' && <RecordingChrome />}
 
-      <div className="app-root">
+      {/* `--split` on the shell, not just on the body: it rebinds `--measure` (see
+          styles.css), so the dock, the error banner and the drill tools widen to
+          the same block the two columns occupy and share its edges. Centring them
+          on the viewport instead left the dock visibly out of line with both
+          columns on a wide screen. */}
+      <div className={`app-root${hasPane ? ' app-root--split' : ''}`}>
         <Header
           sessionSeconds={sessionSeconds}
           remainingSeconds={remainingSeconds}
@@ -432,15 +440,22 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
             is the only thing on the page worth reading, and capping it to a
             third of the screen left half of it blank. It shrinks back once the
             conversation has something in it. */}
-        {(route.view === 'design' || route.view === 'coding') && (
-          <div className={`problem-pane-slot${phase === 'idle' ? ' problem-pane-slot--roomy' : ''}`}>
-            <ProblemPane problem={route.problem} track={route.view} />
-          </div>
-        )}
+        {/* Wrapper so the prompt and the conversation can sit side by side once
+            there is room for it — see `.drill-body` in styles.css. Stacked below
+            that width, which is the only shape this had before. `--split` is on
+            the wrapper rather than driven off the pane's presence, because the
+            behavioural track has no pane and must keep the single column. */}
+        <div className={`drill-body${hasPane ? ' drill-body--split' : ''}`}>
+          {hasPane && (
+            <div className={`problem-pane-slot${phase === 'idle' ? ' problem-pane-slot--roomy' : ''}`}>
+              <ProblemPane problem={problem} track={route.view as 'design' | 'coding'} />
+            </div>
+          )}
 
-        <main className="main-column">
-          <Transcript entries={entries} interimSentences={interimSentences} streaming={interviewerSpeaking} meta={meta} />
-        </main>
+          <main className="main-column">
+            <Transcript entries={entries} interimSentences={interimSentences} streaming={interviewerSpeaking} meta={meta} />
+          </main>
+        </div>
 
         <div className="dock-stack">
           {errorKind && (
