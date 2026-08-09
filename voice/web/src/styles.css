@@ -1053,6 +1053,31 @@ body {
   box-shadow: 2px 2px 0 0 var(--shadow-color, currentColor);
 }
 
+.home__offline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px;
+  border: 2px solid var(--destructive);
+  background: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+  max-width: 68ch;
+  text-wrap: pretty;
+}
+
+.home__offline-title {
+  font-size: 15px;
+}
+
+.home__offline code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  background: var(--background);
+}
+
 .home__note {
   margin: 0;
   font-size: 13px;
