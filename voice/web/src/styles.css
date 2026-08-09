@@ -31,6 +31,26 @@
   box-sizing: border-box;
 }
 
+:root {
+  /*
+   * The drill shell's width. Was 820px hardcoded in eight places, which on any
+   * ordinary laptop left a third of the window empty either side of a drill.
+   *
+   * Two separate numbers, because a shell and a paragraph want different things.
+   * `--measure` is how wide the chrome may get — header row, dock, the problem
+   * pane, the transcript column. `--measure-prose` caps the *text* inside it, so
+   * widening the shell buys layout room without producing 1300px-long lines that
+   * are genuinely harder to read than the narrow version was.
+   */
+  --measure: 1320px;
+  --measure-prose: 78ch;
+  /* Both columns together. Wider than `--measure` because it carries two of them. */
+  --measure-split: 2400px;
+  /* The chooser stays narrow on purpose: its cards are one short line and a
+     select each, and stretching those to 1320px makes a form look like a banner. */
+  --measure-home: 880px;
+}
+
 html,
 body {
   height: 100%;
@@ -230,7 +250,7 @@ body {
 .transcript-region {
   position: relative;
   width: 100%;
-  max-width: 820px;
+  max-width: var(--measure);
   padding: 0 28px;
   display: flex;
   flex-direction: column;
@@ -306,6 +326,9 @@ body {
   line-height: 1.62;
   text-wrap: pretty;
   overflow-wrap: anywhere;
+  /* The transcript column may now be far wider than a comfortable line. Cap the
+     prose rather than the column, so the extra width goes to layout. */
+  max-width: var(--measure-prose);
 }
 
 .turn__body--collapsed {
@@ -405,7 +428,7 @@ body {
 
 .error-banner {
   width: 100%;
-  max-width: 820px;
+  max-width: var(--measure);
   display: flex;
   border: 2px solid var(--destructive);
   background: var(--card);
@@ -465,7 +488,7 @@ body {
 
 .pacing {
   width: 100%;
-  max-width: 820px;
+  max-width: var(--measure);
 }
 
 .pacing__row {
@@ -549,7 +572,7 @@ body {
 }
 
 .dock__inner {
-  max-width: 820px;
+  max-width: var(--measure);
   margin: 0 auto;
   padding: 18px 28px 22px;
   display: flex;
@@ -799,7 +822,7 @@ body {
    while everything else was centred, which read as bolted on rather than
    part of the screen. */
 .device-settings {
-  max-width: 820px;
+  max-width: var(--measure);
   margin: 0 auto;
   display: flex;
   flex-wrap: wrap;
@@ -882,7 +905,7 @@ body {
    action already is. */
 .coding-tools {
   width: 100%;
-  max-width: 820px;
+  max-width: var(--measure);
   margin: 0 auto;
   padding: 12px 28px;
   display: flex;
@@ -963,6 +986,120 @@ body {
 /* The timed tracks' problem statement (ProblemPane). Sits between the header
    and the transcript, capped so a long prompt scrolls inside itself rather than
    pushing the conversation off screen. */
+/*
+ * The drill body: the problem statement and the conversation.
+ *
+ * Stacked by default, which is what this always was. Given the width, they fold
+ * out side by side instead — the prompt is meant to stay readable for the whole
+ * drill, and stacking it above the transcript made those two compete for the same
+ * vertical space, so on a wide window the prompt was squeezed into a third of the
+ * screen while a third of the width sat empty.
+ */
+.drill-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 62rem, not a device width: the threshold is the point at which two columns each
+   still clear a readable measure. Below it, stacked is genuinely better. */
+@media (min-width: 62rem) {
+  /*
+   * One knob for the whole split screen. Everything below the columns — the dock,
+   * the error banner, the pacing bar, the drill tools — is capped with
+   * `--measure`, so rebinding it here lines all of them up with the two columns
+   * instead of centring them on the viewport. Measured before this: the body sat
+   * at 499..2899 while the dock sat at 1039..2359, sharing an edge with neither
+   * column.
+   */
+  .app-root--split {
+    --measure: var(--measure-split);
+  }
+
+  .drill-body--split {
+    flex-direction: row;
+    align-items: stretch;
+    /*
+     * Beyond this the two columns stop growing and the window's extra width
+     * becomes margin. Measured, not guessed: on a 3398px viewport an uncapped
+     * split put a 608px prompt and a 1320px transcript against 1470px of dead
+     * space, all of it on one side. Whitespace at that size is unavoidable — the
+     * choice is whether it reads as deliberate margin or as a broken column.
+     */
+    max-width: var(--measure-split);
+    margin-inline: auto;
+    width: 100%;
+  }
+
+  .drill-body--split .problem-pane-slot {
+    /* Basis, not a fixed width: it gives up space to the transcript first, since
+       the prompt is a fixed amount of text and the conversation only grows. The
+       bounds keep it legible at 62rem and stop it becoming a banner at 150rem. */
+    flex: 0 1 34%;
+    min-width: 22rem;
+    max-width: 44rem;
+    border-bottom: none;
+    border-right: 2px solid var(--border);
+    /* The column itself does not scroll — only the prompt inside it does. Letting
+       the whole slot scroll carried the "Problem" summary out of the top with the
+       text, which is the button that collapses the pane, so it became unreachable
+       exactly when a long prompt made collapsing it useful. */
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .drill-body--split .problem-pane {
+    max-width: none;
+    /*
+     * Reset, not inherited. The stacked layout centres this with `margin: 0 auto`,
+     * and an auto margin on a flex item's cross axis *disables the stretch* — so
+     * the pane sized itself to its content (652px) and overflowed a 476px column,
+     * which `overflow: hidden` then clipped. `min-width: 0` alone could not fix it,
+     * because the box was never being asked to shrink in the first place.
+     */
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    /* Both, and for different axes: `min-height` lets it scroll inside the column,
+       `min-width` lets it narrow to the column instead of being clipped by it. */
+    min-width: 0;
+    flex: 1;
+  }
+
+  /* The prompt takes the whole column below the summary, so the stacked layout's
+     viewport-fraction caps — there to stop it pushing the transcript off screen —
+     no longer apply. `min-height: 0` is what actually lets it scroll inside a
+     flex column rather than growing past it. */
+  .drill-body--split .problem-pane__body,
+  .drill-body--split .problem-pane-slot--roomy .problem-pane__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+  }
+
+  .drill-body--split .main-column {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* Fills its column rather than keeping a cap of its own, which left a hole of
+     unused column to the right of the conversation. Safe because the turn text
+     carries its own reading measure — see `.turn__body`. */
+  .drill-body--split .transcript-region {
+    max-width: none;
+  }
+
+  /* Left-aligned rather than centred once it is a column of its own: a centred
+     transcript inside a right-hand column reads as drifting away from the prompt. */
+  .drill-body--split .main-column {
+    justify-content: flex-start;
+  }
+}
+
 .problem-pane-slot {
   flex: none;
   border-bottom: 2px solid var(--border);
@@ -970,7 +1107,7 @@ body {
 }
 
 .problem-pane {
-  max-width: 820px;
+  max-width: var(--measure);
   margin: 0 auto;
   padding: 0 28px;
 }
@@ -1100,6 +1237,14 @@ ol.md__list {
 }
 
 .md__pre {
+  /*
+   * `white-space: pre` makes this block's min-content width the longest line in
+   * it, and a flex item's default `min-width: auto` then hands that minimum up to
+   * every ancestor. Measured: it pushed the problem pane to 652px inside a 476px
+   * column, and the column's `overflow: hidden` clipped the prose beside it. It
+   * has its own horizontal scroller, so it does not need the width.
+   */
+  min-width: 0;
   margin: 2px 0;
   padding: 10px 12px;
   border-left: 3px solid var(--border);
@@ -1132,10 +1277,49 @@ ol.md__list {
 
 .home__inner {
   width: 100%;
-  max-width: 820px;
+  max-width: var(--measure-home);
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+/*
+ * The three tracks side by side once there is room, rather than a stack with the
+ * window's width unused beside it. Same threshold as the drill body's split, for
+ * the same reason: below it a third of the width is not a readable card.
+ *
+ * The cap widens with the layout — three cards in an 880px block would be too
+ * narrow to read, so this borrows the drill measure instead.
+ */
+@media (min-width: 62rem) {
+  .home__inner {
+    max-width: var(--measure);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    /* The grid is stretched to the scroll container's full height, and a grid's
+       default `align-content` stretches its auto rows to match — which opened a
+       200px gap under the heading and left dead space inside every card. Rows keep
+       their content height and the block sits at the top. */
+    align-content: start;
+  }
+
+  /* Both span the row: the heading names the whole screen, and an unreachable
+     server breaks every track, so neither belongs in one column. */
+  .home__title,
+  .home__offline {
+    grid-column: 1 / -1;
+  }
+
+  /* Equal height, with the action pushed to the bottom, so the three buttons line
+     up across the row even though the blurbs are different lengths. Stretch is the
+     grid default — the cards only need to fill the row they are given. */
+  .home__card {
+    height: 100%;
+  }
+
+  .home__card > :last-child {
+    margin-top: auto;
+  }
 }
 
 .home__title {
