@@ -5,7 +5,9 @@ import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
-import { assertNoSpoilers, buildSystemPrompt, designTimeCue, DESIGN_BUDGET_MS, PROBLEM_SLUG, type Track } from './context'
+import { assertNoSpoilers, buildSystemPrompt, timeCue, CODING_BUDGET_MS, DESIGN_BUDGET_MS, PROBLEM_SLUG, type Track } from './context'
+import { findCodingProblem, listCodingProblems, problemDir } from './problems'
+import { runDrillTests, verdictCue } from './drill-tests'
 import { createInterviewer, anthropicStream, type StreamFn } from './interviewer'
 import { claudeCliStream } from './claude-cli'
 import { createSession, finishSession } from './session'
@@ -51,6 +53,13 @@ export interface VoiceServerDeps {
   speaker?: Speaker
   /** Injectable so tests never shell out to the real `say -a '?'`. */
   listOutputDevices?(): Promise<Device[]>
+  /**
+   * The vitest runner behind `POST /api/session/:id/tests`. Injectable for the
+   * same reason `transcode` is: a real run spawns `npx vitest` on one of Andre's
+   * own drills, which takes seconds and depends on whatever he has half-written
+   * in `solution.ts`. See `DrillTestOptions.runner` for the contract.
+   */
+  runDrillTests?(args: string[], cwd: string, reportPath: string): Promise<void>
 }
 
 // A recorded interview turn is at most a few minutes of audio; 25MB is a wide
@@ -96,14 +105,14 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
  */
 export function parseDrill(body: Record<string, unknown> | null): Drill {
   const track = body?.track ?? 'mock'
-  if (track !== 'mock' && track !== 'design') {
+  if (track !== 'mock' && track !== 'design' && track !== 'coding') {
     throw new Error(`Unknown track: ${String(track)}`)
   }
   if (track === 'mock') return { track }
 
   const problem = body?.problem
   if (typeof problem !== 'string' || problem === '') {
-    throw new Error('A design drill needs a problem name.')
+    throw new Error(`A ${track} drill needs a problem name.`)
   }
   if (!PROBLEM_SLUG.test(problem)) {
     throw new Error(`Invalid problem name: ${problem}`)
@@ -113,7 +122,7 @@ export function parseDrill(body: Record<string, unknown> | null): Drill {
   // overridable — bounded, because it drives a countdown the drill is graded
   // against and a nonsense value would quietly make the timing meaningless.
   const raw = body?.budgetMinutes
-  let budgetMs = DESIGN_BUDGET_MS
+  let budgetMs = track === 'coding' ? CODING_BUDGET_MS : DESIGN_BUDGET_MS
   if (raw !== undefined) {
     if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 5 || raw > 180) {
       throw new Error('budgetMinutes must be a number between 5 and 180.')
@@ -138,6 +147,20 @@ function listDesignProblems(root: string): string[] {
     .filter((entry) => entry.isDirectory() && PROBLEM_SLUG.test(entry.name))
     .map((entry) => entry.name)
     .sort()
+}
+
+/**
+ * The pattern directory a coding problem lives in, or a throw naming the slug.
+ *
+ * Throws rather than returning `null` so an unknown slug reaches the same 400
+ * path as any other unknown problem, and so no caller can accidentally carry on
+ * with `undefined` — `allowedPaths` would then build `problems/undefined/...`
+ * and fail with a far less useful message.
+ */
+function codingPattern(root: string, problem: string): string {
+  const found = findCodingProblem(root, problem)
+  if (!found) throw new Error(`Unknown problem "${problem}": no coding drill by that name.`)
+  return found.pattern
 }
 
 function serveStatic(distDir: string, pathname: string, res: ServerResponse): boolean {
@@ -438,9 +461,22 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       return
     }
 
-    // The design track's problem picker. Names only — see `listDesignProblems`.
+    // The problem picker for whichever track asked. Names only — see
+    // `listDesignProblems`, and `listCodingProblems`, whose whole reason for
+    // existing is that a coding problem's *path* names its pattern and so can
+    // never be what the client is handed. `?track=` defaults to design, which
+    // is what the only client sent before the coding track existed.
     if (req.method === 'GET' && url.pathname === '/api/problems') {
-      sendJson(res, 200, { problems: listDesignProblems(deps.root) })
+      const track = url.searchParams.get('track') ?? 'design'
+      if (track !== 'design' && track !== 'coding') {
+        sendJson(res, 400, { error: `Unknown track: ${track}` })
+        return
+      }
+      const problems =
+        track === 'coding'
+          ? listCodingProblems(deps.root).map((problem) => problem.slug)
+          : listDesignProblems(deps.root)
+      sendJson(res, 200, { problems })
       return
     }
 
@@ -456,11 +492,29 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     const problemMatch = /^\/api\/problems\/([^/]+)$/.exec(url.pathname)
     if (req.method === 'GET' && problemMatch) {
       const problem = decodeURIComponent(problemMatch[1]!)
+      const track = url.searchParams.get('track') ?? 'design'
+      if (track !== 'design' && track !== 'coding') {
+        sendJson(res, 400, { error: `Unknown track: ${track}` })
+        return
+      }
       if (!PROBLEM_SLUG.test(problem)) {
         sendJson(res, 400, { error: `Invalid problem name: ${problem}` })
         return
       }
-      const relPath = `system-design/${problem}/README.md`
+      let relPath: string
+      if (track === 'coding') {
+        // Resolved off disk rather than built from the slug, because only the
+        // resolver knows the pattern directory — and the response deliberately
+        // carries the slug back, never the path it was found at.
+        const found = findCodingProblem(deps.root, problem)
+        if (!found) {
+          notFound(res)
+          return
+        }
+        relPath = `${problemDir(found)}/README.md`
+      } else {
+        relPath = `system-design/${problem}/README.md`
+      }
       assertNoSpoilers([relPath])
       const full = join(deps.root, relPath)
       if (!existsSync(full)) {
@@ -511,7 +565,14 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       const entryClock = makeEntryClock()
       let system: string
       try {
-        system = buildSystemPrompt(deps.root, drill.track, drill.problem)
+        // The pattern is resolved here and passed straight into the prompt. It
+        // is deliberately not stored on the session: `stored.drill` is spread
+        // into `POST /api/session`'s and `GET /api/session/:id`'s response
+        // bodies, so anything living there is one field-add away from being
+        // shipped to the browser. `POST .../tests` re-resolves it instead —
+        // a directory scan, which costs nothing next to running a test suite.
+        const pattern = drill.track === 'coding' ? codingPattern(deps.root, drill.problem!) : undefined
+        system = buildSystemPrompt(deps.root, drill.track, drill.problem, pattern)
       } catch (error) {
         // An unknown problem slug reaches here as a missing-file throw from
         // buildSystemPrompt. That is the client asking for something that does
@@ -525,7 +586,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         now: () => entryClock(),
         // Only the timed track gets a cue; a behavioural mock has no budget and
         // must not be told it has one.
-        turnCue: drill.budgetMs === undefined ? undefined : () => designTimeCue(entryClock(), drill.budgetMs),
+        turnCue: drill.budgetMs === undefined ? undefined : () => timeCue(entryClock(), drill.budgetMs),
       })
       const scratchDir = mkdtempSync(join(tmpdir(), 'voice-web-'))
       const stored = store.create(session, interviewer, new Date(), scratchDir, drill)
@@ -810,6 +871,79 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // this race.
       await clearRetainedAudio(stored)
       sendJson(res, 200, { abandoned: true })
+      return
+    }
+
+    // The coding track's test run — `drill.md` step 7, reassigned. Andre presses
+    // a button, the suite runs, and the interviewer is told the outcome and
+    // reacts out loud.
+    //
+    // The verdict reaches the interviewer as a bracketed note through
+    // `session.interject`, not through `submitTurn`: he did not say anything, so
+    // no Andre entry is written. It also goes back in this response, because the
+    // client has to render *something* immediately — a suite can take a while,
+    // and the button cannot just go quiet until the interviewer starts speaking.
+    //
+    // Shares `turnsInFlight` with the spoken turns on purpose. A test run and a
+    // recorded answer both drive an interviewer turn, and two interviewer turns
+    // racing would interleave sentences into one another and corrupt the
+    // transcript's ordering.
+    const testsMatch = /^\/api\/session\/([^/]+)\/tests$/.exec(url.pathname)
+    if (req.method === 'POST' && testsMatch) {
+      const id = testsMatch[1]!
+      const stored = store.get(id)
+      if (!stored) {
+        notFound(res)
+        return
+      }
+      if (stored.drill.track !== 'coding') {
+        sendJson(res, 400, { error: 'only a coding drill has tests to run' })
+        return
+      }
+      if (stored.session.endedEarly()) {
+        sendJson(res, 409, { error: 'session already ended' })
+        return
+      }
+      if (turnsInFlight.has(id)) {
+        sendJson(res, 409, { error: 'a turn is already in progress for this session' })
+        return
+      }
+      turnsInFlight.add(id)
+      store.touch(id, idleClock())
+
+      let verdict: Awaited<ReturnType<typeof runDrillTests>>
+      try {
+        verdict = await runDrillTests({
+          root: deps.root,
+          problem: { slug: stored.drill.problem!, pattern: codingPattern(deps.root, stored.drill.problem!) },
+          runner: deps.runDrillTests,
+        })
+      } catch (error) {
+        turnsInFlight.delete(id)
+        sendJson(res, 500, { error: errorMessage(error) })
+        return
+      }
+
+      // Answered before the interviewer's reaction streams, same ordering as a
+      // spoken turn's 202: the client gets the outcome now, the sentences follow
+      // over SSE.
+      sendJson(res, 200, verdict)
+      void (async () => {
+        const before = stored.session.entries().length
+        await streamTurn(stored.sseClient, stored.session.interject(verdictCue(verdict)), deps.speaker)
+        if (stored.sseClient) {
+          for (const entry of stored.session.entries().slice(before)) {
+            writeSSE(stored.sseClient, 'entry', entry)
+          }
+        }
+        if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, id)
+      })()
+        .catch((error: unknown) => {
+          console.error('voice session test reaction failed:', error)
+        })
+        .finally(() => {
+          turnsInFlight.delete(id)
+        })
       return
     }
 

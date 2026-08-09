@@ -21,6 +21,13 @@ describe('parseRoute', () => {
     expect(parseRoute('#/design/rate-limiter')).toEqual({ view: 'design', problem: 'rate-limiter' })
   })
 
+  it('parses a coding route with its problem', () => {
+    expect(parseRoute('#/coding/container-with-most-water')).toEqual({
+      view: 'coding',
+      problem: 'container-with-most-water',
+    })
+  })
+
   // A hash is user-editable text that ends up naming a file on the server, so it
   // gets the same treatment as a request body: anything not a plain slug is not
   // a route. The server validates independently — this is about the client not
@@ -36,6 +43,13 @@ describe('parseRoute', () => {
     '#/design/a/b',
     '#/nope',
     '#/design/%ZZ',
+    // The same rules apply to the coding track's problem, which reaches a
+    // `problems/` directory on the server.
+    '#/coding/../../patterns.md',
+    '#/coding/Container',
+    '#/coding/',
+    '#/coding',
+    '#/coding/a/b',
   ])('refuses to route %j anywhere but home', (hash) => {
     expect(parseRoute(hash).view).toBe('home')
   })
@@ -46,6 +60,7 @@ describe('routeHash', () => {
     [{ view: 'home' } as Route, '#/'],
     [{ view: 'mock' } as Route, '#/mock'],
     [{ view: 'design', problem: 'notification-fanout' } as Route, '#/design/notification-fanout'],
+    [{ view: 'coding', problem: 'celebrity' } as Route, '#/coding/celebrity'],
   ])('renders %j as %s', (route, hash) => {
     expect(routeHash(route)).toBe(hash)
   })
@@ -57,6 +72,7 @@ describe('routeHash', () => {
     { view: 'home' } as Route,
     { view: 'mock' } as Route,
     { view: 'design', problem: 'rate-limiter' } as Route,
+    { view: 'coding', problem: 'container-with-most-water' } as Route,
   ])('round-trips %j through the hash unchanged', (route) => {
     expect(parseRoute(routeHash(route))).toEqual(route)
   })
@@ -77,6 +93,16 @@ describe('routeDrill', () => {
     expect(routeDrill({ view: 'design', problem: 'metrics-pipeline' })).toEqual({
       track: 'design',
       problem: 'metrics-pipeline',
+    })
+  })
+
+  // By bare slug, and there is nothing else the client could send: the pattern
+  // a coding problem lives under is the answer to the drill, and the client is
+  // never told it. See voice/problems.ts.
+  it('asks for the coding track by problem slug alone', () => {
+    expect(routeDrill({ view: 'coding', problem: 'container-with-most-water' })).toEqual({
+      track: 'coding',
+      problem: 'container-with-most-water',
     })
   })
 })

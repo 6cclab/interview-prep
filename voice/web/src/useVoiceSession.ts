@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Drill, Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
+import type { Drill, DrillVerdict, Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
 
 export interface VoiceSession {
   mode: Mode
@@ -91,7 +91,7 @@ export interface VoiceSession {
   /**
    * Seconds left of a timed drill's budget, or `null` when the drill is untimed.
    * Floors at zero and keeps counting no further — the interviewer is told when
-   * time is up (see `designTimeCue`) and closes the interview itself, so the
+   * time is up (see `timeCue`) and closes the interview itself, so the
    * clock hitting zero is not the client's cue to end anything.
    */
   remainingSeconds: number | null
@@ -101,6 +101,21 @@ export interface VoiceSession {
    * flight and races its own session into a 409 against itself.
    */
   starting: boolean
+  /**
+   * The coding track's "Run tests" action (`POST /api/session/:id/tests`).
+   *
+   * Runs the drill's suite server-side and hands the verdict to the interviewer,
+   * which reacts out loud — that reaction arrives through the existing
+   * `sentence`/`entry` SSE listeners, so nothing extra is wired for it here.
+   * The verdict is also returned so the screen can show it: a suite takes real
+   * seconds and the button cannot go silent until the interviewer starts
+   * speaking.
+   */
+  runTests(): void
+  /** The most recent test run's verdict, or `null` before the first run. */
+  verdict: DrillVerdict | null
+  /** True while a suite is running, so the button can say so and not be pressed twice. */
+  testsRunning: boolean
   record(): void
   stopAndSubmit(): void
   /** The dock's "End session" action — ends the current session, wherever it is in its turn cycle. */
@@ -251,6 +266,8 @@ export function useVoiceSession(): VoiceSession {
   // a sleeping laptop — all of which stall interval callbacks and would
   // otherwise leave the clock reading long after the time was actually gone.
   const [starting, setStarting] = useState(false)
+  const [verdict, setVerdict] = useState<DrillVerdict | null>(null)
+  const [testsRunning, setTestsRunning] = useState(false)
   const [deadlineAt, setDeadlineAt] = useState<number | null>(null)
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null)
   useEffect(() => {
@@ -259,7 +276,7 @@ export function useVoiceSession(): VoiceSession {
       return
     }
     // Floors at zero: the interviewer is told when time is up and closes the
-    // interview itself (see `designTimeCue`), so this display must not race it
+    // interview itself (see `timeCue`), so this display must not race it
     // by ending anything, and a negative number would just be noise.
     const tick = () => setRemainingSeconds(Math.max(0, Math.ceil((deadlineAt - Date.now()) / 1000)))
     tick()
@@ -274,6 +291,10 @@ export function useVoiceSession(): VoiceSession {
   const [selectedOutputId, setSelectedOutputId] = useState<string | null>(null)
 
   const sessionIdRef = useRef<string | null>(null)
+  // A ref as well as state, for the same reason the other in-flight guards are:
+  // `runTests` is a stable callback, so it would read a stale `testsRunning`
+  // from the render it was created in and let a second press through.
+  const testsRunningRef = useRef(false)
   const eventSourceRef = useRef<EventSource | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
@@ -420,6 +441,10 @@ export function useVoiceSession(): VoiceSession {
     setSessionConflict(false)
     setMicFailureKind(null)
     setTranscriptFailed(false)
+    // A new drill starts with no test result. Carrying the previous session's
+    // verdict over would show a green — or a failing test list — for code that
+    // has since been reset back to the stub.
+    setVerdict(null)
     setStatus('Starting session…')
     setStarting(true)
     void (async () => {
@@ -691,6 +716,44 @@ export function useVoiceSession(): VoiceSession {
     })()
   }, [])
 
+  /**
+   * "Run tests": runs the drill's suite and lets the interviewer react.
+   *
+   * `testsRunning` is a real guard, not just a label — a vitest run takes
+   * seconds, and the server refuses a second one with a 409 while the first
+   * interviewer turn is still in flight. Blocking here means the common case
+   * never has to surface that 409 as an error.
+   *
+   * A failed *request* and a failed *suite* are deliberately different things:
+   * a red suite is the drill working as intended and arrives as a verdict, so
+   * only a transport or server error reaches `status`.
+   */
+  const runTests = useCallback(() => {
+    const id = sessionIdRef.current
+    if (!id || testsRunningRef.current) return
+    testsRunningRef.current = true
+    setTestsRunning(true)
+    setStatus('Running the tests…')
+    void (async () => {
+      try {
+        const res = await fetch(`/api/session/${id}/tests`, { method: 'POST' })
+        if (!res.ok) {
+          const { error } = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { error: string }
+          setStatus(`Could not run the tests: ${error}`)
+          return
+        }
+        setVerdict((await res.json()) as DrillVerdict)
+        setStatus('Tests finished.')
+      } catch (error) {
+        setStatus('Could not reach the drill server to run the tests.')
+        console.error('voice: POST /tests failed', error)
+      } finally {
+        testsRunningRef.current = false
+        setTestsRunning(false)
+      }
+    })()
+  }, [])
+
   // `''` from the <select>'s own "system default" option means "no explicit
   // choice" — normalized to `null` here so the rest of the hook only ever
   // deals in `string | null`.
@@ -816,6 +879,9 @@ export function useVoiceSession(): VoiceSession {
     retryTranscription,
     abandonTurn,
     start,
+    runTests,
+    verdict,
+    testsRunning,
     record,
     stopAndSubmit,
     endSession,

@@ -12,9 +12,10 @@ import { DeviceSettings } from './components/DeviceSettings'
 import { Home } from './components/Home'
 import { HomeHeader } from './components/HomeHeader'
 import { ProblemPane } from './components/ProblemPane'
+import { TestVerdict } from './components/TestVerdict'
 import { routeDrill, routeHash, useRoute, type Route } from './route'
 import { useTheme } from './theme'
-import { derivePhase, fmt, wallClock, stuckBody, DESIGN_BUDGET_MINUTES, ERROR_COPY, ANNOUNCEMENTS } from './phase'
+import { derivePhase, fmt, wallClock, stuckBody, TIMED_BUDGET_MINUTES, ERROR_COPY, ANNOUNCEMENTS } from './phase'
 import type { ErrorKind } from './types'
 
 // Status title/detail for the dock's left-hand block. The `requesting`
@@ -63,6 +64,20 @@ export default function App() {
   return <DrillScreen key={routeHash(route)} route={route} dark={dark} onToggleTheme={toggleTheme} onGoHome={() => navigate({ view: 'home' })} />
 }
 
+/**
+ * The header's naming, per view. A table rather than nested ternaries: with three
+ * tracks the conditional version had to be read twice to see which branch was
+ * the behavioural one.
+ */
+const HEADER = {
+  mock: { title: 'Mock interview', kicker: 'Behavioral · voice' },
+  design: { title: 'Design interview', kicker: 'System design' },
+  coding: { title: 'Coding interview', kicker: 'Coding' },
+  // `home` never reaches DrillScreen, but the record is keyed by the full Route
+  // view so a new view cannot be added without deciding what the header says.
+  home: { title: 'Mock interview', kicker: 'Behavioral · voice' },
+} as const
+
 interface DrillScreenProps {
   route: Route
   dark: boolean
@@ -88,6 +103,9 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     forceEndStuckSession,
     stuckSession,
     reopenStuckSession,
+    runTests,
+    verdict,
+    testsRunning,
     drill,
     remainingSeconds,
     starting,
@@ -107,6 +125,9 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   const [deviceSettingsOpen, setDeviceSettingsOpen] = useState(false)
 
   const phase = derivePhase(mode, interviewerSpeaking)
+  const timed = route.view === 'design' || route.view === 'coding'
+  // Narrowing once, so the header and the pane do not each re-derive it.
+  const problem = 'problem' in route ? route.problem : ''
 
   // The session clock ("8:34 session" in the header) is client-side display
   // only — the wire carries no session-duration field (see the handoff
@@ -332,9 +353,10 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   } else if (phase === 'ready') {
     statusTitle = 'Your turn'
     // The behavioural drill deliberately promises no clock ("thinking time is
-    // the exercise"). A design drill is the opposite — it is timed by design, and
-    // repeating "no countdown" while a countdown runs in the header would be a
-    // straightforward lie.
+    // the exercise"). The timed tracks are the opposite, and repeating "no
+    // countdown" while a countdown runs in the header would be a straightforward
+    // lie. Keyed off `remainingSeconds` rather than the route, so it is right for
+    // any timed track without enumerating them.
     statusDetail =
       remainingSeconds === null
         ? 'Start when you are ready. There is no time limit and no countdown.'
@@ -359,11 +381,11 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
           sessionSeconds={sessionSeconds}
           remainingSeconds={remainingSeconds}
           // Only before the countdown exists, and only on a timed track.
-          budgetMinutes={route.view === 'design' && remainingSeconds === null ? DESIGN_BUDGET_MINUTES : null}
+          budgetMinutes={timed && remainingSeconds === null ? TIMED_BUDGET_MINUTES : null}
           // From the route, not the live drill: the header must name the track
           // before a session exists, not just once one is running.
-          title={route.view === 'design' ? 'Design interview' : 'Mock interview'}
-          kicker={route.view === 'design' ? `System design · ${route.problem}` : 'Behavioral · voice'}
+          title={HEADER[route.view].title}
+          kicker={timed ? `${HEADER[route.view].kicker} · ${problem}` : HEADER[route.view].kicker}
           // Leaving a live session is `End session`'s job, not a navigation's —
           // walking away silently would abandon a transcript.
           onGoHome={phase === 'idle' || phase === 'ended' ? onGoHome : undefined}
@@ -404,9 +426,9 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
             is the only thing on the page worth reading, and capping it to a
             third of the screen left half of it blank. It shrinks back once the
             conversation has something in it. */}
-        {route.view === 'design' && (
+        {(route.view === 'design' || route.view === 'coding') && (
           <div className={`problem-pane-slot${phase === 'idle' ? ' problem-pane-slot--roomy' : ''}`}>
-            <ProblemPane problem={route.problem} />
+            <ProblemPane problem={route.problem} track={route.view} />
           </div>
         )}
 
@@ -424,6 +446,21 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
                 body={errorKind === 'stuck' ? stuckBody(stuckSession?.startedAt ?? null) : ERROR_COPY[errorKind].body}
                 actions={errorActions}
                 details={errorKind === 'denied' && showPermissionHelp ? PERMISSION_HELP : undefined}
+              />
+            </div>
+          )}
+          {/* The coding track only. Sits in the dock rather than beside the
+              problem so it is in the same place as every other action, and stays
+              on screen through `ended` so the last verdict is still readable
+              while the interviewer delivers its closing. `onRun` is withheld
+              until a session exists — there is nothing to run tests against, and
+              a live button that 404s is worse than a disabled one. */}
+          {route.view === 'coding' && (
+            <div className="dock-stack__row">
+              <TestVerdict
+                verdict={verdict}
+                running={testsRunning}
+                onRun={phase === 'idle' || phase === 'ended' ? undefined : runTests}
               />
             </div>
           )}

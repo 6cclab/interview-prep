@@ -37,6 +37,21 @@ export interface Session {
    * before.
    */
   submitTurn(said: string, at: number): AsyncIterable<string>
+  /**
+   * Drive an interviewer turn from a bracketed note rather than from speech.
+   *
+   * The coding track needs this: `drill.md` step 7 has the interviewer react to
+   * a test run, and a test run is a button press, not an utterance. So this
+   * commits **no** Andre `Entry` — he said nothing — while the interviewer's
+   * reply is committed exactly as any other turn's is, because it *was* spoken
+   * aloud and belongs in the record.
+   *
+   * The note itself never enters the transcript either, for the same reason
+   * `turnCue` doesn't: the saved transcript is a record of what was said, and
+   * an entry reading `[Test result, for you only: ...]` attributed to either
+   * party would be a line neither of them uttered.
+   */
+  interject(note: string): AsyncIterable<string>
   /** The transcript so far. */
   entries(): Entry[]
   /** Set once a turn has failed; the message named in the synthetic entry. */
@@ -109,6 +124,9 @@ export function createSession(opts: CreateSessionOptions): Session {
     submitTurn(said: string, at: number): AsyncIterable<string> {
       entries.push({ speaker: 'andre', text: said, at })
       return runInterviewerTurn(said)
+    },
+    interject(note: string): AsyncIterable<string> {
+      return runInterviewerTurn(note)
     },
     entries: () => entries,
     endedEarly: () => earlyMarker,

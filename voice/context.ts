@@ -221,19 +221,36 @@ export function buildSystemPrompt(root: string, track: Track, problem?: string, 
 export const DESIGN_BUDGET_MS = 45 * 60 * 1000
 
 /**
- * The per-turn time check fed to a design interviewer (see `CreateSessionOptions.turnCue`).
+ * The live coding track's budget.
+ *
+ * Unlike the design track's, this number is a **choice, not a quotation**:
+ * `drill.md` step 3 says "start a timer" and never says how long. 45 minutes is
+ * the length of the interview it is preparing him for, and matching the design
+ * track keeps one budget rule across both timed tracks. Overridable per session
+ * for the same reason design's is.
+ */
+export const CODING_BUDGET_MS = 45 * 60 * 1000
+
+/**
+ * The per-turn time check fed to a timed interviewer (see `CreateSessionOptions.turnCue`).
  *
  * Phrased as an instruction to the interviewer rather than as data, because it
  * arrives in the `user` slot where everything else is Andre speaking, and the
  * one failure that would ruin a drill is the interviewer reading it out as
- * though he had said it. `design.md` drives the behaviour — the warning at ten
- * minutes and stopping at time — so this only supplies the number, and states
- * the deadline plainly at zero so "at time, stop" has an unambiguous trigger.
+ * though he had said it. The track's own prompt drives the behaviour — design.md
+ * warns at ten minutes and stops at time; drill.md closes with a verdict — so
+ * this only supplies the number, and states the deadline plainly at zero so
+ * "at time, stop" has an unambiguous trigger.
+ *
+ * Shared by both timed tracks, which is why the closing instruction is generic:
+ * each track's `<voice-mode>` already spells out what its own closing consists
+ * of (a rubric score for design, a solved/not verdict for coding), and naming
+ * one of them here would tell the other interviewer to deliver the wrong thing.
  */
-export function designTimeCue(elapsedMs: number, budgetMs: number = DESIGN_BUDGET_MS): string {
+export function timeCue(elapsedMs: number, budgetMs: number = DESIGN_BUDGET_MS): string {
   const remainingMs = budgetMs - elapsedMs
   if (remainingMs <= 0) {
-    return '[Time check, for you only: time is up. Stop the interview now and deliver the score.]'
+    return '[Time check, for you only: time is up. Stop the interview now and close it out as your instructions say.]'
   }
   // Rounded up, so a cue never says "0 minutes remain" while time is still left.
   const minutes = Math.ceil(remainingMs / 60_000)

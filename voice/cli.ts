@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { record } from './audio'
 import { claudeCliStream } from './claude-cli'
-import { designTimeCue, buildSystemPrompt, type Track } from './context'
+import { timeCue, buildSystemPrompt, type Track } from './context'
 import { listInputDevices, listOutputDevices, readDeviceConfig } from './devices'
 import { anthropicStream, createInterviewer, type StreamFn } from './interviewer'
 import { runSession } from './session'
@@ -109,7 +109,7 @@ async function main(): Promise<void> {
       // own — without this each turn it is told nothing and design.md's "warn
       // once at ten minutes, stop at time" is unfollowable. The web path does
       // the same; this keeps the terminal from being the clockless one.
-      turnCue: track === 'design' ? () => designTimeCue(Date.now() - started) : undefined,
+      turnCue: track === 'design' ? () => timeCue(Date.now() - started) : undefined,
     })
 
     // The path written may differ from the one asked for — `writeSession` will

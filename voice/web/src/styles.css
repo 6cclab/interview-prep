@@ -877,7 +877,85 @@ body {
   max-width: 60ch;
 }
 
-/* The design track's problem statement (ProblemPane). Sits between the header
+/* The coding track's test runner (TestVerdict). Lives in the dock stack, so it
+   shares the dock's measure and sits where every other action already is. */
+.test-verdict {
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 12px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.test-verdict__row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.test-verdict__hint {
+  font-size: 0.8rem;
+  color: var(--muted-foreground);
+  max-width: 52ch;
+}
+
+.test-verdict__result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 2px solid var(--border);
+  /* A left rule carries the tone. Colour alone would be the only signal for a
+     distinction the drill is built on, so the headline states it in words too. */
+  border-left-width: 6px;
+  background: var(--muted);
+}
+
+.test-verdict__result--green {
+  border-left-color: var(--brand, currentColor);
+}
+
+/* A right answer that costs too much. Deliberately not styled as a failure —
+   it is a working brute force, which is a real checkpoint. */
+.test-verdict__result--cost {
+  border-left-color: #b8860b;
+}
+
+.test-verdict__result--wrong,
+.test-verdict__result--errored {
+  border-left-color: #b3261e;
+}
+
+.test-verdict__headline {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.test-verdict__body {
+  font-size: 0.85rem;
+  color: var(--muted-foreground);
+  max-width: 68ch;
+}
+
+.test-verdict__failed {
+  margin: 2px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  /* Failing test names only, never a diff — a scale fixture's expected value is
+     a hundred thousand numbers, and a message quoting it hands over the answer.
+     Long names scroll inside this block rather than widening the page. */
+  overflow-x: auto;
+}
+
+/* The timed tracks' problem statement (ProblemPane). Sits between the header
    and the transcript, capped so a long prompt scrolls inside itself rather than
    pushing the conversation off screen. */
 .problem-pane-slot {

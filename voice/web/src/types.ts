@@ -54,15 +54,34 @@ export interface StuckSession {
 
 /** Which drill a session runs. Mirrors the server's `Drill` (voice/session-store.ts). */
 export interface Drill {
-  track: 'mock' | 'design'
-  /** Required for `design`, absent for `mock`. */
+  track: 'mock' | 'design' | 'coding'
+  /** Required for `design` and `coding`, absent for `mock`. */
   problem?: string
-  /** The design track's budget in ms; absent when the drill is untimed. */
+  /** A timed drill's budget in ms; absent when the drill is untimed. */
   budgetMs?: number
 }
 
-/** A design problem and its prompt, from `GET /api/problems/:problem`. */
+/** The tracks that have a problem to put on screen. */
+export type ProblemTrack = 'design' | 'coding'
+
+/** A problem and its prompt, from `GET /api/problems/:problem?track=`. */
 export interface ProblemStatement {
   problem: string
   prompt: string
 }
+
+/**
+ * A drill suite's outcome, from `POST /api/session/:id/tests`. Mirrors the
+ * server's `DrillVerdict` (voice/drill-tests.ts).
+ *
+ * The two reds are separate cases because `drill.md` insists they mean opposite
+ * things: `correctness-red` is a wrong answer, `cost-red` is a *right* answer
+ * that costs too much — a working brute force, which is a legitimate checkpoint.
+ * Collapsing them into "failed" is the specific wrong lesson the drill exists to
+ * prevent, so the client renders them differently too.
+ */
+export type DrillVerdict =
+  | { kind: 'green' }
+  | { kind: 'correctness-red'; failed: string[] }
+  | { kind: 'cost-red'; failed: string[] }
+  | { kind: 'errored'; message: string }

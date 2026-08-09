@@ -10,6 +10,7 @@ function fakeSession(): Session {
   return {
     begin: async function* () {},
     submitTurn: async function* () {},
+    interject: async function* () {},
     entries: () => [],
     endedEarly: () => undefined,
     reportFailure: () => {},

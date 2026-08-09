@@ -39,10 +39,10 @@ pnpm reset <problem>    # restore stub.ts over solution.ts
 pnpm domains            # domains the exercise set covers; `--for <company>` to tailor
 pnpm mock:voice         # spoken behavioral drill
 pnpm mock:web           # React browser client (127.0.0.1) — builds, then serves.
-                        # Serves BOTH spoken tracks. The landing page chooses;
+                        # Serves ALL THREE spoken tracks. The landing page chooses;
                         # each drill then gets its own screen at its own URL
-                        # (#/mock, #/design/<problem>), so a reload comes back to
-                        # the same drill instead of the chooser.
+                        # (#/mock, #/design/<p>, #/coding/<p>), so a reload comes
+                        # back to the same drill instead of the chooser.
 pnpm build:web          # build the React client only (voice/web -> voice/dist)
 pnpm dev:web            # Vite dev server with HMR for voice/web (proxies /api)
 pnpm dev:web:api        # the node:http API/session server alone, for use alongside dev:web
@@ -70,6 +70,36 @@ Served from `system-design/<problem>/`: `README.md` only. `reference.md` is a
 worked design and denied outright, and `rubric.md` — though not a denied file —
 is deliberately never put on screen mid-drill, because it enumerates the
 dimensions being scored.
+
+### The spoken coding track
+
+Browser only — there is no `coding:voice`. The drill needs the problem on screen
+for 45 minutes and a **Run tests** button, and neither works in a terminal that
+scrolls.
+
+**There is no editor in the browser, deliberately.** He writes the answer in his
+own editor, in the real `solution.ts`, against real types. The button runs that
+problem's suite server-side and the interviewer is told the outcome as a
+bracketed note it never speaks — `drill.md`'s step 7, reassigned, the same way
+the design track's time check is.
+
+The verdict distinguishes three reds and the distinction is the whole point:
+correctness-red is a **wrong answer**; correctness-green-with-cost-red is a
+**right answer that costs too much** — a working brute force, which is a
+legitimate checkpoint — and `errored` is a suite that never ran. Collapsing the
+first two into "failed" teaches the exact thing `drill.md` forbids.
+
+A test run writes **no Andre entry** (he pressed a button; he said nothing), and
+the bracketed verdict never enters the transcript. Transcripts land in
+`local/drills/<problem>-live-<stamp>.md`.
+
+**The pattern is the answer, and a coding problem's path is its pattern.** So
+`problems/<pattern>/<slug>` never leaves the server: routes take a bare slug,
+`voice/problems.ts` is the only module that resolves one to a directory, the
+resolved pattern is passed once into the prompt (the interviewer needs it to give
+rung 2 of the hint ladder) and is deliberately *not* stored on the session, and
+anything derived from test output goes through `stripPatternPaths` on the way
+out. `voice/coding-routes.test.ts` asserts every one of those.
 
 ### Browser support for `mock:web`
 
