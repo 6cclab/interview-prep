@@ -365,7 +365,10 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
 
   let statusTitle = 'Not started'
   let statusDetail = 'The first question is asked out loud. Nothing is recorded until you start a turn.'
-  if (phase === 'requesting') {
+  if (starting) {
+    statusTitle = 'Starting the session'
+    statusDetail = 'Asking the server for a session. The microphone has not been touched yet.'
+  } else if (phase === 'requesting') {
     statusTitle = 'Waiting for the microphone'
     statusDetail = requestingLong ? REQUESTING_LONG_COPY : 'Your browser is asking for permission. Nothing is being recorded yet.'
   } else if (phase === 'recording') {
@@ -512,7 +515,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
               <PacingBar seconds={elapsedSeconds} />
             </div>
           )}
-          <Dock phase={phase} statusTitle={statusTitle} statusDetail={statusDetail} onEndSession={endSession} onPrimary={onPrimaryAction} />
+          <Dock phase={phase} starting={starting} statusTitle={statusTitle} statusDetail={statusDetail} onEndSession={endSession} onPrimary={onPrimaryAction} />
         </div>
       </div>
     </>

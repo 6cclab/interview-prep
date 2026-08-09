@@ -109,3 +109,24 @@ describe('wallClock', () => {
     expect(wallClock(new Date(2026, 7, 9, 19, 5))).toBe('19:05')
   })
 })
+
+/**
+ * `starting` is not a Phase, and that is the point: `start()` is called from both
+ * `idle` and `ended`, and the mode does not change until the POST lands. So the
+ * wait it represents cannot be derived from the mode, and these assert that
+ * neither phase pretends otherwise.
+ */
+describe('the session-start wait sits outside the phase model', () => {
+  it('is idle before and after, so the phase alone cannot show the wait', () => {
+    expect(derivePhase('idle', false, false)).toBe('idle')
+    expect(derivePhase('ended', false, false)).toBe('ended')
+  })
+
+  // Both are phases with a live control, which is exactly why the wait has to be
+  // signalled separately rather than left to the caller to notice.
+  it('leaves both of those phases pressable', () => {
+    for (const mode of ['idle', 'ended'] as const) {
+      expect(['idle', 'ended']).toContain(derivePhase(mode, false, false))
+    }
+  })
+})

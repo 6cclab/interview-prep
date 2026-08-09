@@ -2,6 +2,17 @@ import type { Phase } from '../types'
 
 interface Props {
   phase: Phase
+  /**
+   * The `POST /api/session` round trip is open.
+   *
+   * Not a `Phase`, because it straddles two of them: `start` is called from
+   * `idle` *and* from `ended`, and the mode does not change until the response
+   * lands. `App.tsx`'s handler already refuses a second press (the spacebar goes
+   * through the same handler, so the guard has to live there) — but a refusal the
+   * screen does not show is a button that looks live and does nothing, which is
+   * the same complaint that produced `transcribing` and `thinking`.
+   */
+  starting?: boolean
   onPress(): void
 }
 
@@ -15,7 +26,7 @@ interface Props {
 // shadow that only appears on hover) isn't the "always-4px, press-to-2px"
 // look this control needs. `Button` is used everywhere the handoff itself
 // uses it — see Header.tsx, Dock.tsx, ErrorBanner.tsx.
-export function PrimaryAction({ phase, onPress }: Props) {
+export function PrimaryAction({ phase, starting = false, onPress }: Props) {
   // Every phase where the drill is doing something and pressing would be wrong.
   // Rendered as a non-button so there is nothing to press: the transcribing case
   // used to leave a live "End answer" here for the several seconds transcription
@@ -27,7 +38,7 @@ export function PrimaryAction({ phase, onPress }: Props) {
     speaking: { label: 'Interviewer speaking', hint: 'Please wait' },
   }
 
-  const waiting = WAITING[phase]
+  const waiting = starting ? { label: 'Starting session', hint: 'Please wait' } : WAITING[phase]
   if (waiting) {
     return (
       <div className="primary primary--wait" aria-disabled="true" aria-busy="true">

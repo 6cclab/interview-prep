@@ -8,6 +8,8 @@ interface Props {
   statusDetail: string
   onEndSession(): void
   onPrimary(): void
+  /** The session POST is open. Straddles two phases — see PrimaryAction. */
+  starting?: boolean
 }
 
 // Bottom dock, always visible: status block on the left, "End session" +
@@ -15,7 +17,7 @@ interface Props {
 // absorb a full paragraph (the hung-permission copy) without shifting
 // anything else — see the `max-width`/wrap rule in styles.css rather than
 // any JS truncation here.
-export function Dock({ phase, statusTitle, statusDetail, onEndSession, onPrimary }: Props) {
+export function Dock({ phase, statusTitle, statusDetail, onEndSession, onPrimary, starting }: Props) {
   const canEndSession = phase !== 'idle' && phase !== 'ended'
 
   return (
@@ -35,7 +37,7 @@ export function Dock({ phase, statusTitle, statusDetail, onEndSession, onPrimary
               End session
             </Button>
           )}
-          <PrimaryAction phase={phase} onPress={onPrimary} />
+          <PrimaryAction phase={phase} starting={starting} onPress={onPrimary} />
         </div>
       </div>
     </div>

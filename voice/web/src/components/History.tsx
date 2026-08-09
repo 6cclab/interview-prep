@@ -79,6 +79,15 @@ export function History({ onGoHome }: { onGoHome(): void }) {
 
   const summary = payload?.summary
   const rows = payload?.rows ?? []
+  /**
+   * Only the very first load blanks the screen.
+   *
+   * Toggling patterns refetches, and keying the table's visibility off `loading`
+   * made the whole thing vanish and come back for a change that only adds a
+   * column. `aria-busy` on the section still reports the refetch, so the state is
+   * announced without the content leaving.
+   */
+  const firstLoad = loading && payload === null
 
   return (
     <div className="app-root">
@@ -93,7 +102,7 @@ export function History({ onGoHome }: { onGoHome(): void }) {
       </header>
 
       <section className="history" aria-busy={loading}>
-        {loading && <p className="home__note">Loading your drill log…</p>}
+        {firstLoad && <p className="home__note">Loading your drill log…</p>}
 
         {failed && (
           <p className="home__note">
@@ -101,7 +110,7 @@ export function History({ onGoHome }: { onGoHome(): void }) {
           </p>
         )}
 
-        {!loading && !failed && summary?.attempts === 0 && (
+        {!firstLoad && !failed && summary?.attempts === 0 && (
           <div className="history__empty">
             <p>
               Nothing logged yet. A drill writes a row here when it finishes — from <code>/drill</code> or from the
@@ -114,7 +123,7 @@ export function History({ onGoHome }: { onGoHome(): void }) {
           </div>
         )}
 
-        {!loading && !failed && summary !== undefined && summary.attempts > 0 && (
+        {!firstLoad && !failed && summary !== undefined && summary.attempts > 0 && (
           <>
             {/* Cold solves lead. See the component comment for why that is not
                 interchangeable with the solve count. */}
