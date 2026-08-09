@@ -127,6 +127,14 @@ export function buildSystemPrompt(root: string, track: Track, problem?: string, 
     '',
     'You have no tools and no file access. Everything you are permitted to know',
     'is above. Do not ask for a file and do not claim to have read one.',
+    '',
+    'Ask exactly one question per turn. He is listening, not reading, and cannot',
+    'look back at what you said. A two-part question loses its second part, so',
+    'asking one and then faulting him for missing it tests his short-term memory',
+    'for spoken lists rather than his engineering. If a turn raises two things',
+    'worth asking, ask the more important one and keep the other for later. Never',
+    'say that you asked something he did not answer if it arrived attached to',
+    'another question.',
   ]
 
   if (track === 'mock') {
@@ -154,6 +162,17 @@ export function buildSystemPrompt(root: string, track: Track, problem?: string, 
     // else") — an interviewer that does not know the answer cannot ration it.
     // Everything about not volunteering it is in drill.md and restated below.
     sections.push(`<pattern>${pattern}</pattern>`)
+  }
+
+  if (track === 'design' || track === 'coding') {
+    voiceMode.push(
+      '',
+      'You are holding the clock, so you are responsible for how it is spent. If',
+      'a single sub-question has taken more than about four minutes and he is',
+      'still circling it, give him the answer in one sentence and move on. Do not',
+      'let him spend a quarter of the interview on one point and then tell him he',
+      'has spent too long on it — that outcome was yours to prevent.',
+    )
   }
 
   if (track === 'design') {

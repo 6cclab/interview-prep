@@ -24,6 +24,10 @@ beforeEach(() => {
   seed('system-design/rate-limiter/reference.md', 'WORKED-DESIGN-SPOILER')
   seed('solutions/elimination/celebrity.md', 'THE ANSWER')
   seed('patterns.md', 'THE ANSWER')
+  // The coding track needs its own command file and a problem README, so the
+  // shared voice-mode assertions can cover all three tracks rather than two.
+  seed('.claude/commands/drill.md', 'DRILL COMMAND')
+  seed('problems/two-pointers/container-with-most-water/README.md', 'Given heights, find the best pair.')
 })
 
 afterEach(() => {
@@ -264,5 +268,57 @@ describe('buildSystemPrompt on the coding track', () => {
 
   it.each(['../elimination', '/etc', 'Two-Pointers', ''])('refuses the pattern %j', (pattern) => {
     expect(() => allowedPaths('coding', 'container-with-most-water', pattern)).toThrow()
+  })
+})
+
+/**
+ * One question per turn.
+ *
+ * A real design drill was ended in frustration, and the transcript says why: 15
+ * of 24 interviewer turns asked two or more questions — several asked three or
+ * four — and the interviewer then faulted him for the parts he had not answered.
+ * In a spoken interview he cannot look back at what was said, so the second half
+ * of a two-part question is simply gone. That measures short-term memory for
+ * spoken lists, not engineering, and it is the opposite of what these drills are
+ * for. The same defect showed up on the coding track, so the rule lives in the
+ * shared voice-mode block.
+ */
+/** Each track's problem argument, since design and coding require one. */
+const PROBLEM_FOR = { mock: undefined, design: 'rate-limiter', coding: 'container-with-most-water' } as const
+
+describe('the spoken interviewer asks one question at a time', () => {
+  it.each(['mock', 'design', 'coding'] as const)('instructs one question per turn on %s', (track) => {
+    const prompt = buildSystemPrompt(root, track, PROBLEM_FOR[track], 'two-pointers')
+    expect(prompt).toContain('one question per turn')
+    // The reason, not just the rule: an instruction without its rationale is the
+    // first thing a model discards under pressure.
+    expect(prompt).toContain('cannot')
+  })
+
+  it('forbids faulting him for the half of a question he could not retain', () => {
+    const prompt = buildSystemPrompt(root, 'design', 'rate-limiter')
+    expect(prompt).toContain('Never')
+    expect(prompt.toLowerCase()).toContain('did not answer')
+  })
+})
+
+/**
+ * Clock stewardship. The same session spent fourteen minutes of forty-five on a
+ * single sub-point — idempotency keys — and the interviewer then told him not to
+ * spend more of his clock on it. That was its clock to manage.
+ */
+describe('the timed interviewer owns the clock it is holding', () => {
+  it.each(['design', 'coding'] as const)('tells %s to cut a stalled sub-question loose', (track) => {
+    const prompt = buildSystemPrompt(root, track, PROBLEM_FOR[track], 'two-pointers')
+    expect(prompt).toContain('four minutes')
+    expect(prompt).toContain('move on')
+  })
+
+  // The behavioural track is deliberately untimed — "thinking time is the
+  // exercise" — so a clock instruction there would be describing a clock that
+  // does not exist.
+  it('says nothing about a clock on the untimed behavioural track', () => {
+    const prompt = buildSystemPrompt(root, 'mock')
+    expect(prompt).not.toContain('four minutes')
   })
 })
