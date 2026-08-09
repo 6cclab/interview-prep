@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ProblemTrack } from '../types'
+import { Markdown } from './Markdown'
 
 /**
  * A timed track's problem statement, on screen for the whole drill.
@@ -74,11 +75,12 @@ export function ProblemPane({ problem, track }: Props) {
           ) : prompt === null ? (
             <p className="problem-pane__note">Loading the prompt…</p>
           ) : (
-            // Rendered as preformatted text, not parsed as markdown: the prompt
-            // is a committed file written for a human to read, and adding a
-            // markdown renderer to display it would be a dependency bought for
-            // nothing. Wrapped, so long lines do not scroll sideways.
-            <pre className="problem-pane__prompt">{prompt}</pre>
+            // Rendered markdown, not raw source. It was `<pre>` first, on the
+            // reasoning that a renderer would be a dependency bought for nothing
+            // — but the dependency turned out to be unnecessary (see
+            // `markdown.ts`) and the raw `#`, `**` and fence lines were exactly
+            // what someone stares at for forty-five minutes.
+            <Markdown source={prompt} />
           )}
         </div>
       )}
