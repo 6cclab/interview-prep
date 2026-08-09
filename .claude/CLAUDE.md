@@ -36,6 +36,7 @@ pnpm bootstrap          # seed local/ (idempotent, never overwrites)
 pnpm test <problem>     # run one drill
 pnpm test               # everything, as a regression check
 pnpm reset <problem>    # restore stub.ts over solution.ts
+pnpm domains            # domains the exercise set covers; `--for <company>` to tailor
 pnpm mock:voice         # spoken behavioral drill
 pnpm mock:web           # React browser client (127.0.0.1) — builds, then serves.
                         # Serves BOTH spoken tracks. The landing page chooses;
@@ -139,6 +140,28 @@ The other tracks use the same idea with a different discriminator:
 Note what "ships red" means per track: coding and feature stubs throw
 `not implemented`; debugging exercises fail on assertions, because the bug is
 real code doing the wrong thing.
+
+## Tailoring to a company
+
+`debugging/`, `feature/` and `system-design/` exercises carry a `domains:` list
+in `meta.yaml` — neutral capability tags, deliberately **not** company names.
+`local/companies/<company>.md` declares that company's domains in a one-line
+HTML comment, and `pnpm domains --for <company>` intersects the two, ranking an
+exercise higher when it covers more of them.
+
+The indirection is the point, for two reasons:
+
+- Everything outside `local/` must be publishable un-redacted, so nothing
+  committed may name an employer. The naming lives in the gitignored research.
+- The research does not support naming questions. `/prep` caught and excluded
+  two fabrications researching one company, and the reports it trusted name a
+  single coding question. A domain is a claim about the *exercise*, checkable by
+  reading it; "company X asks this problem" is not, so the schema cannot say it.
+
+So this **selects from the authored set and never generates**. An empty result
+is a real answer — inventing an exercise to fill the gap is the failure mode the
+whole arrangement exists to prevent. `problems/` is excluded: its exercises are
+pattern drills, its `meta.yaml` carries `pattern:`, and that is a spoiler.
 
 ## job-search link
 

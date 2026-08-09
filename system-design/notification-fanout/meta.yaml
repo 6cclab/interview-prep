@@ -1,0 +1,4 @@
+title: Notification Fanout System
+domains:
+  - messaging-fanout
+  - stream-ingestion
