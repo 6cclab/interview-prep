@@ -508,11 +508,21 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         sendJson(res, 400, { error: `Unknown track: ${track}` })
         return
       }
-      const problems =
-        track === 'coding'
-          ? listCodingProblems(deps.root).map((problem) => problem.slug)
-          : listDesignProblems(deps.root)
-      sendJson(res, 200, { problems })
+      if (track !== 'coding') {
+        sendJson(res, 200, { problems: listDesignProblems(deps.root) })
+        return
+      }
+      // Slugs stay the payload's shape — the pattern is the spoiler and never
+      // leaves this process — with difficulty alongside as a separate map rather
+      // than folded into the entries. Keeping `problems` a bare string array
+      // means the design branch above and every existing client keep working
+      // unchanged, and a client that ignores `difficulties` still gets a
+      // complete, correct list.
+      const coding = listCodingProblems(deps.root)
+      sendJson(res, 200, {
+        problems: coding.map((problem) => problem.slug),
+        difficulties: Object.fromEntries(coding.map((problem) => [problem.slug, problem.difficulty])),
+      })
       return
     }
 

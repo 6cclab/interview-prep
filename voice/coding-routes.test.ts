@@ -45,6 +45,8 @@ function seedContext() {
   seed(`solutions/${PATTERN}/${SLUG}.md`, 'WORKED-SOLUTION-SPOILER two pointers converging')
   seed('patterns.md', 'PATTERNS-SPOILER two-pointers -> converge from both ends')
   seed('problems/elimination/celebrity/README.md', '# Celebrity\n')
+  seed(`problems/${PATTERN}/${SLUG}/meta.yaml`, `pattern: ${PATTERN}\ndifficulty: medium\n`)
+  seed('problems/elimination/celebrity/meta.yaml', 'pattern: elimination\ndifficulty: hard\n')
 }
 
 /** A vitest stand-in: writes the report a real run would have written. */
@@ -114,7 +116,36 @@ describe('GET /api/problems?track=coding', () => {
     const { port } = await listen(baseDeps())
     const res = await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ problems: ['celebrity', SLUG] })
+    expect(await res.json()).toEqual({
+      problems: ['celebrity', SLUG],
+      difficulties: { celebrity: 'hard', [SLUG]: 'medium' },
+    })
+  })
+
+  // The tier is what makes opening with a warm-up findable rather than a guess.
+  // A problem whose meta.yaml says nothing must still be listed and pickable.
+  it('reports a tier for every problem, unrated when meta.yaml does not say', async () => {
+    const bare = join(root, 'problems/trie/word-dictionary')
+    mkdirSync(bare, { recursive: true })
+    writeFileSync(join(bare, 'README.md'), '# Word dictionary\n')
+
+    const { port } = await listen(baseDeps())
+    const body = (await (await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)).json()) as {
+      problems: string[]
+      difficulties: Record<string, string>
+    }
+    expect(body.problems).toContain('word-dictionary')
+    expect(body.difficulties['word-dictionary']).toBe('unrated')
+    // Every listed problem carries a tier, so the client never has to guess.
+    expect(Object.keys(body.difficulties).sort()).toEqual([...body.problems].sort())
+  })
+
+  // The design track has no difficulty field, and its payload must not grow one
+  // — a client keying off `difficulties` being absent is how it stays a flat list.
+  it('sends no difficulties for the design track', async () => {
+    const { port } = await listen(baseDeps())
+    const body = (await (await fetch(`http://127.0.0.1:${port}/api/problems?track=design`)).json()) as object
+    expect(Object.keys(body)).toEqual(['problems'])
   })
 
   // The list is what populates the picker on screen. A pattern reaching it

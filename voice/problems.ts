@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { PROBLEM_SLUG } from './context'
 
@@ -23,10 +23,53 @@ export interface CodingProblem {
   slug: string
   /** The pattern directory it lives under. A spoiler — see the module comment. */
   pattern: string
+  /**
+   * The tier from `meta.yaml`, or `'unrated'` when the file omits it or names
+   * something unrecognised.
+   *
+   * Safe to show, unlike `pattern`: it says how hard the problem is, not what
+   * the answer looks like. It is here because the set is 20-odd medium problems
+   * and picking a warm-up out of an alphabetical list of slugs is guesswork —
+   * and after five years away, opening with a warm-up is the point.
+   */
+  difficulty: Difficulty
 }
 
+/** Ordered easiest first, which is the order the picker groups them in. */
+export const DIFFICULTIES = ['warmup', 'easy', 'medium', 'hard', 'unrated'] as const
+
+export type Difficulty = (typeof DIFFICULTIES)[number]
+
+/**
+ * The `difficulty:` line from a problem's `meta.yaml`.
+ *
+ * A regex rather than a YAML parser, and a deliberately narrow one: this reads a
+ * single scalar off a file whose only other consumer is a human. An unreadable
+ * or unrecognised file is `'unrated'` and never a throw — a malformed `meta.yaml`
+ * must not be able to empty the problem picker.
+ */
+function readDifficulty(dir: string): Difficulty {
+  let text: string
+  try {
+    text = readFileSync(join(dir, 'meta.yaml'), 'utf8')
+  } catch {
+    return 'unrated'
+  }
+  const found = /^difficulty:[ \t]*([a-z]+)[ \t]*$/im.exec(text)?.[1]
+  return DIFFICULTIES.includes(found as Difficulty) ? (found as Difficulty) : 'unrated'
+}
+
+/**
+ * Just enough of a problem to locate its directory.
+ *
+ * Separate from `CodingProblem` so that resolving a path never requires a
+ * difficulty: the test runner and the routes below build one of these from a
+ * slug and a pattern lookup, and they have no business knowing the tier.
+ */
+export type ProblemLocation = Pick<CodingProblem, 'slug' | 'pattern'>
+
 /** `problems/<pattern>/<problem>` for a resolved problem. Never shown to Andre. */
-export function problemDir(problem: CodingProblem): string {
+export function problemDir(problem: ProblemLocation): string {
   return `problems/${problem.pattern}/${problem.slug}`
 }
 
@@ -44,8 +87,9 @@ export function listCodingProblems(root: string): CodingProblem[] {
     if (!pattern.isDirectory() || !PROBLEM_SLUG.test(pattern.name)) continue
     for (const slug of readdirSync(join(base, pattern.name), { withFileTypes: true })) {
       if (!slug.isDirectory() || !PROBLEM_SLUG.test(slug.name)) continue
-      if (!existsSync(join(base, pattern.name, slug.name, 'README.md'))) continue
-      found.push({ slug: slug.name, pattern: pattern.name })
+      const dir = join(base, pattern.name, slug.name)
+      if (!existsSync(join(dir, 'README.md'))) continue
+      found.push({ slug: slug.name, pattern: pattern.name, difficulty: readDifficulty(dir) })
     }
   }
   return found.sort((a, b) => a.slug.localeCompare(b.slug))

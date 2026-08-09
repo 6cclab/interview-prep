@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from 'brutalkit/button'
 import type { Route } from '../route'
 import type { ProblemTrack } from '../types'
+import { easiest, groupByTier } from '../tiers'
 
 /**
  * The drill chooser.
@@ -37,11 +38,17 @@ type ListFailure = 'offline' | 'route' | null
 
 interface ProblemList {
   problems: string[]
+  /**
+   * Slug to tier, for the tracks that report one. Empty for the design track,
+   * which has no difficulty field, and empty for a coding server too old to send
+   * one — in both cases the picker falls back to a flat list.
+   */
+  difficulties: Record<string, string>
   selected: string
   failure: ListFailure
 }
 
-const EMPTY: ProblemList = { problems: [], selected: '', failure: null }
+const EMPTY: ProblemList = { problems: [], difficulties: {}, selected: '', failure: null }
 
 /**
  * One track's problem list, fetched once.
@@ -70,9 +77,13 @@ function useProblems(track: ProblemTrack): ProblemList {
       }
       try {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const { problems } = (await res.json()) as { problems: string[] }
+        const body = (await res.json()) as { problems: string[]; difficulties?: Record<string, string> }
+        const { problems } = body
         if (!live) return
-        setState({ problems, selected: problems[0] ?? '', failure: null })
+        // The easiest problem is the default where tiers are known, rather than
+        // whichever slug happens to sort first alphabetically.
+        const difficulties = body.difficulties ?? {}
+        setState({ problems, difficulties, selected: easiest(problems, difficulties), failure: null })
       } catch (error) {
         if (live) setState({ ...EMPTY, failure: 'route' })
         console.error(`voice: /api/problems?track=${track} returned something unusable`, error)
@@ -101,6 +112,7 @@ function ProblemTrackCard({ title, blurb, list, offline, buttonLabel, onStart }:
   // The list arrives asynchronously, so the default cannot be an initial value.
   const chosen = selected || list.selected
   const id = `home-problem-${title.replace(/\s+/g, '-').toLowerCase()}`
+  const groups = groupByTier(list.problems, list.difficulties)
 
   return (
     <section className="home__card">
@@ -117,11 +129,21 @@ function ProblemTrackCard({ title, blurb, list, offline, buttonLabel, onStart }:
           onChange={(event) => setSelected(event.target.value)}
         >
           {list.problems.length === 0 && <option value="">{list.failure ? 'Unavailable' : 'None found'}</option>}
-          {list.problems.map((problem) => (
-            <option key={problem} value={problem}>
-              {problem}
-            </option>
-          ))}
+          {groups
+            ? groups.map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.problems.map((problem) => (
+                    <option key={problem} value={problem}>
+                      {problem}
+                    </option>
+                  ))}
+                </optgroup>
+              ))
+            : list.problems.map((problem) => (
+                <option key={problem} value={problem}>
+                  {problem}
+                </option>
+              ))}
         </select>
         <Button variant="outline" disabled={offline || chosen === ''} onClick={() => onStart(chosen)}>
           {buttonLabel}

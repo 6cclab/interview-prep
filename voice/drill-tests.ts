@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
-import { stripPatternPaths, type CodingProblem, problemDir } from './problems'
+import { stripPatternPaths, type ProblemLocation, problemDir } from './problems'
 
 const run = promisify(execFile)
 
@@ -99,7 +99,7 @@ export function failedTestsFromJson(json: string): FailedTest[] {
 
 export interface DrillTestOptions {
   root: string
-  problem: CodingProblem
+  problem: ProblemLocation
   /**
    * Injectable so tests never spawn a real vitest. Contract: run the command and
    * leave vitest's JSON report at `reportPath` — the report, not a return value,
