@@ -1,0 +1,4 @@
+title: Make payment capture idempotent
+domains:
+  - payments
+  - idempotency
