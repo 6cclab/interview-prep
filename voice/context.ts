@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, normalize, sep } from 'node:path'
 
-export type Track = 'mock' | 'design'
+export type Track = 'mock' | 'design' | 'coding'
 
 /**
  * Paths the interviewer must never see. `.claude/rules/no-spoilers.md` states
@@ -39,7 +39,15 @@ export function assertNoSpoilers(paths: string[]): void {
  */
 export const PROBLEM_SLUG = /^[a-z0-9-]+$/
 
-export function allowedPaths(track: Track, problem?: string): string[] {
+/**
+ * The files an interviewer for this drill is allowed to read.
+ *
+ * `pattern` applies to the coding track only, where a problem's directory is
+ * `problems/<pattern>/<slug>`. It is validated like every other segment, and it
+ * must come from resolving a slug against disk (`problems.ts`) rather than from
+ * a client — the client never sends a pattern, because the pattern is the answer.
+ */
+export function allowedPaths(track: Track, problem?: string, pattern?: string): string[] {
   if (track === 'mock') {
     return [
       '.claude/commands/mock.md',
@@ -47,9 +55,21 @@ export function allowedPaths(track: Track, problem?: string): string[] {
       'behavioral/questions.md',
     ]
   }
-  if (!problem) throw new Error('A design drill needs a problem name.')
+  if (!problem) throw new Error(`A ${track} drill needs a problem name.`)
   if (!PROBLEM_SLUG.test(problem)) {
     throw new Error(`Invalid problem name: ${problem}`)
+  }
+  if (track === 'coding') {
+    if (!pattern) throw new Error('A coding drill needs its resolved pattern.')
+    if (!PROBLEM_SLUG.test(pattern)) {
+      throw new Error(`Invalid pattern name: ${pattern}`)
+    }
+    // No `solution.test.ts`: the suite is the objective standard and the
+    // interviewer does not need to read it to use it — `pnpm test` reports the
+    // verdict. Its comments explain fixture construction, and they have leaked
+    // an approach once already. No `meta.yaml` either; it names the pattern in a
+    // field, and the pattern reaches the prompt deliberately and once, below.
+    return ['.claude/commands/drill.md', `problems/${pattern}/${problem}/README.md`]
   }
   return [
     '.claude/commands/design.md',
@@ -79,8 +99,8 @@ export function competencyCoverage(root: string): { all: string[]; covered: stri
   return { all, covered }
 }
 
-export function buildSystemPrompt(root: string, track: Track, problem?: string): string {
-  const paths = allowedPaths(track, problem)
+export function buildSystemPrompt(root: string, track: Track, problem?: string, pattern?: string): string {
+  const paths = allowedPaths(track, problem, pattern)
   assertNoSpoilers(paths)
 
   const sections = paths.map((path) => {
@@ -128,6 +148,14 @@ export function buildSystemPrompt(root: string, track: Track, problem?: string):
     )
   }
 
+  if (track === 'coding') {
+    // The pattern, stated once and deliberately. The interviewer needs it to be
+    // able to give rung 2 of the hint ladder ("the pattern name, and nothing
+    // else") — an interviewer that does not know the answer cannot ration it.
+    // Everything about not volunteering it is in drill.md and restated below.
+    sections.push(`<pattern>${pattern}</pattern>`)
+  }
+
   if (track === 'design') {
     // design.md's live mode step 6 ends by saving the transcript and score to
     // local/designs/. You cannot write files, and the same gap on the mock
@@ -147,6 +175,39 @@ export function buildSystemPrompt(root: string, track: Track, problem?: string):
       'how long the conversation feels, and treat the time check as instruction',
       'to you, not as something he said — never read it aloud or refer to being',
       'told it.',
+    )
+  }
+
+  if (track === 'coding') {
+    // drill.md is written for a chat session with file tools: it says to run
+    // `pnpm reset`, paste the README, start a timer, run `pnpm test`, and append
+    // to the drill log. None of that is available here, and leaving those steps
+    // unreplaced is exactly how the mock track's whole story-log step ended up
+    // silently undone. So each one is reassigned below to what actually happens.
+    voiceMode.push(
+      '',
+      'You have no clock, no terminal and no files. What drill.md asks you to do',
+      'yourself is done for you instead:',
+      '',
+      'Step 2, pasting the README: he can already see the problem on screen. Do',
+      'not read it out. Open by asking him to tell you what the problem is asking',
+      'for, in his own words.',
+      '',
+      'Step 3, starting a timer: the clock runs on screen, and each turn you are',
+      'given is preceded by a time check. Treat that as instruction to you, not',
+      'as something he said — never read it aloud.',
+      '',
+      'Step 7, running the tests: he runs them, and you are given the result the',
+      'same way, as a bracketed note. React to it as an interviewer would.',
+      '',
+      'The drill log: you cannot write it. Everything you say is recorded and',
+      'saved, so say your verdict out loud instead — solved or not, the highest',
+      'hint rung he needed, and the one thing that actually went wrong.',
+      '',
+      'He is typing code in his own editor while he talks. Long silences are him',
+      'working, not him stuck: step 5 of drill.md still holds, and holds harder',
+      'out loud than in writing. Do not fill a pause, do not ask how it is going,',
+      'and do not comment on an attempt in progress.',
     )
   }
 

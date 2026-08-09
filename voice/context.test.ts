@@ -209,3 +209,60 @@ describe('buildSystemPrompt on the design track', () => {
     expect(prompt).not.toContain('WORKED-DESIGN-SPOILER')
   })
 })
+
+describe('buildSystemPrompt on the coding track', () => {
+  beforeEach(() => {
+    seed('.claude/commands/drill.md', 'DRILL COMMAND')
+    seed('problems/two-pointers/container-with-most-water/README.md', 'Given n heights, find the largest container.')
+    seed('problems/two-pointers/container-with-most-water/meta.yaml', 'pattern: two-pointers\ntitle: Container')
+    seed('problems/two-pointers/container-with-most-water/solution.test.ts', 'FIXTURE-RATIONALE-COMMENTS')
+  })
+
+  it('reads the prompt and the protocol, and nothing else from the problem directory', () => {
+    expect(allowedPaths('coding', 'container-with-most-water', 'two-pointers')).toEqual([
+      '.claude/commands/drill.md',
+      'problems/two-pointers/container-with-most-water/README.md',
+    ])
+  })
+
+  it('never reads meta.yaml or the test file', () => {
+    const prompt = buildSystemPrompt(root, 'coding', 'container-with-most-water', 'two-pointers')
+    expect(prompt).toContain('largest container')
+    // meta.yaml names the pattern in a field, and the test file's comments have
+    // leaked an approach once before.
+    expect(prompt).not.toContain('title: Container')
+    expect(prompt).not.toContain('FIXTURE-RATIONALE-COMMENTS')
+  })
+
+  // The interviewer is the one consumer that needs the pattern: rung 2 of the
+  // hint ladder is "the pattern name, and nothing else", and an interviewer that
+  // does not know the answer cannot ration it.
+  it('tells the interviewer the pattern, once and explicitly', () => {
+    const prompt = buildSystemPrompt(root, 'coding', 'container-with-most-water', 'two-pointers')
+    expect(prompt).toContain('<pattern>two-pointers</pattern>')
+  })
+
+  it('replaces every drill.md step that needs a tool it does not have', () => {
+    // Whitespace-normalised: the prompt is hard-wrapped for readability, so a
+    // phrase can straddle a newline. The wrapping is presentational and asserting
+    // through it would make the test break on a reflow rather than on a change of
+    // meaning.
+    const prompt = buildSystemPrompt(root, 'coding', 'container-with-most-water', 'two-pointers').replace(/\s+/g, ' ')
+    expect(prompt).toMatch(/no clock/i)
+    expect(prompt).toMatch(/he runs them/i) // step 7, the tests
+    expect(prompt).toMatch(/cannot write it/i) // the drill log
+    expect(prompt).toMatch(/do not read it out/i) // step 2, the README
+    // The behaviour most easily lost out loud: silence is him typing.
+    expect(prompt).toMatch(/long silences are him working/i)
+    // The other tracks' mechanisms have no business here.
+    expect(prompt).not.toContain('story-log')
+  })
+
+  it('refuses a coding drill with no resolved pattern', () => {
+    expect(() => allowedPaths('coding', 'container-with-most-water')).toThrow(/resolved pattern/i)
+  })
+
+  it.each(['../elimination', '/etc', 'Two-Pointers', ''])('refuses the pattern %j', (pattern) => {
+    expect(() => allowedPaths('coding', 'container-with-most-water', pattern)).toThrow()
+  })
+})
