@@ -174,15 +174,50 @@ problem hands the solver an expensive operation:
   `problems/elimination/celebrity/solution.test.ts` for why this matters and
   how it's built.
 - **Scale test** — no oracle exists, so use an input large enough that the
-  brute force cannot finish inside Vitest's 10s timeout while the reference
-  finishes in well under a second. Require at least two orders of magnitude
-  of margin between the two. Generate the input deterministically with
-  `mulberry32`/`seededTrials` from `test-utils/random.ts` rather than
-  `Math.random()`, so the suite stays reproducible.
+  brute force takes tens of seconds while the reference finishes in well under
+  a second. Require at least two orders of magnitude of margin between the two.
+  Generate the input deterministically with `mulberry32`/`seededTrials` from
+  `test-utils/random.ts` rather than `Math.random()`, so the suite stays
+  reproducible.
+
+  **The `testTimeout` does not enforce this — the elapsed-time assertion does.**
+  Vitest cannot preempt synchronous JavaScript, so a brute force that blocks the
+  event loop runs to completion and *then* reports; a measured case here ran 48s
+  inside a 10s timeout and still returned a result. Every scale test therefore
+  asserts `elapsed` explicitly, and the 10s timeout only catches the async ones.
+
+  **Size the fixture by measuring, never by eye.** `max-sum-window` was authored
+  at n = 200,000 with k = 50,000, and the from-scratch solution *passed* it in
+  four seconds; the cost is `(n - k + 1) * k`, maximised at `k = n/2`, which is
+  where it sits now. This is exactly what the three-way proof below is for.
 
 When authoring a new problem, prove the suite three ways before committing: it
 must fail a wrong solution, fail a brute-force solution, and pass the reference.
 A suite a brute-force answer passes is broken, whatever the reference does.
+
+### The warm-up tier
+
+`meta.yaml` carries `difficulty:` — `warmup`, `easy`, `medium` or `hard` — and
+**`warmup` is a deliberate exemption from the rule above.** Those suites check
+correctness only.
+
+The exemption exists because the rule, applied strictly, excludes every classic
+opener: reverse a linked list, valid anagram, max depth of a tree, valid
+palindrome. None of them has an asymptotically-worse-but-correct approach to
+reject, so none can carry a cost gap — and after five years away, those are
+exactly the reps that need doing. Interviews open with them too, so drilling
+them is drilling the real thing.
+
+Keep the exemption visible rather than quiet. A warm-up's test file opens with a
+comment saying it is correctness-only and why, its README says there is no
+hidden cost trap, and its `meta.yaml` `budget:` line points back here. A drill
+that silently lacks teeth is indistinguishable from a broken suite; one that says
+so is a different exercise.
+
+Every other tier is bound by the rule. `easy` means *easy insight with a real
+cost gap*, not *no insight* — `two-sum-sorted`, `contains-duplicate`,
+`valid-parentheses`, `climbing-stairs`, `max-sum-window` and
+`range-sum-queries` all reject a brute force.
 
 The other tracks use the same idea with a different discriminator:
 

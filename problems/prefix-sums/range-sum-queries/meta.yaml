@@ -1,0 +1,9 @@
+pattern: prefix-sums
+title: Range Sum Queries
+difficulty: easy
+budget: scale test — 200,000 wide queries over 200,000 values, where summing each range costs 10^10 additions, must finish well under 5s
+companies:
+  - name: unknown
+    confidence: low
+    source: a standard easy interview problem; no company-specific report
+    date: "general"

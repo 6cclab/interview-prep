@@ -1,0 +1,9 @@
+pattern: two-pointers
+title: Two Sum (Sorted)
+difficulty: easy
+budget: scale test — a 500,000-element array whose only answer sits at the far end must finish well under 5s
+companies:
+  - name: unknown
+    confidence: low
+    source: a standard easy interview problem; no company-specific report
+    date: "general"

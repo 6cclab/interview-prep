@@ -1,0 +1,9 @@
+pattern: dp-1d
+title: Climbing Stairs
+difficulty: easy
+budget: scale test — n = 77, where re-deriving each subproblem from scratch is exponential, must finish well under 5s
+companies:
+  - name: unknown
+    confidence: low
+    source: a standard easy interview problem; no company-specific report
+    date: "general"

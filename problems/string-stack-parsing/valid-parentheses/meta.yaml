@@ -1,0 +1,9 @@
+pattern: string-stack-parsing
+title: Valid Parentheses
+difficulty: easy
+budget: scale test — 200,000 characters nested 100,000 deep, where repeated pair-removal is quadratic, must finish well under 5s
+companies:
+  - name: unknown
+    confidence: low
+    source: a standard easy interview problem; no company-specific report
+    date: "general"

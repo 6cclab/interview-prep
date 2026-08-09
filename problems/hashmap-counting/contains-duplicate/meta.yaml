@@ -1,0 +1,9 @@
+pattern: hashmap-counting
+title: Contains Duplicate
+difficulty: easy
+budget: scale test — 500,000 shuffled distinct values, the worst case for pairwise comparison, must finish well under 5s
+companies:
+  - name: unknown
+    confidence: low
+    source: a standard easy interview problem; no company-specific report
+    date: "general"

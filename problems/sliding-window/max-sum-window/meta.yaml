@@ -1,0 +1,9 @@
+pattern: sliding-window
+title: Maximum Sum of a Fixed Window
+difficulty: easy
+budget: scale test — 500,000 values with a window of 250,000 (the size that maximises the from-scratch cost at 6.25*10^10 additions) must finish well under 5s
+companies:
+  - name: unknown
+    confidence: low
+    source: a standard easy interview problem; no company-specific report
+    date: "general"
