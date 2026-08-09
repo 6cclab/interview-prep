@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react'
+import type { ProblemTrack } from '../types'
 
 /**
- * The design track's problem statement, on screen for the whole drill.
+ * A timed track's problem statement, on screen for the whole drill.
  *
- * This is the reason the design track waited for a browser at all: in the
- * terminal the prompt scrolls away the moment the conversation starts, and a
- * 45-minute design interview where you cannot re-read the question is testing
- * the wrong thing. A real whiteboard interview leaves the prompt up.
+ * This is the reason both these tracks waited for a browser at all: in the
+ * terminal the prompt scrolls away the moment the conversation starts, and an
+ * interview where you cannot re-read the question is testing the wrong thing. A
+ * real whiteboard or screen-share interview leaves the prompt up.
  *
- * It renders `GET /api/problems/:problem`, which serves `README.md` alone —
- * never the rubric (the dimensions being scored) and never `reference.md` (a
- * worked design, and a spoiler the server refuses outright). See the route.
+ * It renders `GET /api/problems/:problem?track=`, which serves `README.md` alone
+ * — for design, never the rubric (the dimensions being scored) and never
+ * `reference.md` (a worked design the server refuses outright); for coding,
+ * never anything that names the pattern, including the path the file was read
+ * from. See the route.
  *
  * Collapsible, because the transcript is the other thing competing for this
  * screen and a long prompt should not push it out of view for the whole drill.
@@ -18,9 +21,10 @@ import { useEffect, useState } from 'react'
 
 interface Props {
   problem: string
+  track: ProblemTrack
 }
 
-export function ProblemPane({ problem }: Props) {
+export function ProblemPane({ problem, track }: Props) {
   const [prompt, setPrompt] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   const [open, setOpen] = useState(true)
@@ -31,7 +35,7 @@ export function ProblemPane({ problem }: Props) {
     setFailed(false)
     void (async () => {
       try {
-        const res = await fetch(`/api/problems/${encodeURIComponent(problem)}`)
+        const res = await fetch(`/api/problems/${encodeURIComponent(problem)}?track=${track}`)
         if (!res.ok) throw new Error(String(res.status))
         const body = (await res.json()) as { prompt: string }
         if (live) setPrompt(body.prompt)
@@ -44,7 +48,7 @@ export function ProblemPane({ problem }: Props) {
     return () => {
       live = false
     }
-  }, [problem])
+  }, [problem, track])
 
   return (
     <section className="problem-pane" aria-label="Problem statement">

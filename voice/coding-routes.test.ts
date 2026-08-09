@@ -217,7 +217,7 @@ describe('POST /api/session for the coding track', () => {
       body: JSON.stringify({ track: 'coding' }),
     })
     expect(res.status).toBe(400)
-    expect((await res.json()).error).toMatch(/coding drill needs a problem/)
+    expect(((await res.json()) as { error: string }).error).toMatch(/coding drill needs a problem/)
   })
 
   it('reopens with the drill it was started with', async () => {
@@ -337,10 +337,12 @@ describe('POST /api/session/:id/tests', () => {
     await fetch(`http://127.0.0.1:${port}/api/session/session-1/tests`, { method: 'POST' })
     await readSSE(stream) // the reaction's sentence
     await readSSE(stream) // the reaction's entry, so it is definitely committed
-    const state = await (await fetch(`http://127.0.0.1:${port}/api/session/session-1`)).json()
-    expect(state.entries.filter((e: { speaker: string }) => e.speaker === 'andre')).toEqual([])
+    const state = (await (await fetch(`http://127.0.0.1:${port}/api/session/session-1`)).json()) as {
+      entries: { speaker: string }[]
+    }
+    expect(state.entries.filter((e) => e.speaker === 'andre')).toEqual([])
     // The interviewer's reaction *was* spoken, so it is in the record.
-    expect(state.entries.filter((e: { speaker: string }) => e.speaker === 'interviewer').length).toBe(2)
+    expect(state.entries.filter((e) => e.speaker === 'interviewer').length).toBe(2)
   })
 
   // The bracketed note is scaffolding Andre never heard — same rule as the
@@ -438,7 +440,7 @@ describe('POST /api/session/:id/tests', () => {
     await startCodingSession(port)
     const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/tests`, { method: 'POST' })
     expect(res.status).toBe(200)
-    expect((await res.json()).kind).toBe('errored')
+    expect(((await res.json()) as { kind: string }).kind).toBe('errored')
   })
 })
 
@@ -447,7 +449,7 @@ describe('the coding transcript', () => {
     const { port } = await listen(baseDeps())
     await startCodingSession(port)
     const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/end`, { method: 'POST' })
-    const { relPath } = await res.json()
+    const { relPath } = (await res.json()) as { relPath: string }
     expect(relPath).toMatch(new RegExp(`^local/drills/${SLUG}-live-`))
     expect(relPath).not.toContain(PATTERN)
   })

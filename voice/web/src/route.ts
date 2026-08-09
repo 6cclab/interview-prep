@@ -5,28 +5,32 @@ import type { Drill } from './types'
  * Which view the page is showing, parsed from `location.hash`.
  *
  * Hash routing, and no router dependency. The alternative — React Router — buys
- * nested routes, loaders and data APIs for a two-view single-user localhost tool,
+ * nested routes, loaders and data APIs for a single-user localhost tool with four views,
  * and the web spec's "zero new dependencies" is a judgement about exactly this
  * kind of tool. The hash also avoids needing the server to serve `index.html`
  * for arbitrary paths, which is a second thing not to have to get right.
  *
- * `home` is the drill chooser. `mock` and `design` are the drill screen — the
- * same screen, configured differently — so a reload lands back on the drill you
- * were doing rather than a generic start page.
+ * `home` is the drill chooser. Every other view is the drill screen — the same
+ * screen, configured differently — so a reload lands back on the drill you were
+ * doing rather than a generic start page.
  */
-export type Route = { view: 'home' } | { view: 'mock' } | { view: 'design'; problem: string }
+export type Route =
+  | { view: 'home' }
+  | { view: 'mock' }
+  | { view: 'design'; problem: string }
+  | { view: 'coding'; problem: string }
 
 /** The route's drill, or `null` on `home`. What `start()` is called with. */
 export function routeDrill(route: Route): Drill | null {
   if (route.view === 'home') return null
   if (route.view === 'mock') return { track: 'mock' }
-  return { track: 'design', problem: route.problem }
+  return { track: route.view, problem: route.problem }
 }
 
 export function routeHash(route: Route): string {
   if (route.view === 'home') return '#/'
   if (route.view === 'mock') return '#/mock'
-  return `#/design/${encodeURIComponent(route.problem)}`
+  return `#/${route.view}/${encodeURIComponent(route.problem)}`
 }
 
 // Mirrors the server's `PROBLEM_SLUG` (voice/context.ts). A hash is user-editable
@@ -38,19 +42,19 @@ export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#\/?/, '')
   if (path === '' || path === 'home') return { view: 'home' }
   if (path === 'mock') return { view: 'mock' }
-  const design = /^design\/([^/]+)$/.exec(path)
-  if (design) {
+  const withProblem = /^(design|coding)\/([^/]+)$/.exec(path)
+  if (withProblem) {
     let problem: string
     try {
-      problem = decodeURIComponent(design[1]!)
+      problem = decodeURIComponent(withProblem[2]!)
     } catch {
       // A malformed escape sequence in a hand-edited URL.
       return { view: 'home' }
     }
-    if (PROBLEM_SLUG.test(problem)) return { view: 'design', problem }
+    if (PROBLEM_SLUG.test(problem)) return { view: withProblem[1] as 'design' | 'coding', problem }
   }
   // An unknown route is the chooser, not a blank screen or an error: there is
-  // always somewhere sensible to be in a two-view app.
+  // always somewhere sensible to be.
   return { view: 'home' }
 }
 

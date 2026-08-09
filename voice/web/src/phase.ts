@@ -33,14 +33,18 @@ export function wallClock(date: Date): string {
 }
 
 /**
- * The design track's budget in minutes, for display before a session exists.
+ * A timed track's budget in minutes, for display before a session exists.
  *
- * Mirrors `DESIGN_BUDGET_MS` in voice/context.ts, which is the authority — the
- * client cannot import server code. It is display only: once a drill starts the
- * countdown runs off the `budgetMs` the server actually reported, so a drift
- * here would show the wrong number on the Idle screen and nowhere else.
+ * Mirrors `DESIGN_BUDGET_MS` and `CODING_BUDGET_MS` in voice/context.ts, which
+ * are the authority — the client cannot import server code. Both are 45, so one
+ * constant covers them; if they ever diverge this has to become per-track rather
+ * than quietly showing one track the other's number.
+ *
+ * Display only: once a drill starts the countdown runs off the `budgetMs` the
+ * server actually reported, so a drift here would show the wrong number on the
+ * Idle screen and nowhere else.
  */
-export const DESIGN_BUDGET_MINUTES = 45
+export const TIMED_BUDGET_MINUTES = 45
 
 export interface ErrorCopy {
   title: string
