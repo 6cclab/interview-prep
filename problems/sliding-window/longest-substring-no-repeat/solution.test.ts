@@ -54,10 +54,12 @@ describe('lengthOfLongestSubstring — scale', () => {
    * doesn't look like a suspiciously tidy sequential run.
    *
    * At this size the reference approach finishes in low single-digit
-   * milliseconds; a genuinely quadratic scan takes on the order of ten
-   * seconds or more —
-   * comfortably past Vitest's 10s test timeout, with several orders of
-   * magnitude of margin between the two.
+   * milliseconds — measured at 7ms — while a genuinely quadratic scan takes
+   * 15.6s: three orders of magnitude of margin.
+   *
+   * The elapsed-time assertion below is what fails it, NOT the 10s testTimeout
+   * — Vitest cannot preempt synchronous JavaScript. See ".claude/CLAUDE.md" >
+   * "Tests encode the insight".
    */
   it('finishes well within the timeout on a large, all-distinct input', () => {
     const n = 30_000

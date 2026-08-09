@@ -35,10 +35,13 @@ describe('maxArea — correctness', () => {
 describe('maxArea — scale', () => {
   /**
    * A brute force that checks every pair is O(n^2). At n = 200,000 that's
-   * 4*10^10 pair evaluations — orders of magnitude too slow to finish inside
-   * Vitest's 10s timeout, while the reference approach finishes in well
-   * under a second. That gap is what this test is for; it is not a performance
+   * 2*10^10 pair evaluations, measured at 30.2s, against 6ms for the reference
+   * approach. That gap is what this test is for; it is not a performance
    * micro-benchmark.
+   *
+   * The elapsed-time assertion below is what fails it, NOT the 10s testTimeout
+   * — Vitest cannot preempt synchronous JavaScript. See ".claude/CLAUDE.md" >
+   * "Tests encode the insight".
    *
    * The array can't just be n random numbers, though — with no way to
    * independently compute the true maximum at this size, there would be

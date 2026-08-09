@@ -69,10 +69,14 @@ describe('KthLargest — scale', () => {
    * O(m * n log n) for m adds against a history that grows to size n. With
    * an initial history of INITIAL_SIZE and ADDS further calls, the history
    * grows past 100,000 entries and there are 100,000 more sorts to do —
-   * on the order of 10^11 comparisons in total. That cannot finish inside
-   * Vitest's 10s timeout, let alone the 5s budget asserted below, while the
-   * reference approach finishes in a small fraction of a second: several
-   * orders of magnitude of margin.
+   * on the order of 10^11 comparisons in total. Measured: the re-sorting
+   * version was still running after four minutes and had to be killed, against
+   * 34ms for the reference approach.
+   *
+   * The 5s budget asserted below is what fails it, NOT the 10s testTimeout —
+   * Vitest cannot preempt synchronous JavaScript, so a blocking brute force
+   * runs to completion and only then reports. See ".claude/CLAUDE.md" > "Tests
+   * encode the insight".
    *
    * The stream is generated deterministically via `mulberry32` so the
    * suite is reproducible. Expected values are NOT computed by re-running

@@ -39,9 +39,13 @@ describe('minEatingSpeed — correctness', () => {
 
 describe('minEatingSpeed — scale', () => {
   // No expensive oracle exists here (unlike celebrity's knows()), so the
-  // discriminator is wall-clock: an input large enough that scanning
-  // candidate speeds upward from 1 cannot finish inside Vitest's 10s
-  // timeout, while a reference solution finishes in well under a second.
+  // discriminator is wall-clock: an input large enough that scanning candidate
+  // speeds upward from 1 takes tens of seconds, while a reference solution
+  // finishes in about a millisecond. Measured: 41.7s for the linear scan.
+  //
+  // The elapsed-time assertion below is what fails it, NOT the 10s testTimeout
+  // — Vitest cannot preempt synchronous JavaScript. See ".claude/CLAUDE.md" >
+  // "Tests encode the insight".
   //
   // The trap with a scale test built from a big array is that the array
   // itself dominates runtime for every approach, drowning out the
@@ -67,11 +71,9 @@ describe('minEatingSpeed — scale', () => {
 
     expect(result).toBe(PILE_SIZE)
 
-    // The reference solution finishes in well under a second; a linear
-    // scan of candidate speeds cannot finish this input inside Vitest's
-    // 10s timeout at all, so this bound is not tight against the
-    // reference — it exists as a sanity ceiling, and the timeout is the
-    // real backstop against the brute force.
+    // Not tight against the reference, which finishes in about a millisecond —
+    // this is a sanity ceiling, and it is the only thing standing between a
+    // 42-second linear scan and a green suite.
     expect(elapsedMs).toBeLessThan(5000)
   })
 })

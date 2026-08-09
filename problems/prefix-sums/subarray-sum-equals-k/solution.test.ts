@@ -51,11 +51,14 @@ describe('subarraySum — correctness', () => {
 })
 
 describe('subarraySum — scale', () => {
-  // No expensive oracle exists for this problem (unlike celebrity's
-  // knows()), so the discriminator here is wall-clock: an array long
-  // enough that summing every subarray (O(n^2)) cannot finish inside
-  // Vitest's 10s timeout, while the reference approach finishes in
-  // single-digit milliseconds.
+  // No expensive oracle exists for this problem (unlike celebrity's knows()),
+  // so the discriminator here is wall-clock: an array long enough that summing
+  // every subarray (O(n^2)) takes tens of seconds, while the reference approach
+  // finishes in single-digit milliseconds.
+  //
+  // The elapsed-time assertion below is what fails it, NOT the 10s testTimeout
+  // — Vitest cannot preempt synchronous JavaScript. See ".claude/CLAUDE.md" >
+  // "Tests encode the insight".
   //
   // The array is generated deterministically with mulberry32 rather than
   // Math.random() so the suite is reproducible. The expected count was NOT
@@ -66,9 +69,10 @@ describe('subarraySum — scale', () => {
   // over the identical generated array, and the two agreed exactly. The
   // result is hard-coded below.
   //
-  // Measured while authoring this drill: the O(n^2) brute force took
-  // ~16.1s over this array (already over budget), while the reference
-  // O(n) approach took ~8ms — roughly three orders of magnitude apart.
+  // Measured while authoring this drill: the O(n^2) brute force took ~16.1s
+  // over this array, while the reference O(n) approach took ~8ms — roughly
+  // three orders of magnitude apart. Re-measured since, on the same fixture:
+  // 14.9s and 17ms.
   it('stays well under the timeout on a large array', () => {
     const SEED = 0xc0ffee42
     const N = 250_000
