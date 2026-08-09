@@ -6,7 +6,7 @@ import type { ErrorKind, Mode, Phase } from './types'
  * tracks — see the comment on `Phase` in types.ts for why no new hook state
  * was needed for this.
  */
-export function derivePhase(mode: Mode, interviewerSpeaking: boolean): Phase {
+export function derivePhase(mode: Mode, interviewerSpeaking: boolean, awaitingInterviewer: boolean): Phase {
   switch (mode) {
     case 'idle':
       return 'idle'
@@ -14,10 +14,18 @@ export function derivePhase(mode: Mode, interviewerSpeaking: boolean): Phase {
       return 'requesting'
     case 'recording':
       return 'recording'
+    case 'transcribing':
+      return 'transcribing'
     case 'ended':
       return 'ended'
     case 'listening-to-interviewer':
-      return interviewerSpeaking ? 'speaking' : 'ready'
+      // Three states share this mode, and the order matters. Speaking wins: once
+      // a sentence has arrived the reply is audibly under way. Otherwise a reply
+      // that is owed but has not started is `thinking` — the case that used to
+      // fall through to `ready` and put "Start answer" on screen before the
+      // question existed. Only with nothing owed is it genuinely his turn.
+      if (interviewerSpeaking) return 'speaking'
+      return awaitingInterviewer ? 'thinking' : 'ready'
   }
 }
 
@@ -102,4 +110,6 @@ export const ANNOUNCEMENTS = {
   ready: 'Interviewer finished. Press space to start your answer.',
   ended: 'Session ended. Transcript saved.',
   turnSaved: (duration: string): string => `Answer saved, ${duration}. Interviewer is preparing a reply.`,
+  transcribing: 'Answer recorded. Transcribing it now — nothing is being recorded.',
+  thinking: 'Transcribed. Waiting for the interviewer to reply.',
 }

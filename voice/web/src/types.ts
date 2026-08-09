@@ -1,13 +1,42 @@
-export type Mode = 'idle' | 'listening-to-interviewer' | 'requesting-mic' | 'recording' | 'ended'
+export type Mode =
+  | 'idle'
+  | 'listening-to-interviewer'
+  | 'requesting-mic'
+  | 'recording'
+  /**
+   * The answer has been recorded and is being uploaded and transcribed.
+   *
+   * Its own mode because `recording` used to cover it: `stopAndSubmit` stopped
+   * the recorder, set a status string, and left the mode at `recording` until
+   * the fetch resolved — so for the several seconds transcription takes, the
+   * primary control still read "End answer" and was still live, over a frozen
+   * timer.
+   */
+  | 'transcribing'
+  | 'ended'
 
 /**
- * The design handoff's five-state model. Derived from `Mode` plus
- * `interviewerSpeaking` in `derivePhase` (App.tsx) — `listening-to-interviewer`
- * conflates the handoff's `ready` and `speaking`, and the hook already tracks
- * `interviewerSpeaking` separately, so splitting on that is enough; no new
- * hook state was needed for this.
+ * What the screen is doing. Derived from `Mode` plus `interviewerSpeaking` and
+ * `awaitingInterviewer` in `derivePhase` (see phase.ts).
+ *
+ * Started as the design handoff's five states. Two more were added because the
+ * five silently covered waits: `listening-to-interviewer` meant both "the
+ * interviewer is generating a reply" and "your turn", so the primary control
+ * invited an answer to a question that had not been asked yet — and the same
+ * state was entered the moment a session started, before the opening question
+ * existed. A wait the UI does not name is a wait the user reads as a hang.
  */
-export type Phase = 'idle' | 'requesting' | 'ready' | 'recording' | 'speaking' | 'ended'
+export type Phase =
+  | 'idle'
+  | 'requesting'
+  | 'ready'
+  | 'recording'
+  /** Uploading and transcribing the answer just given. */
+  | 'transcribing'
+  /** Transcribed; the interviewer is generating a reply but has not spoken yet. */
+  | 'thinking'
+  | 'speaking'
+  | 'ended'
 
 /**
  * The four first-class error banners from the handoff. Each maps to a real

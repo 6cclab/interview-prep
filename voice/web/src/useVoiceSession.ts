@@ -9,6 +9,8 @@ export interface VoiceSession {
   elapsedSeconds: number
   /** True while the interviewer's reply is actively streaming in as sentences. Display only. */
   interviewerSpeaking: boolean
+  /** A reply is owed but has not started arriving. See the state's comment. */
+  awaitingInterviewer: boolean
   /**
    * Sentences of the interviewer's in-progress reply, one per `sentence` SSE
    * event, oldest first. Cleared the moment the matching `entry` event lands
@@ -271,6 +273,16 @@ export function useVoiceSession(): VoiceSession {
   const [entries, setEntries] = useState<Entry[]>([])
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [interviewerSpeaking, setInterviewerSpeaking] = useState(false)
+  /**
+   * A reply is owed but has not started arriving.
+   *
+   * Separate from `interviewerSpeaking`, which only becomes true once the first
+   * `sentence` lands. The gap between those two is real — a session start or a
+   * submitted turn, then several seconds of generation — and without this flag
+   * that gap derived to `ready`, so the screen said "your turn" while the
+   * interviewer had not asked anything.
+   */
+  const [awaitingInterviewer, setAwaitingInterviewer] = useState(false)
   const [interimSentences, setInterimSentences] = useState<string[]>([])
   const [sessionConflict, setSessionConflict] = useState(false)
   const [micUnsupported] = useState(mediaDevicesUnsupported)
@@ -450,6 +462,8 @@ export function useVoiceSession(): VoiceSession {
       const { text } = JSON.parse((event as MessageEvent<string>).data) as { text: string }
       setStatus('Interviewer speaking…')
       setInterviewerSpeaking(true)
+      // The wait is over the moment the first sentence lands.
+      setAwaitingInterviewer(false)
       // Appends for the *current* reply only — cleared below the moment the
       // matching `entry` lands. Display only, same spoiler boundary as
       // `entries`: this text originates from the same `sentence` payload the
@@ -478,6 +492,7 @@ export function useVoiceSession(): VoiceSession {
       const { endedEarly } = JSON.parse((event as MessageEvent<string>).data) as { endedEarly: string | null }
       setStatus(endedEarly ? `Session ended early: ${endedEarly}` : 'Session ended.')
       setInterviewerSpeaking(false)
+      setAwaitingInterviewer(false)
       setInterimSentences([])
       es.close()
       setMode('ended')
@@ -545,6 +560,9 @@ export function useVoiceSession(): VoiceSession {
       setEntries([])
       setInterviewerSpeaking(false)
       setInterimSentences([])
+      // The opening question is owed before the stream has said a word, so this
+      // is set alongside the connect rather than after the first sentence.
+      setAwaitingInterviewer(true)
       connectStream(started.id)
       setMode('listening-to-interviewer')
 
@@ -600,6 +618,9 @@ export function useVoiceSession(): VoiceSession {
       setDeadlineAt(state.budgetMs === undefined ? null : Date.parse(state.startedAt) + state.budgetMs)
       setEntries(state.entries)
       setInterviewerSpeaking(false)
+      // Nothing is owed on a reopen: the question that was asked is already in
+      // `state.entries`, so this is his move, not a wait.
+      setAwaitingInterviewer(false)
       setInterimSentences([])
       setSessionConflict(false)
       setStuckSession(null)
@@ -717,6 +738,9 @@ export function useVoiceSession(): VoiceSession {
       // forced a fresh permission-adjacent `getUserMedia` call every turn.
 
       const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType })
+      // Before the upload, not after: this is what takes the primary control out
+      // of "End answer" for the duration of the round trip.
+      setMode('transcribing')
       setStatus('Transcribing…')
       const id = sessionIdRef.current
       if (!id) return
@@ -735,10 +759,13 @@ export function useVoiceSession(): VoiceSession {
         // stays held (see mediaStreamRef) so "Answer again" can re-record
         // without a fresh permission prompt.
         setMode('listening-to-interviewer')
+        // No reply is coming — the turn failed, so the next move is his.
+        setAwaitingInterviewer(false)
         setTranscriptFailed(true)
         return
       }
       setMode('listening-to-interviewer')
+      setAwaitingInterviewer(true)
       // Clears a prior turn's transcription error: recording again is one of
       // the ways out of that state (the primary action stays live under the
       // banner), so a success here has resolved it just as "Answer again" would.
@@ -965,6 +992,7 @@ export function useVoiceSession(): VoiceSession {
     entries,
     elapsedSeconds,
     interviewerSpeaking,
+    awaitingInterviewer,
     interimSentences,
     micUnsupported,
     sessionConflict,

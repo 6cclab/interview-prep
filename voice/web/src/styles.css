@@ -692,6 +692,33 @@ body {
   color: var(--muted-foreground);
   box-shadow: none;
   cursor: default;
+  /* Clips the sweeping bar below to the control's own box. */
+  position: relative;
+  overflow: hidden;
+}
+
+/* An indeterminate progress bar, because there is no percentage to report: the
+   waits here are a permission prompt, a transcription and a model generating,
+   none of which expose progress. A dashed border alone reads as "disabled",
+   which is the wrong message — the drill is working, not broken. */
+.primary--wait::after {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-end: 0;
+  block-size: 4px;
+  inline-size: 35%;
+  background: var(--muted-foreground);
+  animation: waitSweep 1.4s ease-in-out infinite;
+}
+
+@keyframes waitSweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
 }
 
 @media (max-width: 720px) {
@@ -744,6 +771,15 @@ body {
   .dock__dot--recording,
   .turn__caret {
     animation: none;
+  }
+
+  /* The bar stops rather than disappearing: it is the only visual sign that a
+     wait is a wait and not a dead control, so removing it outright would take
+     the indicator away from the people who asked for less motion, not less
+     information. It sits still, full width, as a plain rule. */
+  .primary--wait::after {
+    animation: none;
+    inline-size: 100%;
   }
 }
 

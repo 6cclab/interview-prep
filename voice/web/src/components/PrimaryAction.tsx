@@ -16,12 +16,23 @@ interface Props {
 // look this control needs. `Button` is used everywhere the handoff itself
 // uses it — see Header.tsx, Dock.tsx, ErrorBanner.tsx.
 export function PrimaryAction({ phase, onPress }: Props) {
-  if (phase === 'requesting' || phase === 'speaking') {
-    const label = phase === 'requesting' ? 'Waiting for microphone' : 'Interviewer speaking'
+  // Every phase where the drill is doing something and pressing would be wrong.
+  // Rendered as a non-button so there is nothing to press: the transcribing case
+  // used to leave a live "End answer" here for the several seconds transcription
+  // takes, which invited a second press against an already-stopped recorder.
+  const WAITING: Partial<Record<Phase, { label: string; hint: string }>> = {
+    requesting: { label: 'Waiting for microphone', hint: 'Please wait' },
+    transcribing: { label: 'Transcribing your answer', hint: 'Not recording' },
+    thinking: { label: 'Interviewer is thinking', hint: 'Please wait' },
+    speaking: { label: 'Interviewer speaking', hint: 'Please wait' },
+  }
+
+  const waiting = WAITING[phase]
+  if (waiting) {
     return (
-      <div className="primary primary--wait" aria-disabled="true">
-        <span className="primary__label">{label}</span>
-        <span className="primary__hint">Please wait</span>
+      <div className="primary primary--wait" aria-disabled="true" aria-busy="true">
+        <span className="primary__label">{waiting.label}</span>
+        <span className="primary__hint">{waiting.hint}</span>
       </div>
     )
   }

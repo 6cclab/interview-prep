@@ -37,6 +37,14 @@ interface Props {
 type ListFailure = 'offline' | 'route' | null
 
 interface ProblemList {
+  /**
+   * Whether the fetch is still in flight.
+   *
+   * Needed because "no problems" and "not yet asked" both looked like an empty
+   * array, and the picker rendered the empty case — so a slow list said "None
+   * found", which is a claim rather than a wait.
+   */
+  loading: boolean
   problems: string[]
   /**
    * Slug to tier, for the tracks that report one. Empty for the design track,
@@ -48,7 +56,9 @@ interface ProblemList {
   failure: ListFailure
 }
 
-const EMPTY: ProblemList = { problems: [], difficulties: {}, selected: '', failure: null }
+const EMPTY: ProblemList = { loading: false, problems: [], difficulties: {}, selected: '', failure: null }
+
+const LOADING: ProblemList = { ...EMPTY, loading: true }
 
 /**
  * One track's problem list, fetched once.
@@ -59,10 +69,13 @@ const EMPTY: ProblemList = { problems: [], difficulties: {}, selected: '', failu
  * is perfectly fine.
  */
 function useProblems(track: ProblemTrack): ProblemList {
-  const [state, setState] = useState<ProblemList>(EMPTY)
+  const [state, setState] = useState<ProblemList>(LOADING)
 
   useEffect(() => {
     let live = true
+    // Re-entered whenever `track` changes, so this resets rather than leaving the
+    // previous track's list on screen under a new heading.
+    setState(LOADING)
     void (async () => {
       let res: Response
       try {
@@ -83,7 +96,7 @@ function useProblems(track: ProblemTrack): ProblemList {
         // The easiest problem is the default where tiers are known, rather than
         // whichever slug happens to sort first alphabetically.
         const difficulties = body.difficulties ?? {}
-        setState({ problems, difficulties, selected: easiest(problems, difficulties), failure: null })
+        setState({ loading: false, problems, difficulties, selected: easiest(problems, difficulties), failure: null })
       } catch (error) {
         if (live) setState({ ...EMPTY, failure: 'route' })
         console.error(`voice: /api/problems?track=${track} returned something unusable`, error)
@@ -126,9 +139,12 @@ function ProblemTrackCard({ title, blurb, list, offline, buttonLabel, onStart }:
           id={id}
           value={chosen}
           disabled={list.problems.length === 0}
+          aria-busy={list.loading}
           onChange={(event) => setSelected(event.target.value)}
         >
-          {list.problems.length === 0 && <option value="">{list.failure ? 'Unavailable' : 'None found'}</option>}
+          {list.problems.length === 0 && (
+            <option value="">{list.loading ? 'Loading…' : list.failure ? 'Unavailable' : 'None found'}</option>
+          )}
           {groups
             ? groups.map((group) => (
                 <optgroup key={group.label} label={group.label}>
@@ -145,8 +161,8 @@ function ProblemTrackCard({ title, blurb, list, offline, buttonLabel, onStart }:
                 </option>
               ))}
         </select>
-        <Button variant="outline" disabled={offline || chosen === ''} onClick={() => onStart(chosen)}>
-          {buttonLabel}
+        <Button variant="outline" disabled={offline || list.loading || chosen === ''} onClick={() => onStart(chosen)}>
+          {list.loading ? 'Loading…' : buttonLabel}
         </Button>
       </div>
       {/* Only for a server that answered badly. The offline case is covered by

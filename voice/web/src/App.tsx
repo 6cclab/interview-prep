@@ -91,6 +91,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     entries,
     elapsedSeconds,
     interviewerSpeaking,
+    awaitingInterviewer,
     interimSentences,
     errorKind,
     dismissError,
@@ -127,7 +128,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   const [micCheckOpen, setMicCheckOpen] = useState(false)
   const [deviceSettingsOpen, setDeviceSettingsOpen] = useState(false)
 
-  const phase = derivePhase(mode, interviewerSpeaking)
+  const phase = derivePhase(mode, interviewerSpeaking, awaitingInterviewer)
   const timed = route.view === 'design' || route.view === 'coding'
   // Narrowing once, so the header and the pane do not each re-derive it.
   const problem = 'problem' in route ? route.problem : ''
@@ -251,9 +252,10 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     if (prev !== phase) {
       if (phase === 'requesting') setAnnouncement(ANNOUNCEMENTS.requesting)
       else if (phase === 'recording') setAnnouncement(ANNOUNCEMENTS.recording)
-      else if (phase === 'speaking' && prev === 'recording') {
+      else if (phase === 'transcribing' && prev === 'recording') {
         setAnnouncement(ANNOUNCEMENTS.turnSaved(fmt(pendingDurationRef.current ?? 0)))
-      } else if (phase === 'speaking') setAnnouncement(ANNOUNCEMENTS.speaking)
+      } else if (phase === 'thinking') setAnnouncement(ANNOUNCEMENTS.thinking)
+      else if (phase === 'speaking') setAnnouncement(ANNOUNCEMENTS.speaking)
       else if (phase === 'ready' && prev === 'speaking') setAnnouncement(ANNOUNCEMENTS.ready)
       else if (phase === 'ended') setAnnouncement(ANNOUNCEMENTS.ended)
       prevPhaseRef.current = phase
@@ -356,6 +358,12 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   } else if (phase === 'recording') {
     statusTitle = 'Recording your answer'
     statusDetail = 'Press the button, or space, when you have finished. Silence does not end the turn.'
+  } else if (phase === 'transcribing') {
+    statusTitle = 'Transcribing your answer'
+    statusDetail = 'The recording has stopped and is being turned into text. Nothing is being recorded.'
+  } else if (phase === 'thinking') {
+    statusTitle = 'Interviewer is thinking'
+    statusDetail = 'Your answer went through. The reply is being written and will start speaking on its own.'
   } else if (phase === 'speaking') {
     statusTitle = 'Interviewer is speaking'
     statusDetail = 'The reply is being spoken and written out as it goes.'
