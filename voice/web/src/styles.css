@@ -877,9 +877,10 @@ body {
   max-width: 60ch;
 }
 
-/* The coding track's test runner (TestVerdict). Lives in the dock stack, so it
-   shares the dock's measure and sits where every other action already is. */
-.test-verdict {
+/* The coding track's tools (CodingTools) — hint ladder and test runner. Lives in
+   the dock stack, so it shares the dock's measure and sits where every other
+   action already is. */
+.coding-tools {
   width: 100%;
   max-width: 820px;
   margin: 0 auto;
@@ -889,20 +890,24 @@ body {
   gap: 10px;
 }
 
-.test-verdict__row {
+.coding-tools__row {
   display: flex;
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
 }
 
-.test-verdict__hint {
-  font-size: 0.8rem;
+/* The help already taken, stated plainly. Mono because it is a count, and the
+   same face every other metric on this screen uses. */
+.coding-tools__rung {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
   color: var(--muted-foreground);
-  max-width: 52ch;
 }
 
-.test-verdict__result {
+.coding-tools__result {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -914,34 +919,34 @@ body {
   background: var(--muted);
 }
 
-.test-verdict__result--green {
+.coding-tools__result--green {
   border-left-color: var(--brand, currentColor);
 }
 
 /* A right answer that costs too much. Deliberately not styled as a failure —
    it is a working brute force, which is a real checkpoint. */
-.test-verdict__result--cost {
+.coding-tools__result--cost {
   border-left-color: #b8860b;
 }
 
-.test-verdict__result--wrong,
-.test-verdict__result--errored {
+.coding-tools__result--wrong,
+.coding-tools__result--errored {
   border-left-color: #b3261e;
 }
 
-.test-verdict__headline {
+.coding-tools__headline {
   font-family: var(--font-mono);
   font-size: 13px;
   letter-spacing: 0.02em;
 }
 
-.test-verdict__body {
+.coding-tools__body {
   font-size: 0.85rem;
   color: var(--muted-foreground);
   max-width: 68ch;
 }
 
-.test-verdict__failed {
+.coding-tools__failed {
   margin: 2px 0 0;
   padding-left: 18px;
   display: flex;

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Server } from 'node:http'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
@@ -441,6 +441,322 @@ describe('POST /api/session/:id/tests', () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/tests`, { method: 'POST' })
     expect(res.status).toBe(200)
     expect(((await res.json()) as { kind: string }).kind).toBe('errored')
+  })
+})
+
+describe('POST /api/session/:id/hint', () => {
+  /** Records what the interviewer was fed, so the cue can be asserted on. */
+  function capturing(fed: string[]): Partial<VoiceServerDeps> {
+    return {
+      createTransport: () => async function* (_system, messages) {
+        fed.push(String(messages.at(-1)?.content ?? ''))
+        yield 'Think about what you can rule out.'
+      },
+    }
+  }
+
+  it('advances exactly one rung per request, and reports the rung', async () => {
+    const { port } = await listen(baseDeps())
+    await startCodingSession(port)
+    for (const expected of [1, 2, 3, 4]) {
+      const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/hint`, { method: 'POST' })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ rung: expected })
+    }
+  })
+
+  // Rung 4 is the full worked solution: there is nothing further to give. Asking
+  // again is not an error, though — a 409 would leave the button looking broken at
+  // the moment he is most stuck.
+  it('clamps at the last rung rather than refusing', async () => {
+    const { port } = await listen(baseDeps())
+    await startCodingSession(port)
+    for (let i = 0; i < 6; i++) {
+      const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/hint`, { method: 'POST' })
+      expect(res.status).toBe(200)
+    }
+    const state = (await (await fetch(`http://127.0.0.1:${port}/api/session/session-1`)).json()) as {
+      hintRung: number
+    }
+    expect(state.hintRung).toBe(4)
+  })
+
+  // The ladder's whole value is that it is rationed. A model asked for "a hint"
+  // over-delivers, so the cue names one rung and quotes it verbatim.
+  it('tells the interviewer which single rung is owed, and to stop there', async () => {
+    const fed: string[] = []
+    const { port } = await listen(baseDeps(capturing(fed)))
+    await startCodingSession(port)
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/session-1/stream`)
+    await readSSE(stream)
+    await readSSE(stream)
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/hint`, { method: 'POST' })
+    await readSSE(stream)
+    expect(fed.at(-1)).toContain('[Hint request, for you only: give rung 1')
+    expect(fed.at(-1)).toContain('does not name the pattern')
+    expect(fed.at(-1)).toMatch(/not the one above it/)
+  })
+
+  // Rung 2 IS the pattern name, so it is the one rung whose cue must contain it.
+  it('names the pattern only at rung 2', async () => {
+    const fed: string[] = []
+    const { port } = await listen(baseDeps(capturing(fed)))
+    await startCodingSession(port)
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/session-1/stream`)
+    await readSSE(stream)
+    await readSSE(stream)
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/hint`, { method: 'POST' })
+    await readSSE(stream)
+    await readSSE(stream)
+    expect(fed.at(-1)).not.toContain('pattern name')
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/hint`, { method: 'POST' })
+    await readSSE(stream)
+    expect(fed.at(-1)).toContain('the pattern name, and nothing else')
+  })
+
+  it('makes the interviewer deliver it out loud', async () => {
+    const { port } = await listen(baseDeps())
+    await startCodingSession(port)
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/session-1/stream`)
+    await readSSE(stream)
+    await readSSE(stream)
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/hint`, { method: 'POST' })
+    expect(await readSSE(stream)).toMatchObject({ event: 'sentence', data: { speaker: 'interviewer' } })
+  })
+
+  // He pressed a button; he said nothing. Same rule as a test run.
+  it('writes no Andre entry, and keeps the cue out of the transcript', async () => {
+    const { port } = await listen(baseDeps())
+    await startCodingSession(port)
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/session-1/stream`)
+    await readSSE(stream)
+    await readSSE(stream)
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/hint`, { method: 'POST' })
+    await readSSE(stream)
+    await readSSE(stream)
+    const state = (await (await fetch(`http://127.0.0.1:${port}/api/session/session-1`)).json()) as {
+      entries: { speaker: string; text: string }[]
+    }
+    expect(state.entries.filter((e) => e.speaker === 'andre')).toEqual([])
+    expect(JSON.stringify(state.entries)).not.toContain('Hint request')
+  })
+
+  it.each(['mock', 'design'] as const)('400s on the %s track, which has no ladder', async (track) => {
+    const { port } = await listen(baseDeps())
+    await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(track === 'mock' ? { track } : { track, problem: 'rate-limiter' }),
+    })
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/hint`, { method: 'POST' })
+    expect(res.status).toBe(400)
+  })
+
+  it('404s for a session that does not exist', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/nope/hint`, { method: 'POST' })
+    expect(res.status).toBe(404)
+  })
+})
+
+describe('the drill log a spoken coding drill writes', () => {
+  /** An interviewer that closes with the drill-log trailer, as its prompt tells it to. */
+  function closing(trailer: string): Partial<VoiceServerDeps> {
+    return {
+      createTransport: () => async function* () {
+        yield `That is the one. ${trailer}`
+      },
+    }
+  }
+
+  const TRAILER = '```drill-log\nsolved: yes\nnote: found the elimination pass, forgot to verify\n```'
+
+  function logBody(): string {
+    return readFileSync(join(root, 'local/drill-log.md'), 'utf8')
+  }
+
+  /**
+   * Drive the opening turn to completion.
+   *
+   * The trailer is read off `interviewer.lastRaw()`, which only exists once the
+   * interviewer has actually spoken — and the opening turn does not run until a
+   * client connects to the stream. Ending a session that never had one leaves
+   * nothing to parse, which is correct behaviour and not what these tests are for.
+   */
+  async function begin(port: number): Promise<Response> {
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/session-1/stream`)
+    await readSSE(stream) // the opening sentence
+    await readSSE(stream) // its entry, so the reply is complete
+    return stream
+  }
+
+  // The gap this closes: /status reads exactly one log to find rusty patterns, and
+  // a spoken drill used to append nothing at all to it.
+  it('appends a row in the same table /drill writes', async () => {
+    const { port } = await listen(baseDeps(closing(TRAILER)))
+    await startCodingSession(port)
+    await begin(port)
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/end`, { method: 'POST' })
+    expect(await res.json()).toMatchObject({ drillLogWritten: true })
+    expect(logBody()).toContain('| Date | Problem | Pattern | Solved | Hints | Time | Note |')
+    expect(logBody()).toContain(`| ${SLUG} | ${PATTERN} | yes | 0 | 00:00 | found the elimination pass, forgot to verify |`)
+  })
+
+  // The hint count is the server's, not the interviewer's — it is the number
+  // /status uses to tell rust from coverage, so it is a measurement.
+  it('records the rungs actually taken, not a number the interviewer recalled', async () => {
+    const { port } = await listen(
+      baseDeps(closing('```drill-log\nsolved: yes\nnote: needed no help at all\n```')),
+    )
+    await startCodingSession(port)
+    await begin(port)
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/hint`, { method: 'POST' })
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/hint`, { method: 'POST' })
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/end`, { method: 'POST' })
+    expect(logBody()).toContain('| yes | 2 | 00:00 |')
+  })
+
+  it('reads solved: no as unsolved', async () => {
+    const { port } = await listen(baseDeps(closing('```drill-log\nsolved: no\nnote: never found the invariant\n```')))
+    await startCodingSession(port)
+    await begin(port)
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/end`, { method: 'POST' })
+    expect(logBody()).toContain('| no | 0 |')
+  })
+
+  // A solve wrongly logged as a miss re-queues a pattern; a miss wrongly logged as
+  // a solve removes it from the queue and rots the signal. So anything that is not
+  // an explicit yes is a no.
+  it.each(['maybe', 'partially', 'true', ''])('treats solved: %j as unsolved', async (value) => {
+    const { port } = await listen(baseDeps(closing(`\`\`\`drill-log\nsolved: ${value}\nnote: n\n\`\`\``)))
+    await startCodingSession(port)
+    await begin(port)
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/end`, { method: 'POST' })
+    expect(logBody()).toContain('| no | 0 |')
+  })
+
+  it('never speaks the trailer', async () => {
+    const { port } = await listen(baseDeps(closing(TRAILER)))
+    await startCodingSession(port)
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/session-1/stream`)
+    const sentence = await readSSE(stream)
+    expect(JSON.stringify(sentence)).not.toContain('drill-log')
+    expect(JSON.stringify(sentence)).not.toContain('solved:')
+  })
+
+  // The transcript is still the product of the drill. Losing a log row costs one
+  // data point in /status; refusing to save the recording would lose the session.
+  it('still saves the transcript when the interviewer emits no trailer', async () => {
+    const { port } = await listen(baseDeps(closing('no trailer here')))
+    await startCodingSession(port)
+    await begin(port)
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/end`, { method: 'POST' })
+    const body = (await res.json()) as { relPath: string; drillLogWritten: boolean }
+    expect(body.drillLogWritten).toBe(false)
+    expect(existsSync(join(root, body.relPath))).toBe(true)
+  })
+
+  // The gap this closes: the trailer is instructed for the interviewer's *final*
+  // turn, and <voice-mode> frames that as time running out. Most drills end with
+  // the button instead, so before this the log row existed only for the drills
+  // that ran the full forty-five minutes.
+  it('drives a closing turn on end, so a drill ended early still logs', async () => {
+    const fed: string[] = []
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* (_system, messages) {
+          fed.push(String(messages.at(-1)?.content ?? ''))
+          yield `Good enough. ${TRAILER}`
+        },
+      }),
+    )
+    await startCodingSession(port)
+    await begin(port)
+    const before = fed.length
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/end`, { method: 'POST' })
+    expect(await res.json()).toMatchObject({ drillLogWritten: true })
+    // One more interviewer turn than had run before the request.
+    expect(fed.length).toBe(before + 1)
+    expect(fed.at(-1)).toContain('this is your final turn')
+  })
+
+  it('records the closing verdict in the transcript, and not its cue', async () => {
+    const { port } = await listen(baseDeps(closing(TRAILER)))
+    await startCodingSession(port)
+    await begin(port)
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/end`, { method: 'POST' })
+    const { relPath } = (await res.json()) as { relPath: string }
+    const transcript = readFileSync(join(root, relPath), 'utf8')
+    expect(transcript).toContain('That is the one.')
+    expect(transcript).not.toContain('final turn')
+    expect(transcript).not.toContain('drill-log')
+  })
+
+  // "End session" must always end the session. Blocking on another turn, or racing
+  // it, is worse than losing one log row.
+  it('still ends, without a closing turn, when a turn is already in flight', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const { port } = await listen(
+      baseDeps({
+        ...closing(TRAILER),
+        runDrillTests: async (a, cwd, reportPath) => {
+          await gate
+          await reports([])(a, cwd, reportPath)
+        },
+      }),
+    )
+    await startCodingSession(port)
+    await begin(port)
+    const running = fetch(`http://127.0.0.1:${port}/api/session/session-1/tests`, { method: 'POST' })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/end`, { method: 'POST' })
+    expect(res.status).toBe(200)
+    release()
+    await running
+  })
+
+  it('does not drive a closing turn on the other tracks', async () => {
+    const fed: string[] = []
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* (_system, messages) {
+          fed.push(String(messages.at(-1)?.content ?? ''))
+          yield 'Tell me about a disagreement.'
+        },
+      }),
+    )
+    await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    await begin(port)
+    const before = fed.length
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/end`, { method: 'POST' })
+    expect(fed.length).toBe(before)
+  })
+
+  it('does not write a drill-log row for the other tracks', async () => {
+    const { port } = await listen(baseDeps(closing(TRAILER)))
+    await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    await begin(port)
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/end`, { method: 'POST' })
+    expect(await res.json()).toMatchObject({ drillLogWritten: false })
+    expect(existsSync(join(root, 'local/drill-log.md'))).toBe(false)
+  })
+
+  // A pipe in the note would split the row into extra columns and corrupt the
+  // table for every reader after it.
+  it('escapes a pipe in the note rather than breaking the table', async () => {
+    const { port } = await listen(
+      baseDeps(closing('```drill-log\nsolved: yes\nnote: used a | b instead of a || b\n```')),
+    )
+    await startCodingSession(port)
+    await begin(port)
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/end`, { method: 'POST' })
+    const row = logBody().split('\n').find((line) => line.includes('instead of'))!
+    expect(row).toContain('a \\| b')
+    // Seven columns, so the row still parses as one row.
+    expect(row.split(/(?<!\\)\|/)).toHaveLength(9)
   })
 })
 

@@ -2,7 +2,16 @@ import type { Interviewer } from './interviewer'
 import type { Recorder } from './audio'
 import type { Speaker, Transcriber } from './speech'
 import type { Track } from './context'
-import { appendStoryLog, formatSession, sessionPath, splitTrailer, writeSession, type Entry } from './transcript'
+import {
+  appendDrillLog,
+  appendStoryLog,
+  formatSession,
+  sessionPath,
+  splitDrillLog,
+  splitTrailer,
+  writeSession,
+  type Entry,
+} from './transcript'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -145,11 +154,26 @@ export interface FinishOptions {
   track: Track
   problem?: string
   startedAt: Date
+  /**
+   * The coding track's drill-log facts, which the interviewer is not asked to
+   * recall — see `DrillLog`. Absent on the other tracks, which have no such log.
+   */
+  drill?: {
+    pattern: string
+    hints: number
+    elapsedMs: number
+  }
 }
 
 export interface FinishResult {
   relPath: string
   storyLogWritten: boolean
+  /**
+   * Whether a `local/drill-log.md` row was appended. False when the interviewer
+   * emitted no usable trailer — the transcript is still saved either way, so a
+   * missing row costs the `/status` signal for one drill and nothing else.
+   */
+  drillLogWritten: boolean
 }
 
 export function finishSession(session: Session, interviewer: Interviewer, opts: FinishOptions): FinishResult {
@@ -169,7 +193,26 @@ export function finishSession(session: Session, interviewer: Interviewer, opts: 
       storyLogWritten = true
     }
   }
-  return { relPath, storyLogWritten }
+
+  let drillLogWritten = false
+  if (opts.track === 'coding' && opts.problem && opts.drill) {
+    // Only the interviewer's judgement comes from the trailer. The row's facts
+    // come from `opts.drill`, which the server counted.
+    const { log } = splitDrillLog(interviewer.lastRaw())
+    if (log) {
+      appendDrillLog(opts.root, {
+        startedAt: opts.startedAt,
+        problem: opts.problem,
+        pattern: opts.drill.pattern,
+        solved: log.solved,
+        hints: opts.drill.hints,
+        elapsedMs: opts.drill.elapsedMs,
+        note: log.note,
+      })
+      drillLogWritten = true
+    }
+  }
+  return { relPath, storyLogWritten, drillLogWritten }
 }
 
 export interface SessionDeps {

@@ -12,7 +12,7 @@ import { DeviceSettings } from './components/DeviceSettings'
 import { Home } from './components/Home'
 import { HomeHeader } from './components/HomeHeader'
 import { ProblemPane } from './components/ProblemPane'
-import { TestVerdict } from './components/TestVerdict'
+import { CodingTools } from './components/CodingTools'
 import { routeDrill, routeHash, useRoute, type Route } from './route'
 import { useTheme } from './theme'
 import { derivePhase, fmt, wallClock, stuckBody, TIMED_BUDGET_MINUTES, ERROR_COPY, ANNOUNCEMENTS } from './phase'
@@ -106,6 +106,9 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     runTests,
     verdict,
     testsRunning,
+    askForHint,
+    hintRung,
+    hintPending,
     drill,
     remainingSeconds,
     starting,
@@ -128,6 +131,9 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   const timed = route.view === 'design' || route.view === 'coding'
   // Narrowing once, so the header and the pane do not each re-derive it.
   const problem = 'problem' in route ? route.problem : ''
+  // A session exists to act on. Withheld before and after, because a live button
+  // that 404s is worse than a disabled one.
+  const live = phase !== 'idle' && phase !== 'ended'
 
   // The session clock ("8:34 session" in the header) is client-side display
   // only — the wire carries no session-duration field (see the handoff
@@ -451,16 +457,17 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
           )}
           {/* The coding track only. Sits in the dock rather than beside the
               problem so it is in the same place as every other action, and stays
-              on screen through `ended` so the last verdict is still readable
-              while the interviewer delivers its closing. `onRun` is withheld
-              until a session exists — there is nothing to run tests against, and
-              a live button that 404s is worse than a disabled one. */}
+              on screen through `ended` so the last verdict and the hint count are
+              still readable while the interviewer delivers its closing. */}
           {route.view === 'coding' && (
             <div className="dock-stack__row">
-              <TestVerdict
+              <CodingTools
                 verdict={verdict}
                 running={testsRunning}
-                onRun={phase === 'idle' || phase === 'ended' ? undefined : runTests}
+                hintRung={hintRung}
+                hintPending={hintPending}
+                onRun={live ? runTests : undefined}
+                onHint={live ? askForHint : undefined}
               />
             </div>
           )}
