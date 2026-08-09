@@ -1018,16 +1018,94 @@ body {
   padding-bottom: 16px;
 }
 
-.problem-pane__prompt {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 13px;
+/* The rendered problem statement (Markdown.tsx). Prose in the body face, code in
+   the mono one — the prompt was previously one undifferentiated monospace block,
+   which is why the markers were the only structure visible. */
+.md {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 0.9rem;
   line-height: 1.6;
-  /* The prompt is a committed markdown file, shown as written. Wrapped rather
-     than side-scrolling: a horizontally scrolling problem statement is unusable
-     mid-interview. */
-  white-space: pre-wrap;
+  /* Long identifiers in constraint lines wrap rather than widening the pane; a
+     horizontally scrolling problem statement is unusable mid-interview. */
   overflow-wrap: break-word;
+}
+
+.md__h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.md__h2 {
+  margin: 8px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-foreground);
+}
+
+.md__p {
+  margin: 0;
+  max-width: 74ch;
+}
+
+.md__list {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 74ch;
+  /* Stated explicitly because the CSS reset in use strips `list-style` from every
+     list. Without this the numbers vanished — and "1. knows nobody / 2. everybody
+     knows them" is a numbered list because the numbers carry meaning, so losing
+     them loses part of the problem statement. */
+  list-style-position: outside;
+}
+
+ul.md__list {
+  list-style-type: disc;
+}
+
+ol.md__list {
+  list-style-type: decimal;
+}
+
+.md__list::marker,
+.md__list li::marker {
+  color: var(--muted-foreground);
+}
+
+.md__code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  padding: 1px 4px;
+  border-radius: 2px;
+  /* A tint of the text colour, not a token. `--border` was the first choice and
+     was wrong in a way only a browser showed: it is Brutalkit's heavy *border*
+     colour, dark in both themes, so in light mode every inline code span rendered
+     as a black bar over black text — the whole prompt redacted. Mixing from
+     currentColor is correct in either theme by construction. */
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.md__pre {
+  margin: 2px 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--border);
+  background: var(--background);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  /* Examples and signatures are laid out by hand, so they keep their own line
+     breaks and scroll inside this block rather than being wrapped. */
+  white-space: pre;
+  overflow-x: auto;
 }
 
 .problem-pane__note {
