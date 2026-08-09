@@ -257,6 +257,14 @@ const MIC_WATCHDOG_MESSAGE =
   'level (macOS: System Settings → Privacy & Security → Microphone). This request is still pending ' +
   'and will proceed on its own if access is granted.'
 
+/**
+ * Consecutive stream failures before saying so.
+ *
+ * One is routine: a reconnect is a supported path and recovers on its own. Two in
+ * a row means it is not recovering, which is worth telling someone mid-drill.
+ */
+const STREAM_FAILURES_BEFORE_REPORTING = 2
+
 export function useVoiceSession(): VoiceSession {
   const [mode, setMode] = useState<Mode>('idle')
   const [status, setStatus] = useState('Idle.')
@@ -309,6 +317,8 @@ export function useVoiceSession(): VoiceSession {
   // from the render it was created in and let a second press through.
   const testsRunningRef = useRef(false)
   const hintPendingRef = useRef(false)
+  // Consecutive `EventSource` failures — see the error handler in `connectStream`.
+  const streamFailuresRef = useRef(0)
   const eventSourceRef = useRef<EventSource | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
@@ -405,6 +415,36 @@ export function useVoiceSession(): VoiceSession {
     eventSourceRef.current?.close()
     const es = new EventSource(`/api/session/${id}/stream`)
     eventSourceRef.current = es
+
+    // Without this the page lies. `EventSource` retries a failed connection
+    // forever and silently, so a stream that will never come back — the server
+    // was restarted, and sessions live in memory, so the id is simply gone —
+    // left the screen looking perfectly live while every action 404'd. Nothing
+    // told anyone; it just stopped.
+    //
+    // A single failure is not reported, because a reconnect is normal and
+    // recoverable (see the reconnect handling in the /stream route). Only a run
+    // of them means the stream is actually dead.
+    es.addEventListener('error', () => {
+      // `CLOSED` means the browser has given up entirely and will not retry.
+      if (es.readyState === EventSource.CLOSED) {
+        setStatus('The connection to the drill server closed and will not reopen. Reload the page to start again.')
+        streamFailuresRef.current = 0
+        return
+      }
+      streamFailuresRef.current += 1
+      if (streamFailuresRef.current < STREAM_FAILURES_BEFORE_REPORTING) return
+      setStatus(
+        'Lost the connection to the drill server — still retrying. If the server was restarted this session is ' +
+          'gone; reload the page to start a new one.',
+      )
+    })
+
+    // A message of any kind proves the stream is alive again.
+    const clearFailures = () => {
+      streamFailuresRef.current = 0
+    }
+    es.addEventListener('open', clearFailures)
 
     es.addEventListener('sentence', (event) => {
       const { text } = JSON.parse((event as MessageEvent<string>).data) as { text: string }
