@@ -4,7 +4,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { record } from './audio'
-import { claudeCliStream } from './claude-cli'
+import { claudeCliStream, DEFAULT_CLAUDE_MODEL } from './claude-cli'
+import { chooseBackend, describeBackend } from './backend'
+import { DEFAULT_OLLAMA_MODEL, ollamaStream } from './ollama'
 import { timeCue, buildSystemPrompt, type Track } from './context'
 import { listInputDevices, listOutputDevices, readDeviceConfig } from './devices'
 import { anthropicStream, createInterviewer, type StreamFn } from './interviewer'
@@ -37,18 +39,26 @@ function resolveDevices(root: string): { input?: string; output?: string } {
 }
 
 /**
- * The API key is the signal: set it and the drill spends Console credits
- * through the Messages API; leave it unset and it spends Claude subscription
- * quota through the already-authenticated `claude` CLI instead. Printed at
- * startup so a drill never silently spends the wrong one.
+ * The transport for this track, and what it spends, printed so a drill never
+ * silently comes out of the wrong pocket.
+ *
+ * Chosen per track by `voice/backend.ts` — the same selection the browser
+ * server uses, so `VOICE_BACKEND_DESIGN=ollama` means the same thing whether
+ * the design drill is run here or in the browser.
  */
-function chooseTransport(): StreamFn {
-  if (process.env.ANTHROPIC_API_KEY) {
-    console.log('Transport: Anthropic Messages API (spending Console credits)')
-    return anthropicStream(new Anthropic())
+function chooseTransport(track: Track): StreamFn {
+  const backend = chooseBackend(track)
+  if (backend === 'ollama') {
+    console.log(describeBackend('ollama', process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL))
+    return ollamaStream()
   }
-  console.log('Transport: claude CLI (spending Claude subscription quota)')
-  return claudeCliStream()
+  const model = process.env.VOICE_CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL
+  if (backend === 'api') {
+    console.log(describeBackend('api', model))
+    return anthropicStream(new Anthropic(), model)
+  }
+  console.log(describeBackend('cli', model))
+  return claudeCliStream({ model })
 }
 
 async function printDevices(): Promise<void> {
@@ -86,7 +96,7 @@ async function main(): Promise<void> {
   const startedAt = new Date()
   const started = Date.now()
 
-  const interviewer = createInterviewer(buildSystemPrompt(root, track, problem), chooseTransport())
+  const interviewer = createInterviewer(buildSystemPrompt(root, track, problem), chooseTransport(track))
 
   if (!devices.input) {
     // Silently defaulting here is the trap: an unconfigured index can point at

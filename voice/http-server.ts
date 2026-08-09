@@ -20,7 +20,9 @@ import {
 import { findCodingProblem, listCodingProblems, problemDir } from './problems'
 import { runDrillTests, verdictCue } from './drill-tests'
 import { createInterviewer, anthropicStream, type StreamFn } from './interviewer'
-import { claudeCliStream } from './claude-cli'
+import { claudeCliStream, DEFAULT_CLAUDE_MODEL } from './claude-cli'
+import { backendSummary, chooseBackend, describeBackend } from './backend'
+import { DEFAULT_OLLAMA_MODEL, ollamaStream, preloadOllama } from './ollama'
 import { createSession, finishSession } from './session'
 import { createSessionStore, type Drill, type RetainedAudio, type SessionStore, type StoredSession } from './session-store'
 import { whisperTranscriber, saySpeaker, type Speaker, type Transcriber } from './speech'
@@ -33,7 +35,14 @@ import { listOutputDevices, readDeviceConfig, writeDeviceConfig, type Device, ty
 
 export interface VoiceServerDeps {
   root: string
-  createTransport(): StreamFn
+  /**
+   * The interviewer transport for a session on `track`.
+   *
+   * Takes the track because the backend is chosen per track — see
+   * `voice/backend.ts`. Tests pass a zero-argument stub, which stays
+   * assignable.
+   */
+  createTransport(track: Track): StreamFn
   transcriber: Transcriber
   store?: SessionStore
   /** Milliseconds since the epoch, injectable so tests don't depend on wall time. */
@@ -653,7 +662,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         sendJson(res, 400, { error: errorMessage(error) })
         return
       }
-      const interviewer = createInterviewer(system, deps.createTransport())
+      const interviewer = createInterviewer(system, deps.createTransport(drill.track))
       const session = createSession({
         interviewer,
         now: () => entryClock(),
@@ -1195,13 +1204,54 @@ function configuredSpeaker(root: string): Speaker {
   }
 }
 
-function chooseTransport(): StreamFn {
-  if (process.env.ANTHROPIC_API_KEY) {
-    console.log('Transport: Anthropic Messages API (spending Console credits)')
-    return anthropicStream(new Anthropic())
+/**
+ * The interviewer's transport for one session, chosen by that session's track.
+ *
+ * Per track rather than per process because the tracks tolerate a weaker model
+ * very differently — see `voice/backend.ts` for the reasoning and the
+ * environment variables. Called at session creation, so changing a variable
+ * takes effect on the next drill without a restart.
+ */
+function chooseTransport(track: Track): StreamFn {
+  const backend = chooseBackend(track)
+  if (backend === 'ollama') {
+    const model = process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL
+    console.log(`${track}: ${describeBackend('ollama', model)}`)
+    return ollamaStream()
   }
-  console.log('Transport: claude CLI (spending Claude subscription quota)')
-  return claudeCliStream()
+  const model = process.env.VOICE_CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL
+  if (backend === 'api') {
+    console.log(`${track}: ${describeBackend('api', model)}`)
+    return anthropicStream(new Anthropic(), model)
+  }
+  console.log(`${track}: ${describeBackend('cli', model)}`)
+  return claudeCliStream({ model })
+}
+
+/**
+ * Prints each track's backend at boot, and warms ollama if any track uses it.
+ *
+ * The listing is not decoration: the backend is per track, so a hybrid is the
+ * expected arrangement, and a hybrid you cannot see is one you will
+ * misattribute a bad drill to. An invalid value throws here — at startup,
+ * before a drill — rather than at the first turn.
+ *
+ * The preload is fire-and-forget. A first ollama request has to pull the model
+ * into memory, measured at ~168s for an 18GB model; doing it now means the
+ * drill's first turn does not sit in silence for three minutes. It reports
+ * rather than throws, because a cold cache is slow and an unstarted server is
+ * useless.
+ */
+function announceBackends(): void {
+  const backends = backendSummary()
+  const claudeModel = process.env.VOICE_CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL
+  const ollamaModel = process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL
+  for (const [track, backend] of Object.entries(backends)) {
+    console.log(`  ${track}: ${describeBackend(backend, backend === 'ollama' ? ollamaModel : claudeModel)}`)
+  }
+  if (Object.values(backends).includes('ollama')) {
+    void preloadOllama().then((message) => console.log(`  ${message}`))
+  }
 }
 
 /**
@@ -1264,6 +1314,7 @@ function main(): void {
     // IPv4. The certificate covers both names.
     const url = `${scheme}://127.0.0.1:${port}/`
     console.log(`Voice mock drill: ${url}`)
+    announceBackends()
     if (!tls) {
       console.log(
         'Serving plain HTTP. Chrome and Firefox treat localhost as secure, but Arc and Safari do not —\n' +

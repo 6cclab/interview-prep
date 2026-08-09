@@ -201,6 +201,66 @@ This is **not** an LLM cleanup pass, deliberately. `speech.ts` keeps filler and
 false starts because `/mock` grades them, and a cleaner that smoothed a wrong
 answer would have the interviewer reply to a better answer than he gave.
 
+### Which model the interviewer runs on
+
+Three backends, chosen **per track** and never by sniffing the environment.
+`voice/backend.ts` owns the choice; `describeBackend` prints it, with what it
+spends, at startup and at session creation.
+
+| Backend | What it is | Spends |
+|---|---|---|
+| `cli` (default) | `claude -p` against the logged-in subscription | subscription quota |
+| `api` | the Messages API | Console credits |
+| `ollama` | a local model over HTTP | nothing |
+
+```bash
+VOICE_BACKEND=ollama            # all three tracks
+VOICE_BACKEND_MOCK=ollama       # one track; beats the global
+VOICE_CLAUDE_MODEL=claude-opus-5 # override the Claude model for a drill worth it
+OLLAMA_MODEL=gpt-oss:20b        # override the local model (tags are case-sensitive)
+```
+
+An unrecognised value **throws at startup** rather than falling back — a typo
+silently running a 45-minute drill on the expensive path is the failure this
+arrangement exists to prevent. The old behaviour (any `ANTHROPIC_API_KEY` in the
+environment quietly outranking the subscription) was exactly that failure.
+
+**The Claude default is Sonnet, not Opus, and the reason is cost.** `Interviewer`
+owns the history and re-sends the whole transcript every turn, so a drill's spend
+grows quadratically in turns; on a $20 subscription that ends the practice before
+the practice is done. Sonnet still follows the rules these prompts carry, which
+is the property that matters.
+
+**The knob is per track because the tracks are not equally forgiving.** `mock` is
+behavioural: no spoiler to leak, no hint ladder, no fenced trailer to emit. It is
+the safe place for a weaker model. `coding` is the opposite on all three counts.
+A single global knob would be a choice about the worst track, so the recommended
+arrangement is the hybrid — `VOICE_BACKEND_MOCK=ollama`, Claude elsewhere.
+
+**A local model reads its own thinking aloud unless stopped.** Measured against
+a 30B local model on ollama 0.24.0, with `think: false` set and ignored: 307 of 314
+tokens were deliberation, emitted as ordinary `message.content` and terminated by
+a bare `</think>` with no opening tag. `SentenceBuffer` speaks content, so
+unfiltered that goes out of the speaker — and on the coding track the
+deliberation states what the model thinks the answer is. `createThinkGate` in
+`voice/ollama.ts` is the fix, and holding output back until the marker arrives
+costs the streaming: roughly six seconds of silence before a reply starts. The
+client's `thinking` phase displays it, so it is a wait rather than a mystery.
+
+**The local model was picked by drilling it, not by size.** Same prompt, same
+transcript, two turns each: the 30B took 76.8s to reply and skipped straight to
+grading the answer instead of asking a question; `Qwen3.5:9b` took 13.4s then
+4.8s and asked one question per turn as instructed. Three times smaller and
+better at the only thing being asked of it, so it is the default. Note the
+capital Q — ollama tags are case-sensitive and `qwen3.5:9b` is a 404.
+
+Two more measured facts drive that file's defaults: **cold model load was ~168s**
+(hence `preloadOllama` at startup and `keep_alive: '30m'`), and ollama's default
+`num_ctx` of **4096 truncates silently** — on a 45-minute drill that is an
+interviewer that has quietly forgotten the problem statement, the time check and
+the hint count, with no error anywhere. `num_ctx` is therefore always sent
+explicitly.
+
 ## Tests encode the insight
 
 A drill is only worth doing if a **correct but brute-force** solution fails it.

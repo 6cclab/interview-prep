@@ -17,7 +17,21 @@ export interface ClaudeCliOptions {
   timeoutMs?: number
 }
 
-const DEFAULT_MODEL = 'claude-opus-5'
+/**
+ * Sonnet, not Opus, and the reason is cost rather than quality.
+ *
+ * `Interviewer` owns the history and re-sends the whole transcript every turn
+ * (see `formatPrompt`), so a 45-minute drill's token spend grows quadratically
+ * in turns. On a $20 subscription that exhausts the quota well before the
+ * practice runs out, and a drill you cannot finish teaches nothing.
+ *
+ * Sonnet still follows the dense rules these prompts carry — one question per
+ * turn, the hint rungs quoted verbatim, the fenced ```drill-log trailer —
+ * which is the property that actually matters here and the one a local model
+ * gives up (see `voice/ollama.ts`). Override with `VOICE_CLAUDE_MODEL` if a
+ * particular drill is worth Opus.
+ */
+export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5'
 
 /**
  * A real interviewer turn can run past a minute of speech alone, and model
@@ -249,7 +263,7 @@ function stderrSuffix(tail: string): string {
  */
 export function claudeCliStream(opts: ClaudeCliOptions = {}): StreamFn {
   const binary = opts.binary ?? 'claude'
-  const model = opts.model ?? DEFAULT_MODEL
+  const model = opts.model ?? DEFAULT_CLAUDE_MODEL
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
 
   return async function* (system, messages) {

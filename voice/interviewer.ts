@@ -83,14 +83,19 @@ export function createInterviewer(system: string, stream: StreamFn): Interviewer
 
 /**
  * The real stream. No `thinking` parameter: adaptive thinking is the default on
- * claude-opus-5, and `max_tokens` bounds thinking plus response text together.
- * Effort is `medium` because the interviewer's job is one good question and then
- * silence — lower effort means less preamble, which is exactly the brief.
+ * the Claude 5 models, and `max_tokens` bounds thinking plus response text
+ * together. Effort is `medium` because the interviewer's job is one good
+ * question and then silence — lower effort means less preamble, which is
+ * exactly the brief.
+ *
+ * The model is a parameter so this path and the CLI path can be pointed at the
+ * same tier from one place; see `DEFAULT_MODEL` in `claude-cli.ts` for why the
+ * default is Sonnet rather than Opus.
  */
-export function anthropicStream(client: Anthropic): StreamFn {
+export function anthropicStream(client: Anthropic, model = 'claude-sonnet-5'): StreamFn {
   return async function* (system, messages) {
     const stream = client.messages.stream({
-      model: 'claude-opus-5',
+      model,
       max_tokens: 16000,
       output_config: { effort: 'medium' },
       system,
