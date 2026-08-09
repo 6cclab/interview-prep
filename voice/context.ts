@@ -200,9 +200,23 @@ export function buildSystemPrompt(root: string, track: Track, problem?: string, 
       'Step 7, running the tests: he runs them, and you are given the result the',
       'same way, as a bracketed note. React to it as an interviewer would.',
       '',
-      'The drill log: you cannot write it. Everything you say is recorded and',
-      'saved, so say your verdict out loud instead — solved or not, the highest',
-      'hint rung he needed, and the one thing that actually went wrong.',
+      'The drill log: you cannot write it directly, but it does get written. Say',
+      'your verdict out loud as your closing turn — solved or not, and the one',
+      'thing that actually went wrong — and then end that final turn with this',
+      'block, exactly as shown:',
+      '',
+      '```drill-log',
+      'solved: yes or no',
+      'note: one line on what actually went wrong, not a grade',
+      '```',
+      '',
+      'It is stripped before your words reach him — do not speak it, name it, or',
+      'introduce it. Only these two fields: the date, the problem, the hint rung',
+      'and the elapsed time are recorded for you and are not yours to state.',
+      '',
+      'He may ask for a hint. When he does you are given a bracketed note saying',
+      'which rung to give; obey it exactly and never go past it. Do not offer a',
+      'hint he has not asked for.',
       '',
       'He is typing code in his own editor while he talks. Long silences are him',
       'working, not him stuck: step 5 of drill.md still holds, and holds harder',
@@ -215,6 +229,63 @@ export function buildSystemPrompt(root: string, track: Track, problem?: string, 
   sections.push(voiceMode.join('\n'))
 
   return sections.join('\n\n')
+}
+
+/** The hint ladder's rungs, per `.claude/rules/no-spoilers.md`. Index 0 is no help taken. */
+export const HINT_RUNGS = [
+  'no help taken',
+  'a nudge, phrased as a question, that does not name the pattern',
+  'the pattern name, and nothing else',
+  'the approach in words — no code',
+  'the full worked solution',
+] as const
+
+/** The last rung. Past this there is nothing left to give. */
+export const MAX_HINT_RUNG = HINT_RUNGS.length - 1
+
+/**
+ * The cue that hands the interviewer exactly one rung of the hint ladder.
+ *
+ * The ladder is Andre's own rule and its whole value is that it is rationed: "advance
+ * exactly one rung per request. Never two." A model asked for "a hint" reliably
+ * over-delivers, so the rung is counted server-side and the cue states which one
+ * is owed and quotes that rung's definition verbatim, rather than trusting the
+ * interviewer to remember how many it has already given.
+ *
+ * Marked as an aside for the same reason the time check is: it arrives in the slot
+ * where everything else is Andre speaking, and an interviewer that reads it out
+ * would announce the rung it is about to give.
+ */
+export function hintCue(rung: number): string {
+  if (rung >= MAX_HINT_RUNG) {
+    return (
+      `[Hint request, for you only: this is rung ${MAX_HINT_RUNG}, the last one — ${HINT_RUNGS[MAX_HINT_RUNG]}. ` +
+      'Give it in full, then let him work. There is nothing further to ration, so do not withhold any of it.]'
+    )
+  }
+  return (
+    `[Hint request, for you only: give rung ${rung} and stop — ${HINT_RUNGS[rung]}. ` +
+    'Exactly this rung, not the one above it, and nothing from any later rung. ' +
+    'Do not announce which rung it is, do not say how many remain, and do not ask whether it helped.]'
+  )
+}
+
+/**
+ * The cue that asks a coding interviewer to close the drill out, now.
+ *
+ * Needed because the closing verdict and its `drill-log` trailer are instructed
+ * for the interviewer's *final* turn, and `<voice-mode>` frames that as the moment
+ * time runs out. Most drills do not run to time — he presses "End session" — and
+ * without this the interviewer never gets a final turn, so the log row that
+ * `/status` reads was written only for drills that went the full forty-five
+ * minutes. That is the wrong half of the cases.
+ */
+export function closingCue(): string {
+  return (
+    '[For you only: he has ended the session, so this is your final turn. Close the ' +
+    'drill out now exactly as your instructions say — your verdict out loud, then the ' +
+    'drill-log block. Do not ask him anything; there will be no reply.]'
+  )
 }
 
 /** The live design track's budget, per `design.md`: "45 minutes unless he says otherwise." */

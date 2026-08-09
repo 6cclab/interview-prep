@@ -5,7 +5,18 @@ import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
-import { assertNoSpoilers, buildSystemPrompt, timeCue, CODING_BUDGET_MS, DESIGN_BUDGET_MS, PROBLEM_SLUG, type Track } from './context'
+import {
+  assertNoSpoilers,
+  buildSystemPrompt,
+  closingCue,
+  hintCue,
+  timeCue,
+  CODING_BUDGET_MS,
+  DESIGN_BUDGET_MS,
+  MAX_HINT_RUNG,
+  PROBLEM_SLUG,
+  type Track,
+} from './context'
 import { findCodingProblem, listCodingProblems, problemDir } from './problems'
 import { runDrillTests, verdictCue } from './drill-tests'
 import { createInterviewer, anthropicStream, type StreamFn } from './interviewer'
@@ -296,6 +307,35 @@ async function streamTurn(res: ServerResponse | undefined, turn: AsyncIterable<s
   }
 }
 
+/**
+ * The `finishSession` options for a stored session, built once so every exit path
+ * writes the same thing.
+ *
+ * `elapsedMs` is read from the session's own entry clock, which is the same clock
+ * `Entry.at` uses — so the logged duration and the transcript's timestamps cannot
+ * disagree. The pattern is re-resolved here rather than stored; see the comment in
+ * POST /api/session.
+ */
+function finishOptions(deps: VoiceServerDeps, stored: StoredSession, elapsedMs: number) {
+  return {
+    root: deps.root,
+    // The session's own drill, not a hardcoded 'mock' — a design session's
+    // transcript belongs under local/designs/<problem>-live-..., and naming it
+    // as a mock would file it in the wrong place under the wrong name.
+    track: stored.drill.track,
+    problem: stored.drill.problem,
+    startedAt: stored.startedAt,
+    drill:
+      stored.drill.track === 'coding' && stored.drill.problem
+        ? {
+            pattern: codingPattern(deps.root, stored.drill.problem),
+            hints: stored.hintRung,
+            elapsedMs,
+          }
+        : undefined,
+  }
+}
+
 function endAndPersist(
   deps: VoiceServerDeps,
   store: SessionStore,
@@ -304,15 +344,11 @@ function endAndPersist(
 ): void {
   const stored = store.get(id)
   if (!stored) return
-  const { relPath } = finishSession(stored.session, stored.interviewer, {
-    root: deps.root,
-    // The session's own drill, not a hardcoded 'mock' — a design session's
-    // transcript belongs under local/designs/<problem>-live-..., and naming it
-    // as a mock would file it in the wrong place under the wrong name.
-    track: stored.drill.track,
-    problem: stored.drill.problem,
-    startedAt: stored.startedAt,
-  })
+  const { relPath } = finishSession(
+    stored.session,
+    stored.interviewer,
+    finishOptions(deps, stored, entryClocks.get(id)?.() ?? 0),
+  )
   if (stored.sseClient) {
     writeSSE(stored.sseClient, 'ended', { endedEarly: stored.session.endedEarly() ?? null, relPath })
     stored.sseClient.end()
@@ -617,6 +653,9 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         startedAt: stored.startedAt.toISOString(),
         entries: stored.session.entries(),
         awaitingRetry: stored.retainedAudio !== undefined,
+        // So a reopened coding drill shows the help already taken rather than
+        // resetting the counter to zero and reading as a cold attempt.
+        hintRung: stored.hintRung,
         // So a reopened design session restores its problem pane and resumes
         // its countdown from the right place rather than looking like a mock.
         ...stored.drill,
@@ -874,6 +913,71 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       return
     }
 
+    // "Ask for a hint" — the ladder in `.claude/rules/no-spoilers.md`, made a
+    // button rather than a thing to remember to phrase carefully.
+    //
+    // The rung is counted here, not by the interviewer. The ladder's whole value
+    // is that it is rationed ("advance exactly one rung. Never two."), and a model
+    // asked for "a hint" reliably over-delivers — so the server owns the count and
+    // `hintCue` tells it which single rung is owed, quoting that rung verbatim.
+    // That also makes the number `/status` reads a measurement rather than a
+    // recollection, and lets the client show a live count.
+    //
+    // Shares `turnsInFlight` with the spoken turns and the test run for the same
+    // reason they share it with each other: this drives an interviewer turn, and
+    // two of those at once interleave their sentences.
+    const hintMatch = /^\/api\/session\/([^/]+)\/hint$/.exec(url.pathname)
+    if (req.method === 'POST' && hintMatch) {
+      const id = hintMatch[1]!
+      const stored = store.get(id)
+      if (!stored) {
+        notFound(res)
+        return
+      }
+      if (stored.drill.track !== 'coding') {
+        // The behavioural and design tracks have no ladder — `mock.md` and
+        // `design.md` define no rungs, so there is nothing here to ration.
+        sendJson(res, 400, { error: 'only a coding drill has a hint ladder' })
+        return
+      }
+      if (stored.session.endedEarly()) {
+        sendJson(res, 409, { error: 'session already ended' })
+        return
+      }
+      if (turnsInFlight.has(id)) {
+        sendJson(res, 409, { error: 'a turn is already in progress for this session' })
+        return
+      }
+      turnsInFlight.add(id)
+      store.touch(id, idleClock())
+
+      // Clamped rather than refused at the top. Rung 4 is the full worked
+      // solution, so there is genuinely nothing further to give — but asking
+      // again after it is not an error, and answering a 409 would leave the
+      // button looking broken at the exact moment he is most stuck.
+      const rung = Math.min(stored.hintRung + 1, MAX_HINT_RUNG)
+      stored.hintRung = rung
+      sendJson(res, 200, { rung })
+
+      void (async () => {
+        const before = stored.session.entries().length
+        await streamTurn(stored.sseClient, stored.session.interject(hintCue(rung)), deps.speaker)
+        if (stored.sseClient) {
+          for (const entry of stored.session.entries().slice(before)) {
+            writeSSE(stored.sseClient, 'entry', entry)
+          }
+        }
+        if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, id)
+      })()
+        .catch((error: unknown) => {
+          console.error('voice session hint failed:', error)
+        })
+        .finally(() => {
+          turnsInFlight.delete(id)
+        })
+      return
+    }
+
     // The coding track's test run — `drill.md` step 7, reassigned. Andre presses
     // a button, the suite runs, and the interviewer is told the outcome and
     // reacts out loud.
@@ -955,12 +1059,42 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         notFound(res)
         return
       }
-      const { relPath, storyLogWritten } = finishSession(stored.session, stored.interviewer, {
-        root: deps.root,
-        track: stored.drill.track,
-        problem: stored.drill.problem,
-        startedAt: stored.startedAt,
-      })
+      // The coding track gets one final interviewer turn before anything is
+      // persisted, because its closing verdict and `drill-log` trailer are
+      // *produced* by that turn — `finishSession` reads them off
+      // `interviewer.lastRaw()`. Without it, the log row existed only for drills
+      // that ran the clock all the way down, which is the rarer case.
+      //
+      // Skipped when a turn is already in flight: "End session" must always end
+      // the session, so this never blocks on another turn or races it. The cost is
+      // one lost log row in that case, which is the right thing to lose.
+      //
+      // Also skipped once `endedEarly` is set — the interviewer's stream is
+      // already broken, and asking it for one more turn would just fail again.
+      if (stored.drill.track === 'coding' && !turnsInFlight.has(id) && !stored.session.endedEarly()) {
+        turnsInFlight.add(id)
+        try {
+          const before = stored.session.entries().length
+          await streamTurn(stored.sseClient, stored.session.interject(closingCue()), deps.speaker)
+          if (stored.sseClient) {
+            for (const entry of stored.session.entries().slice(before)) {
+              writeSSE(stored.sseClient, 'entry', entry)
+            }
+          }
+        } catch (error) {
+          // A failed closing turn costs the verdict and the log row. The
+          // transcript is the drill's real product and is still saved below.
+          console.error('voice session closing turn failed:', error)
+        } finally {
+          turnsInFlight.delete(id)
+        }
+      }
+
+      const { relPath, storyLogWritten, drillLogWritten } = finishSession(
+        stored.session,
+        stored.interviewer,
+        finishOptions(deps, stored, entryClocks.get(id)?.() ?? 0),
+      )
       if (stored.sseClient) {
         writeSSE(stored.sseClient, 'ended', { endedEarly: stored.session.endedEarly() ?? null, relPath })
         stored.sseClient.end()
@@ -968,7 +1102,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       store.remove(id)
       entryClocks.delete(id)
       rmSync(stored.scratchDir, { recursive: true, force: true })
-      sendJson(res, 200, { relPath, storyLogWritten })
+      sendJson(res, 200, { relPath, storyLogWritten, drillLogWritten })
       return
     }
 

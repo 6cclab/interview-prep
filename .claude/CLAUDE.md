@@ -18,6 +18,18 @@ budget-enforcing tests, and rationed hints.
 | Feature build | `feature/` | `/feature` | live |
 | Company prep | `local/companies/` | `/prep` | live |
 
+Two commands help rather than test, and both are gated on a drill being over:
+
+| Command | What it does | Gate |
+|---|---|---|
+| `/review [problem]` | The debrief: the answer, the gap, the tell, what the suite was testing | Refuses without a finished attempt in `local/drill-log.md`. The **only** command permitted to read `solutions/**`. |
+| `/coach [pattern]` | Teaches a pattern — tell, insight, cost, where it breaks | Reads `patterns.md`, so it **ends drilling for the session**. Requires an explicit yes first. |
+
+The asymmetry is deliberate. Help during an attempt is rationed to one rung per
+ask; help after one is complete and unrationed. What must never happen is the
+second leaking into the first, which is why `/coach` burns the session rather
+than trying to be careful.
+
 ## Layout
 
 - `problems/<pattern>/<problem>/` — `README.md` (prompt, **never names the
@@ -92,6 +104,21 @@ first two into "failed" teaches the exact thing `drill.md` forbids.
 A test run writes **no Andre entry** (he pressed a button; he said nothing), and
 the bracketed verdict never enters the transcript. Transcripts land in
 `local/drills/<problem>-live-<stamp>.md`.
+
+**Hints are a button, and the rung is the server's.** "Ask for a hint" advances
+exactly one rung of `rules/no-spoilers.md`'s ladder and the count shows on screen,
+so the cost of asking is legible when he asks rather than discovered afterwards.
+The server counts it and tells the interviewer which single rung is owed, quoting
+that rung verbatim — a model asked for "a hint" over-delivers, and the count is
+the number `/status` reads to tell rust from coverage, so it has to be a
+measurement rather than a recollection.
+
+**It writes a `local/drill-log.md` row**, the same table `/drill` appends to,
+because `/status` reads exactly one log. The interviewer closes with a
+```drill-log trailer supplying only judgement — solved, and the one-line note;
+the date, problem, pattern, rung and elapsed time come from the server. Ending
+the session drives one final interviewer turn to produce that closing, since
+otherwise only drills that ran the full 45 minutes ever logged anything.
 
 **The pattern is the answer, and a coding problem's path is its pattern.** So
 `problems/<pattern>/<slug>` never leaves the server: routes take a bare slug,

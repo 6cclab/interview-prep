@@ -48,6 +48,16 @@ export interface StoredSession {
   lastActivity: number
   /** The most recent failed turn's audio, if any — see `RetainedAudio`. At most one at a time. */
   retainedAudio?: RetainedAudio
+  /**
+   * Highest hint rung reached on a coding drill, 0-4 (0 = no help taken).
+   *
+   * Server-owned, and that is the point. The rung is the number `/status` uses to
+   * tell rust from coverage — "solved at rung 3 six weeks ago is rust, not
+   * coverage" — so it is counted from actual requests rather than recalled by the
+   * interviewer at the end of a long conversation. It also lets the client show a
+   * live count without the interviewer having to report one per turn.
+   */
+  hintRung: number
 }
 
 export interface SessionStore {
@@ -79,6 +89,7 @@ export function createSessionStore(
         startedAt,
         scratchDir,
         lastActivity: now(),
+        hintRung: 0,
       }
       sessions.set(stored.id, stored)
       return stored

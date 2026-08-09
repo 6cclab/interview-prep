@@ -116,6 +116,17 @@ export interface VoiceSession {
   verdict: DrillVerdict | null
   /** True while a suite is running, so the button can say so and not be pressed twice. */
   testsRunning: boolean
+  /**
+   * The coding track's "Ask for a hint" action (`POST /api/session/:id/hint`).
+   *
+   * The rung is the server's to count, not this hook's — see the route. The
+   * interviewer delivers it out loud through the existing SSE listeners.
+   */
+  askForHint(): void
+  /** Highest hint rung taken, 0-4. 0 means no help taken. */
+  hintRung: number
+  /** True while a hint request is in flight. */
+  hintPending: boolean
   record(): void
   stopAndSubmit(): void
   /** The dock's "End session" action — ends the current session, wherever it is in its turn cycle. */
@@ -246,6 +257,14 @@ const MIC_WATCHDOG_MESSAGE =
   'level (macOS: System Settings → Privacy & Security → Microphone). This request is still pending ' +
   'and will proceed on its own if access is granted.'
 
+/**
+ * Consecutive stream failures before saying so.
+ *
+ * One is routine: a reconnect is a supported path and recovers on its own. Two in
+ * a row means it is not recovering, which is worth telling someone mid-drill.
+ */
+const STREAM_FAILURES_BEFORE_REPORTING = 2
+
 export function useVoiceSession(): VoiceSession {
   const [mode, setMode] = useState<Mode>('idle')
   const [status, setStatus] = useState('Idle.')
@@ -268,6 +287,8 @@ export function useVoiceSession(): VoiceSession {
   const [starting, setStarting] = useState(false)
   const [verdict, setVerdict] = useState<DrillVerdict | null>(null)
   const [testsRunning, setTestsRunning] = useState(false)
+  const [hintRung, setHintRung] = useState(0)
+  const [hintPending, setHintPending] = useState(false)
   const [deadlineAt, setDeadlineAt] = useState<number | null>(null)
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null)
   useEffect(() => {
@@ -295,6 +316,9 @@ export function useVoiceSession(): VoiceSession {
   // `runTests` is a stable callback, so it would read a stale `testsRunning`
   // from the render it was created in and let a second press through.
   const testsRunningRef = useRef(false)
+  const hintPendingRef = useRef(false)
+  // Consecutive `EventSource` failures — see the error handler in `connectStream`.
+  const streamFailuresRef = useRef(0)
   const eventSourceRef = useRef<EventSource | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
@@ -392,6 +416,36 @@ export function useVoiceSession(): VoiceSession {
     const es = new EventSource(`/api/session/${id}/stream`)
     eventSourceRef.current = es
 
+    // Without this the page lies. `EventSource` retries a failed connection
+    // forever and silently, so a stream that will never come back — the server
+    // was restarted, and sessions live in memory, so the id is simply gone —
+    // left the screen looking perfectly live while every action 404'd. Nothing
+    // told anyone; it just stopped.
+    //
+    // A single failure is not reported, because a reconnect is normal and
+    // recoverable (see the reconnect handling in the /stream route). Only a run
+    // of them means the stream is actually dead.
+    es.addEventListener('error', () => {
+      // `CLOSED` means the browser has given up entirely and will not retry.
+      if (es.readyState === EventSource.CLOSED) {
+        setStatus('The connection to the drill server closed and will not reopen. Reload the page to start again.')
+        streamFailuresRef.current = 0
+        return
+      }
+      streamFailuresRef.current += 1
+      if (streamFailuresRef.current < STREAM_FAILURES_BEFORE_REPORTING) return
+      setStatus(
+        'Lost the connection to the drill server — still retrying. If the server was restarted this session is ' +
+          'gone; reload the page to start a new one.',
+      )
+    })
+
+    // A message of any kind proves the stream is alive again.
+    const clearFailures = () => {
+      streamFailuresRef.current = 0
+    }
+    es.addEventListener('open', clearFailures)
+
     es.addEventListener('sentence', (event) => {
       const { text } = JSON.parse((event as MessageEvent<string>).data) as { text: string }
       setStatus('Interviewer speaking…')
@@ -441,10 +495,11 @@ export function useVoiceSession(): VoiceSession {
     setSessionConflict(false)
     setMicFailureKind(null)
     setTranscriptFailed(false)
-    // A new drill starts with no test result. Carrying the previous session's
+    // A new drill starts with no help taken and no test result. Carrying the previous session's
     // verdict over would show a green — or a failing test list — for code that
     // has since been reset back to the stub.
     setVerdict(null)
+    setHintRung(0)
     setStatus('Starting session…')
     setStarting(true)
     void (async () => {
@@ -531,7 +586,12 @@ export function useVoiceSession(): VoiceSession {
         setStuckSession(null)
         return
       }
-      const state = (await res.json()) as { entries: Entry[]; awaitingRetry: boolean; startedAt: string } & Drill
+      const state = (await res.json()) as {
+        entries: Entry[]
+        awaitingRetry: boolean
+        startedAt: string
+        hintRung?: number
+      } & Drill
       sessionIdRef.current = stuck.id
       setDrill({ track: state.track, problem: state.problem, budgetMs: state.budgetMs })
       // Resumed from the session's real start, not from now — reopening a timed
@@ -544,6 +604,10 @@ export function useVoiceSession(): VoiceSession {
       setSessionConflict(false)
       setStuckSession(null)
       setTranscriptFailed(state.awaitingRetry)
+      // Carried over for the same reason `awaitingRetry` is: a reopened drill
+      // that reset the counter to zero would read as a cold attempt and would log
+      // one, understating the help actually taken.
+      setHintRung(state.hintRung ?? 0)
       connectStream(stuck.id)
       setMode('listening-to-interviewer')
       setStatus(state.awaitingRetry ? 'Reopened — that last answer still needs transcribing.' : 'Reopened. Your turn.')
@@ -573,6 +637,10 @@ export function useVoiceSession(): VoiceSession {
   const endSession = useCallback(() => {
     const id = sessionIdRef.current
     if (!id) return
+    // A coding drill's `/end` drives one last interviewer turn — its closing
+    // verdict — so this request takes as long as a model turn rather than
+    // returning at once. Say so, or the button reads as having done nothing.
+    setStatus('Closing out — the interviewer is giving its verdict…')
     void fetch(`/api/session/${id}/end`, { method: 'POST' })
   }, [])
 
@@ -754,6 +822,39 @@ export function useVoiceSession(): VoiceSession {
     })()
   }, [])
 
+  /**
+   * "Ask for a hint": one rung, delivered out loud.
+   *
+   * The response carries the rung the server settled on rather than this
+   * incrementing a local counter — the server clamps at the last rung, and two
+   * sources of truth for "how much help has he taken" is exactly how the number
+   * `/status` depends on stops being trustworthy.
+   */
+  const askForHint = useCallback(() => {
+    const id = sessionIdRef.current
+    if (!id || hintPendingRef.current) return
+    hintPendingRef.current = true
+    setHintPending(true)
+    void (async () => {
+      try {
+        const res = await fetch(`/api/session/${id}/hint`, { method: 'POST' })
+        if (!res.ok) {
+          const { error } = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { error: string }
+          setStatus(`Could not ask for a hint: ${error}`)
+          return
+        }
+        const { rung } = (await res.json()) as { rung: number }
+        setHintRung(rung)
+      } catch (error) {
+        setStatus('Could not reach the drill server to ask for a hint.')
+        console.error('voice: POST /hint failed', error)
+      } finally {
+        hintPendingRef.current = false
+        setHintPending(false)
+      }
+    })()
+  }, [])
+
   // `''` from the <select>'s own "system default" option means "no explicit
   // choice" — normalized to `null` here so the rest of the hook only ever
   // deals in `string | null`.
@@ -882,6 +983,9 @@ export function useVoiceSession(): VoiceSession {
     runTests,
     verdict,
     testsRunning,
+    askForHint,
+    hintRung,
+    hintPending,
     record,
     stopAndSubmit,
     endSession,
