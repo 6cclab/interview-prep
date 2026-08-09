@@ -24,6 +24,8 @@ import { claudeCliStream } from './claude-cli'
 import { createSession, finishSession } from './session'
 import { createSessionStore, type Drill, type RetainedAudio, type SessionStore, type StoredSession } from './session-store'
 import { whisperTranscriber, saySpeaker, type Speaker, type Transcriber } from './speech'
+import { openDisabled, openInBrowser, openPlan } from './open-browser'
+import { readDrillLog, summarise } from './drill-log'
 import { transcodeToWav } from './transcode'
 import { readStaticFile, resolveStaticFile } from './static'
 import { listOutputDevices, readDeviceConfig, writeDeviceConfig, type Device, type DeviceConfig } from './devices'
@@ -522,6 +524,28 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       sendJson(res, 200, {
         problems: coding.map((problem) => problem.slug),
         difficulties: Object.fromEntries(coding.map((problem) => [problem.slug, problem.difficulty])),
+      })
+      return
+    }
+
+    // Past drills, for the history screen. Read from `local/drill-log.md`, which
+    // is the only structured record any track keeps — the design and behavioural
+    // tracks write free-form transcripts and no scores, so there is nothing
+    // comparable to report for them.
+    //
+    // **The pattern is withheld unless asked for.** The log carries it, and it is
+    // his own file, but a history screen is read *between* drills — and
+    // `/review` exists partly to re-queue a problem for spaced repetition. A
+    // permanent list of problem-to-pattern on screen would spoil every re-drill
+    // at a glance. Same reasoning as `voice/problems.ts`: keep it off the wire so
+    // the guarantee is structural rather than the client remembering to hide a
+    // field it was handed.
+    if (req.method === 'GET' && url.pathname === '/api/history') {
+      const withPatterns = url.searchParams.get('patterns') === '1'
+      const rows = readDrillLog(deps.root)
+      sendJson(res, 200, {
+        summary: summarise(rows),
+        rows: rows.map(({ pattern, ...row }) => (withPatterns ? { ...row, pattern } : row)),
       })
       return
     }
@@ -1221,7 +1245,8 @@ function main(): void {
     // browsers resolve `localhost` to `::1` first — so a `localhost` URL
     // fails to connect in Chrome even though curl silently falls back to
     // IPv4. The certificate covers both names.
-    console.log(`Voice mock drill: ${scheme}://127.0.0.1:${port}/`)
+    const url = `${scheme}://127.0.0.1:${port}/`
+    console.log(`Voice mock drill: ${url}`)
     if (!tls) {
       console.log(
         'Serving plain HTTP. Chrome and Firefox treat localhost as secure, but Arc and Safari do not —\n' +
@@ -1229,6 +1254,22 @@ function main(): void {
           '  mkdir -p local/certs && cd local/certs && mkcert -cert-file cert.pem -key-file key.pem localhost 127.0.0.1 ::1',
       )
     }
+    // Opened here rather than from `createVoiceServer`, which a dozen tests
+    // construct directly. Chrome by name, not the default browser — see
+    // open-browser.ts for why that distinction is load-bearing.
+    const disabled = openDisabled()
+    const plan = openPlan(url, { disabled })
+    if (plan) {
+      console.log(
+        plan.args[0] === '-a'
+          ? 'Opening Chrome. Set VOICE_NO_OPEN=1 to stop doing that.'
+          : 'Chrome not found — opening your default browser instead. Check the table in .claude/CLAUDE.md if the ' +
+              'microphone is never offered.',
+      )
+    } else if (disabled) {
+      console.log('VOICE_NO_OPEN is set — not opening a browser.')
+    }
+    openInBrowser(plan)
   })
 }
 

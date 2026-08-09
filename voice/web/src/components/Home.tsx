@@ -235,6 +235,17 @@ export function Home({ onChoose }: Props) {
           buttonLabel="Coding drill"
           onStart={(problem) => onChoose({ view: 'coding', problem })}
         />
+
+        {/* Not a track, so not a card: nothing starts here. Below the three
+            choices because the question this screen asks is "what are we
+            drilling", and looking at past results is the answer to a different
+            one. */}
+        <p className="home__aside">
+          <Button variant="outline" onClick={() => onChoose({ view: 'history' })}>
+            Past drills
+          </Button>
+          <span className="home__note">What you have attempted, whether it landed, and what help it took.</span>
+        </p>
       </div>
     </main>
   )

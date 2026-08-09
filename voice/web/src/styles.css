@@ -1465,3 +1465,143 @@ ol.md__list {
   color: var(--muted-foreground);
   max-width: 68ch;
 }
+
+/* ---------------------------------------------------------------------- */
+/* Past drills (History.tsx)                                             */
+/* ---------------------------------------------------------------------- */
+
+.home__aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.5rem 0 0;
+}
+
+.history {
+  inline-size: 100%;
+  max-inline-size: var(--measure);
+  margin-inline: auto;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  /* The table is the only thing here that can exceed the viewport, and it gets
+     its own scroller below — the page itself must never scroll sideways. */
+  min-inline-size: 0;
+}
+
+.history__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 1rem;
+  margin: 0;
+}
+
+.history__stat {
+  border: 2px solid var(--border);
+  padding: 0.75rem 1rem;
+}
+
+.history__stat dt {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+
+.history__stat dd {
+  margin: 0.25rem 0 0;
+  font-size: 1.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.history__of {
+  font-size: 1rem;
+  color: var(--muted-foreground);
+}
+
+.history__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.history__warning {
+  margin: 0;
+}
+
+/* Its own scroller so a long note cannot push the page sideways. */
+.history__scroller {
+  overflow-x: auto;
+  min-inline-size: 0;
+  border: 2px solid var(--border);
+}
+
+.history__table {
+  border-collapse: collapse;
+  inline-size: 100%;
+  font-size: 0.9rem;
+}
+
+.history__table th,
+.history__table td {
+  text-align: start;
+  padding: 0.6rem 0.85rem;
+  border-block-end: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  vertical-align: top;
+}
+
+.history__table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.history__table td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The note is the long column; everything else stays on one line. */
+.history__note {
+  min-inline-size: 18rem;
+  font-variant-numeric: normal;
+  color: var(--muted-foreground);
+}
+
+/* Three outcomes, not two: a solve that needed the worked solution is a
+   different result from a cold one, and colouring them alike would undo the
+   distinction this whole screen is built around. */
+.history__row--cold td:first-child {
+  box-shadow: inset 3px 0 0 var(--brand, currentColor);
+}
+
+.history__row--helped td:first-child {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, currentColor 45%, transparent);
+}
+
+.history__row--unsolved td:first-child {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.history__empty {
+  border: 2px dashed var(--border);
+  padding: 1.25rem;
+}
+
+/* Shares the table's measure and padding so the title lines up with the content
+   under it rather than sitting at the viewport edge. */
+.history__header {
+  inline-size: 100%;
+  max-inline-size: var(--measure);
+  margin-inline: auto;
+  padding: 1.25rem 1.5rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}

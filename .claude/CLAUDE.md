@@ -18,6 +18,23 @@ budget-enforcing tests, and rationed hints.
 | Feature build | `feature/` | `/feature` | live |
 | Company prep | `local/companies/` | `/prep` | live |
 
+### Past drills
+
+`#/history` on `mock:web` reads `local/drill-log.md` — the only structured record
+any track keeps, so the screen says outright that it covers coding drills alone.
+
+**Cold solves are reported separately from solves, everywhere on it.** The log's
+own preamble demands that: "a solve that took four hints is a different fact from
+a cold solve, and the log is useless if it flattens them." A single "7 of 9"
+headline is that flattening, so the headline figure is the cold count.
+
+**The pattern is withheld unless asked for**, and withheld *on the wire* rather
+than hidden in the client — `GET /api/history` omits it without `?patterns=1`,
+so it is not in the page until he opts in. A history screen is read between
+drills and `/review` re-queues problems for spaced repetition; a permanent
+problem-to-pattern list would spoil every re-drill at a glance. Turning it on is
+a deliberate act, the same shape as `/coach`'s gate.
+
 Two commands help rather than test, and both are gated on a drill being over:
 
 | Command | What it does | Gate |
@@ -50,7 +67,10 @@ pnpm test               # everything, as a regression check
 pnpm reset <problem>    # restore stub.ts over solution.ts
 pnpm domains            # domains the exercise set covers; `--for <company>` to tailor
 pnpm mock:voice         # spoken behavioral drill
-pnpm mock:web           # React browser client (127.0.0.1) — builds, then serves.
+pnpm mock:web           # React browser client (127.0.0.1) — builds, serves, opens Chrome.
+                        # Chrome by name, not the default browser: per the table below Arc
+                        # never offers the microphone and fails silently, so handing the URL
+                        # to whatever is default is a debugging trap. VOICE_NO_OPEN=1 skips it.
                         # Serves ALL THREE spoken tracks. The landing page chooses;
                         # each drill then gets its own screen at its own URL
                         # (#/mock, #/design/<p>, #/coding/<p>), so a reload comes
@@ -153,7 +173,7 @@ mkcert -cert-file cert.pem -key-file key.pem localhost 127.0.0.1 ::1
 mkcert -install   # needs your password; run in a real terminal, not via `!`
 ```
 
-Open `https://127.0.0.1:4174/`, **not** `localhost` — the server binds IPv4
+Open `https://127.0.0.1:4173/`, **not** `localhost` — the server binds IPv4
 only and browsers try `::1` first.
 
 `VOICE_DEBUG=1` logs every request's method, path and status (never bodies —

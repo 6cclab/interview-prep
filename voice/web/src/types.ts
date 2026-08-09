@@ -114,3 +114,34 @@ export type DrillVerdict =
   | { kind: 'correctness-red'; failed: string[] }
   | { kind: 'cost-red'; failed: string[] }
   | { kind: 'errored'; message: string }
+
+/**
+ * One past drill, from `GET /api/history` (server: `voice/drill-log.ts`).
+ *
+ * `pattern` is optional because the server withholds it unless `?patterns=1` is
+ * asked for — a pattern is the answer to its problem, and this screen is read
+ * between drills. See the route's comment in http-server.ts.
+ */
+export interface HistoryRow {
+  date: string
+  problem: string
+  pattern?: string
+  solved: boolean
+  /** Highest hint rung reached, 0-4. 0 is a cold solve. */
+  hints: number
+  elapsedMs: number
+  note: string
+}
+
+export interface HistorySummary {
+  attempts: number
+  solved: number
+  cold: number
+  problems: number
+  medianSolvedMs: number | null
+}
+
+export interface HistoryPayload {
+  summary: HistorySummary
+  rows: HistoryRow[]
+}

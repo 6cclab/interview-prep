@@ -106,3 +106,28 @@ describe('routeDrill', () => {
     })
   })
 })
+
+/**
+ * The history view. Not a drill: no session, no clock, no microphone — which is
+ * why `routeDrill` must return null for it, exactly as it does for `home`.
+ */
+describe('history route', () => {
+  it('round-trips through the hash', () => {
+    expect(parseRoute('#/history')).toEqual({ view: 'history' })
+    expect(routeHash({ view: 'history' })).toBe('#/history')
+  })
+
+  it('parses without the leading slash', () => {
+    expect(parseRoute('#history')).toEqual({ view: 'history' })
+  })
+
+  // A drill would try to start a session and grab the microphone. This screen is
+  // read between drills and must never do either.
+  it('is not a drill', () => {
+    expect(routeDrill({ view: 'history' })).toBeNull()
+  })
+
+  it('does not swallow a problem-shaped path', () => {
+    expect(parseRoute('#/history/celebrity')).toEqual({ view: 'home' })
+  })
+})

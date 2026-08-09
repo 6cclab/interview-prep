@@ -10,6 +10,7 @@ import { LiveRegions } from './components/LiveRegions'
 import { MicCheck } from './components/MicCheck'
 import { DeviceSettings } from './components/DeviceSettings'
 import { Home } from './components/Home'
+import { History } from './components/History'
 import { HomeHeader } from './components/HomeHeader'
 import { ProblemPane } from './components/ProblemPane'
 import { CodingTools } from './components/CodingTools'
@@ -61,6 +62,16 @@ export default function App() {
       </div>
     )
   }
+  // Not a drill screen: it has no session, no clock and no microphone, so it
+  // shares nothing with DrillScreen but the shell.
+  if (route.view === 'history') {
+    return (
+      <div className="app-root">
+        <HomeHeader dark={dark} onToggleTheme={toggleTheme} />
+        <History onGoHome={() => navigate({ view: 'home' })} />
+      </div>
+    )
+  }
   return <DrillScreen key={routeHash(route)} route={route} dark={dark} onToggleTheme={toggleTheme} onGoHome={() => navigate({ view: 'home' })} />
 }
 
@@ -73,9 +84,11 @@ const HEADER = {
   mock: { title: 'Mock interview', kicker: 'Behavioral · voice' },
   design: { title: 'Design interview', kicker: 'System design' },
   coding: { title: 'Coding interview', kicker: 'Coding' },
-  // `home` never reaches DrillScreen, but the record is keyed by the full Route
-  // view so a new view cannot be added without deciding what the header says.
+  // Neither `home` nor `history` reaches DrillScreen, but the record is keyed by
+  // the full Route view so a new view cannot be added without deciding what the
+  // header says. Adding `history` to Route is what made the compiler ask.
   home: { title: 'Mock interview', kicker: 'Behavioral · voice' },
+  history: { title: 'Past drills', kicker: 'Coding drill log' },
 } as const
 
 interface DrillScreenProps {

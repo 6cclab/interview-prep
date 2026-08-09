@@ -810,3 +810,77 @@ describe('the coding transcript', () => {
     expect(readdirSync(join(root, 'local')).filter((name) => name.startsWith('mock-'))).toEqual([])
   })
 })
+
+/**
+ * The history screen's data. `local/drill-log.md` is the only structured record
+ * any track keeps, and until now nothing read it back at all.
+ */
+describe('GET /api/history', () => {
+  const ROW = '| 2026-08-09 | container-with-most-water | two-pointers | yes | 1 | 04:12 | Shipped early. |'
+
+  function seedLog(...rows: string[]) {
+    mkdirSync(join(root, 'local'), { recursive: true })
+    writeFileSync(
+      join(root, 'local/drill-log.md'),
+      [
+        '# Drill Log',
+        '',
+        '| Date | Problem | Pattern | Solved | Hints | Time | Note |',
+        '|------|---------|---------|--------|-------|------|------|',
+        ...rows,
+        '',
+      ].join('\n'),
+    )
+  }
+
+  it('reports past drills newest first, with a summary', async () => {
+    seedLog('| 2026-08-01 | celebrity | elimination | no | 4 | 45:00 | Ran out. |', ROW)
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/history`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      summary: { attempts: number; solved: number; cold: number }
+      rows: { problem: string }[]
+    }
+    expect(body.rows.map((row) => row.problem)).toEqual(['container-with-most-water', 'celebrity'])
+    expect(body.summary).toMatchObject({ attempts: 2, solved: 1, cold: 0 })
+  })
+
+  // The history screen is read *between* drills, and /review re-queues problems
+  // for spaced repetition. A permanent problem-to-pattern list on screen would
+  // spoil every re-drill, so the pattern stays off the wire unless asked for —
+  // structurally, not by the client remembering to hide it.
+  it('withholds the pattern by default', async () => {
+    seedLog(ROW)
+    const { port } = await listen(baseDeps())
+    const body = await (await fetch(`http://127.0.0.1:${port}/api/history`)).text()
+    expect(body).not.toContain('two-pointers')
+    expect(body).not.toContain(PATTERN)
+    expect(body).toContain('container-with-most-water')
+  })
+
+  it('includes the pattern only when explicitly requested', async () => {
+    seedLog(ROW)
+    const { port } = await listen(baseDeps())
+    const body = (await (await fetch(`http://127.0.0.1:${port}/api/history?patterns=1`)).json()) as {
+      rows: { pattern?: string }[]
+    }
+    expect(body.rows[0]!.pattern).toBe('two-pointers')
+  })
+
+  it.each(['0', 'yes', 'true', ''])('withholds the pattern for patterns=%j', async (value) => {
+    seedLog(ROW)
+    const { port } = await listen(baseDeps())
+    const body = await (await fetch(`http://127.0.0.1:${port}/api/history?patterns=${value}`)).text()
+    expect(body).not.toContain('two-pointers')
+  })
+
+  it('is an empty history rather than an error when nothing has been drilled', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/history`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { summary: { attempts: number }; rows: unknown[] }
+    expect(body.rows).toEqual([])
+    expect(body.summary.attempts).toBe(0)
+  })
+})

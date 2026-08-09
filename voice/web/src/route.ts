@@ -19,10 +19,12 @@ export type Route =
   | { view: 'mock' }
   | { view: 'design'; problem: string }
   | { view: 'coding'; problem: string }
+  /** Past drills. Not a drill screen — it is read between them. */
+  | { view: 'history' }
 
 /** The route's drill, or `null` on `home`. What `start()` is called with. */
 export function routeDrill(route: Route): Drill | null {
-  if (route.view === 'home') return null
+  if (route.view === 'home' || route.view === 'history') return null
   if (route.view === 'mock') return { track: 'mock' }
   return { track: route.view, problem: route.problem }
 }
@@ -30,6 +32,7 @@ export function routeDrill(route: Route): Drill | null {
 export function routeHash(route: Route): string {
   if (route.view === 'home') return '#/'
   if (route.view === 'mock') return '#/mock'
+  if (route.view === 'history') return '#/history'
   return `#/${route.view}/${encodeURIComponent(route.problem)}`
 }
 
@@ -42,6 +45,7 @@ export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#\/?/, '')
   if (path === '' || path === 'home') return { view: 'home' }
   if (path === 'mock') return { view: 'mock' }
+  if (path === 'history') return { view: 'history' }
   const withProblem = /^(design|coding)\/([^/]+)$/.exec(path)
   if (withProblem) {
     let problem: string
