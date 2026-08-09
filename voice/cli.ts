@@ -10,6 +10,7 @@ import { listInputDevices, listOutputDevices, readDeviceConfig } from './devices
 import { anthropicStream, createInterviewer, type StreamFn } from './interviewer'
 import { runSession } from './session'
 import { saySpeaker, whisperTranscriber } from './speech'
+import { transcriptionPrompt } from './vocabulary'
 import {
   appendStoryLog,
   formatSession,
@@ -110,6 +111,9 @@ async function main(): Promise<void> {
       // once at ten minutes, stop at time" is unfollowable. The web path does
       // the same; this keeps the terminal from being the clockless one.
       turnCue: track === 'design' ? () => timeCue(Date.now() - started) : undefined,
+      // The same vocabulary bias the browser path uses, so a terminal drill is
+      // not the one transcribing "O of n" as "on".
+      transcriptionPrompt: transcriptionPrompt(track),
     })
 
     // The path written may differ from the one asked for — `writeSession` will

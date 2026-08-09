@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { isWhisperLogLine, parseWhisperOutput, sayArgs } from './speech'
+import { isWhisperLogLine, parseWhisperOutput, sayArgs, whisperArgs } from './speech'
+import { transcriptionPrompt } from './vocabulary'
 
 describe('parseWhisperOutput', () => {
   it('joins timestamped segments into one utterance', () => {
@@ -138,5 +139,43 @@ describe('sayArgs', () => {
       '-a', '75',
       'hello there',
     ])
+  })
+})
+
+/**
+ * `--prompt` is whisper.cpp's initial-prompt hook, and it was unused: a real
+ * drill transcript recorded "O of n" as "on" twice and "N" as "M", and the
+ * interviewer marked him down for the second one. Asserted on the argv rather
+ * than by spawning whisper — running it would be testing third-party software.
+ */
+describe('whisperArgs', () => {
+  it('passes the model, the file, English and no prints', () => {
+    expect(whisperArgs('models/x.bin', '/tmp/a.wav')).toEqual([
+      '--model',
+      'models/x.bin',
+      '--file',
+      '/tmp/a.wav',
+      '--language',
+      'en',
+      '--no-prints',
+    ])
+  })
+
+  it('appends --prompt when there is a vocabulary to bias toward', () => {
+    const args = whisperArgs('m.bin', '/tmp/a.wav', 'O of n, O of one.')
+    expect(args.slice(-2)).toEqual(['--prompt', 'O of n, O of one.'])
+  })
+
+  // An empty initial prompt is not the same input as no initial prompt, and
+  // there is no reason to discover how this build treats it.
+  it.each([undefined, '', '   '])('omits --prompt entirely for %j', (prompt) => {
+    expect(whisperArgs('m.bin', '/tmp/a.wav', prompt)).not.toContain('--prompt')
+  })
+
+  it('keeps the prompt as one argv entry, however many commas it holds', () => {
+    const prompt = transcriptionPrompt('design')
+    const args = whisperArgs('m.bin', '/tmp/a.wav', prompt)
+    expect(args.filter((arg) => arg === '--prompt')).toHaveLength(1)
+    expect(args.at(-1)).toBe(prompt)
   })
 })

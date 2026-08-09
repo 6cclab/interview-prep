@@ -226,6 +226,15 @@ export interface SessionDeps {
   now(): number
   /** Passed straight through to `createSession` — see `CreateSessionOptions.turnCue`. */
   turnCue?(): string | undefined
+  /**
+   * Vocabulary hints for the decoder — see `voice/vocabulary.ts`.
+   *
+   * A resolved string rather than the track, because this module has no other
+   * use for the track and the stand-in transcribers in `session.test.ts` do not
+   * care. Absent means no `--prompt`, which is what every existing caller and
+   * test gets by default.
+   */
+  transcriptionPrompt?: string
 }
 
 export type SessionOutcome = Entry[] & { endedEarly?: string }
@@ -276,7 +285,7 @@ export async function runSession(deps: SessionDeps): Promise<SessionOutcome> {
 
     let utteranceText: string
     try {
-      const utterance = await deps.transcriber.transcribe(wavPath)
+      const utterance = await deps.transcriber.transcribe(wavPath, deps.transcriptionPrompt)
       utteranceText = utterance.text
     } catch (error) {
       // Reuse the pre-transcribe timestamp, not a fresh sample — whisper's

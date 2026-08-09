@@ -8,7 +8,13 @@ export interface Utterance {
 }
 
 export interface Transcriber {
-  transcribe(wavPath: string): Promise<Utterance>
+  /**
+   * @param wavPath 16 kHz mono PCM wav.
+   * @param prompt Vocabulary hints for the decoder — see `voice/vocabulary.ts`.
+   *   Optional so the stand-in transcribers in tests need not care, and so a
+   *   caller with no track context can omit it rather than invent one.
+   */
+  transcribe(wavPath: string, prompt?: string): Promise<Utterance>
 }
 
 export interface Speaker {
@@ -62,16 +68,27 @@ const WHISPER_MAX_BUFFER = 32 * 1024 * 1024
  * false starts that cloud dictation normalises away — and those are exactly what
  * `/mock` grades — and interview audio never leaves the machine.
  */
+/**
+ * whisper-cli's argv. Pure, so the flags can be asserted without spawning it.
+ *
+ * `--prompt` is whisper.cpp's initial-prompt hook: it biases the decoder toward a
+ * vocabulary without rewriting output. Omitted entirely when there is no prompt,
+ * rather than passed empty — an empty initial prompt is not the same input as no
+ * initial prompt, and there is no reason to find out how this build treats it.
+ */
+export function whisperArgs(model: string, wavPath: string, prompt?: string): string[] {
+  const args = ['--model', model, '--file', wavPath, '--language', 'en', '--no-prints']
+  if (prompt !== undefined && prompt.trim() !== '') args.push('--prompt', prompt)
+  return args
+}
+
 export function whisperTranscriber(opts: { binary: string; model: string }): Transcriber {
   return {
-    async transcribe(wavPath: string): Promise<Utterance> {
+    async transcribe(wavPath: string, prompt?: string): Promise<Utterance> {
       try {
-        const { stdout } = await run(opts.binary, [
-          '--model', opts.model,
-          '--file', wavPath,
-          '--language', 'en',
-          '--no-prints',
-        ], { maxBuffer: WHISPER_MAX_BUFFER })
+        const { stdout } = await run(opts.binary, whisperArgs(opts.model, wavPath, prompt), {
+          maxBuffer: WHISPER_MAX_BUFFER,
+        })
         return parseWhisperOutput(stdout)
       } catch (err) {
         throw new Error(

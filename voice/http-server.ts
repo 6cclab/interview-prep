@@ -26,6 +26,7 @@ import { createSessionStore, type Drill, type RetainedAudio, type SessionStore, 
 import { whisperTranscriber, saySpeaker, type Speaker, type Transcriber } from './speech'
 import { openDisabled, openInBrowser, openPlan } from './open-browser'
 import { readDrillLog, summarise } from './drill-log'
+import { transcriptionPrompt } from './vocabulary'
 import { transcodeToWav } from './transcode'
 import { readStaticFile, resolveStaticFile } from './static'
 import { listOutputDevices, readDeviceConfig, writeDeviceConfig, type Device, type DeviceConfig } from './devices'
@@ -225,6 +226,8 @@ async function transcribeWithRetention(
   transcriber: Transcriber,
   source: { path: string; kind: 'wav' | 'webm' },
   wavScratchPath: string,
+  /** Vocabulary hints for the decoder — see `voice/vocabulary.ts`. */
+  prompt?: string,
 ): Promise<TranscriptionResult> {
   let wavPath: string
   let transcodedThisAttempt = false
@@ -241,7 +244,7 @@ async function transcribeWithRetention(
     }
   }
   try {
-    const { text } = await transcriber.transcribe(wavPath)
+    const { text } = await transcriber.transcribe(wavPath, prompt)
     if (source.kind === 'webm') await unlink(source.path).catch(() => {})
     await unlink(wavPath).catch(() => {})
     return { ok: true, text }
@@ -848,7 +851,13 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       const outputPath = join(stored.scratchDir, `turn-${Date.now()}-${++turnFileSeq}.wav`)
       await writeFile(inputPath, audio)
 
-      const result = await transcribeWithRetention(transcode, deps.transcriber, { path: inputPath, kind: 'webm' }, outputPath)
+      const result = await transcribeWithRetention(
+        transcode,
+        deps.transcriber,
+        { path: inputPath, kind: 'webm' },
+        outputPath,
+        transcriptionPrompt(stored.drill.track),
+      )
       if (!result.ok) {
         turnsInFlight.delete(id)
         // A transcription failure is recoverable — see the module comment on
@@ -899,7 +908,15 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       store.touch(id, idleClock())
 
       const outputPath = join(stored.scratchDir, `retry-${Date.now()}-${++turnFileSeq}.wav`)
-      const result = await transcribeWithRetention(transcode, deps.transcriber, { path: retained.path, kind: retained.kind }, outputPath)
+      // The same prompt as the first attempt: a retry that decoded with a
+      // different vocabulary would not be a retry of the same transcription.
+      const result = await transcribeWithRetention(
+        transcode,
+        deps.transcriber,
+        { path: retained.path, kind: retained.kind },
+        outputPath,
+        transcriptionPrompt(stored.drill.track),
+      )
       if (!result.ok) {
         turnsInFlight.delete(id)
         // Stay recoverable, not escalate: same shape as a first-attempt

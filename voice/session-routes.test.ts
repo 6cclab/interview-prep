@@ -1325,3 +1325,79 @@ describe('GET /api/problems', () => {
     expect(res.status).toBe(404)
   })
 })
+
+/**
+ * The vocabulary bias reaching whisper. Its own block because the failure it
+ * exists to prevent is silent: a transcriber called with no prompt behaves
+ * exactly like one called with the right prompt, except the transcript is worse.
+ *
+ * `voice/vocabulary.test.ts` covers what the terms are and that no pattern name
+ * is among them; this covers only that the prompt is threaded through the route
+ * at all.
+ */
+describe('transcription vocabulary reaches the transcriber', () => {
+  function capturing() {
+    const prompts: (string | undefined)[] = []
+    return {
+      prompts,
+      transcriber: {
+        transcribe: async (_wav: string, prompt?: string) => {
+          prompts.push(prompt)
+          return { text: 'I would shard by tenant.' }
+        },
+      },
+    }
+  }
+
+  async function takeTurn(port: number, body = 'fake webm bytes') {
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'POST' })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    await readSSE(stream)
+    await readSSE(stream)
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/turn`, {
+      method: 'POST',
+      headers: { 'content-type': 'audio/webm' },
+      body: Buffer.from(body),
+    })
+    return id
+  }
+
+  it('passes a prompt containing the complexity notation that was being misheard', async () => {
+    const { prompts, transcriber } = capturing()
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* () {
+          yield 'Tell me more.'
+        },
+        transcriber,
+        transcode: async (_input, output) => writeFileSync(output, Buffer.from('fake wav bytes')),
+      }),
+    )
+    await takeTurn(port)
+
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain('O of n')
+    expect(prompts[0]).toContain('O of one')
+  })
+
+  // A pattern name in the prompt could be hallucinated into his own transcript on
+  // short or silent audio, which would plant the answer in his own record.
+  it('never passes a prompt naming a pattern', async () => {
+    const { prompts, transcriber } = capturing()
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* () {
+          yield 'Tell me more.'
+        },
+        transcriber,
+        transcode: async (_input, output) => writeFileSync(output, Buffer.from('fake wav bytes')),
+      }),
+    )
+    await takeTurn(port)
+
+    for (const phrase of ['two pointers', 'monotonic stack', 'sliding window', 'union find', 'trie']) {
+      expect(prompts[0]!.toLowerCase()).not.toContain(phrase)
+    }
+  })
+})

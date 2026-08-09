@@ -179,6 +179,28 @@ only and browsers try `::1` first.
 `VOICE_DEBUG=1` logs every request's method, path and status (never bodies —
 a turn body is recorded audio).
 
+### Transcription vocabulary
+
+whisper runs `ggml-large-v3-turbo` — the ceiling for local — so the model is not
+a lever. `--prompt` is, and `voice/vocabulary.ts` supplies it per track.
+
+The reason is measured, not assumed: a real drill transcript recorded "O of n"
+as "on" twice and "N" as "M", and the interviewer then marked him down for
+"reciting a shape" on the basis of an M he may never have said. A drill that
+scores a transcription bug is measuring the wrong thing.
+
+**The coding vocabulary names no data structures.** whisper hallucinates prompt
+content into output on short or silent audio, and a pattern is the answer — so a
+term list holding "monotonic stack" could plant it in his own transcript.
+`vocabulary.test.ts` enforces this against the real `problems/` directory names,
+so authoring a new pattern can break the test rather than silently making a term
+unsafe. The design track has no such constraint (its spoiler is `reference.md`)
+and gets its domain terms.
+
+This is **not** an LLM cleanup pass, deliberately. `speech.ts` keeps filler and
+false starts because `/mock` grades them, and a cleaner that smoothed a wrong
+answer would have the interviewer reply to a better answer than he gave.
+
 ## Tests encode the insight
 
 A drill is only worth doing if a **correct but brute-force** solution fails it.
