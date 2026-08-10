@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "bootstrap": "tsx scripts/bootstrap.ts",
     "reset": "tsx scripts/reset.ts",
+    "drill": "tsx scripts/drill.ts",
     "domains": "tsx scripts/domains-cli.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p voice/web/tsconfig.json",
     "mock:voice": "tsx voice/cli.ts mock",

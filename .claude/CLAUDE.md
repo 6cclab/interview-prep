@@ -1,11 +1,16 @@
 # Interview Prep
 
-Andre's interview practice repo. Standalone — it does not depend on the
-job-search repo, but links to it when configured.
+An interview practice repo. Standalone — it does not depend on any job-search
+repo, but links to one when configured.
 
-He has not interviewed in ~5 years. The rust is pattern recall under pressure,
-not coding ability. Everything here is built around that: bounded problem sets,
-budget-enforcing tests, and rationed hints.
+It is built for someone who can code but has not interviewed in years, where the
+rust is pattern recall under pressure rather than ability. Everything follows
+from that: bounded problem sets, budget-enforcing tests, and rationed hints.
+
+This file is also the prompt several commands read, which is why it addresses the
+candidate directly in places. Where it still says "he", that is leftover from
+being one person's notes; nothing depends on it, and a sweep to second person is
+outstanding.
 
 ## Tracks
 
@@ -62,6 +67,14 @@ than trying to be careful.
 
 ```bash
 pnpm bootstrap          # seed local/ (idempotent, never overwrites)
+pnpm drill [problem|pattern]  # a full coding drill with NO model involved:
+                        # picks by rust, shows the prompt cold, asks for the brute
+                        # force first, one hint rung per request, distinguishes the
+                        # two reds, asks complexity before confirming, logs a row.
+                        # Rungs 2 and 4 need no authoring (pattern name; solutions
+                        # file); rungs 1 and 3 come from meta.yaml `hints.nudge`
+                        # and `hints.approach`, and an unauthored rung says so
+                        # rather than serving the next one up.
 pnpm test <problem>     # run one drill
 pnpm test               # everything, as a regression check
 pnpm reset <problem>    # restore stub.ts over solution.ts
@@ -240,7 +253,7 @@ VOICE_BACKEND=ollama            # all three tracks
 VOICE_BACKEND_MOCK=ollama       # one track; beats the global
 VOICE_CLAUDE_MODEL=claude-opus-5 # override the Claude model for a drill worth it
 OLLAMA_MODEL=gpt-oss:20b        # override the local model (tags are case-sensitive)
-OLLAMA_HOST=192.168.3.168:11434 # a bare host:port is accepted, as ollama's CLI does
+OLLAMA_HOST=10.0.0.5:11434 # a bare host:port is accepted, as ollama's CLI does
 ```
 
 An unrecognised value **throws at startup** rather than falling back — a typo
@@ -394,7 +407,10 @@ guess the path.
 
 ## Tone
 
-Andre's three standing rules, kept in job-search and applied here to any drafted
-answer: first-person and conversational rather than third-person corporate;
-never compliment a company by implying his current org is worse; answer the
-question asked instead of pitching a project.
+Three standing rules for any drafted answer: first-person and conversational
+rather than third-person corporate; never compliment a company by implying your
+current employer is worse; answer the question asked instead of pitching a
+project.
+
+Override them in `local/` if your instincts differ — they are one person's
+preferences that happened to be worth writing down, not findings.

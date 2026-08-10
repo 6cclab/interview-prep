@@ -57,15 +57,15 @@ describe('normaliseHost', () => {
   })
 
   it('passes a URL through, minus any trailing slash', () => {
-    expect(normaliseHost('http://192.168.3.168:11434')).toBe('http://192.168.3.168:11434')
-    expect(normaliseHost('http://192.168.3.168:11434/')).toBe('http://192.168.3.168:11434')
+    expect(normaliseHost('http://10.0.0.5:11434')).toBe('http://10.0.0.5:11434')
+    expect(normaliseHost('http://10.0.0.5:11434/')).toBe('http://10.0.0.5:11434')
     expect(normaliseHost('https://ollama.example.com')).toBe('https://ollama.example.com')
   })
 
-  // `OLLAMA_HOST=192.168.3.168:11434` is valid for ollama's own CLI, so a
+  // `OLLAMA_HOST=10.0.0.5:11434` is valid for ollama's own CLI, so a
   // working shell config must not break when this code reads the same variable.
   it('accepts a bare host:port, as ollama’s CLI does', () => {
-    expect(normaliseHost('192.168.3.168:11434')).toBe('http://192.168.3.168:11434')
+    expect(normaliseHost('10.0.0.5:11434')).toBe('http://10.0.0.5:11434')
     expect(normaliseHost('box.local:11434/')).toBe('http://box.local:11434')
   })
 })
