@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { allowedPaths, assertNoSpoilers, buildSystemPrompt, competencyCoverage, timeCue } from './context'
+import { allowedPaths, assertNoSpoilers, buildSystemPrompt, closingCue, competencyCoverage, timeCue } from './context'
 import { splitTrailer } from './transcript'
 
 let root: string
@@ -387,5 +387,57 @@ describe('the spoken register', () => {
     // The closing verdict was the worst offender: it read as a report filed
     // about him rather than something said to him.
     expect(prompt).toMatch(/closing\s+verdict, which he hears/)
+  })
+})
+
+/**
+ * The closing cue, and the timeout it must not invent.
+ *
+ * A real debugging drill ended at 14:48 of a forty-five minute budget and the
+ * interviewer opened its verdict with "You ran out of time before you actually
+ * touched any code". He had pressed End. The cue said he ended the session, but
+ * the surrounding prompt frames the closing as the moment time expires and every
+ * turn carries a time check — so the model narrated a timeout, which changed what
+ * the grade meant: it excused the missing fix as a clock problem rather than a
+ * stop.
+ */
+describe('closingCue', () => {
+  it('says the clock has not run out, and forbids blaming one', () => {
+    const cue = closingCue()
+    expect(cue).toMatch(/clock has NOT run out/)
+    expect(cue).toMatch(/Do not say he ran out of time/)
+    expect(cue).toMatch(/do not excuse anything unfinished as a timing problem/)
+  })
+
+  it('is an aside, like every other cue', () => {
+    expect(closingCue()).toMatch(/^\[For you only:/)
+    expect(closingCue()).toMatch(/\]$/)
+  })
+})
+
+/**
+ * Two rules the debugging interviewer broke in a real drill, now stated.
+ *
+ * It volunteered a causal theory — "is there any async work already in flight from
+ * before the switch" — having been shown the bug report and nothing else, and it
+ * refused a question about the *shape* of the exercise ("where is the render
+ * call?") as though the answer were part of the puzzle. There is no call site: the
+ * two test files are the only entry points in any of these exercises. That refusal
+ * cost the last third of a fifteen-minute session.
+ */
+describe('what the debugging interviewer may and may not say', () => {
+  const prompt = (): string => buildSystemPrompt(root, 'debug', 'loyalty-discount')
+
+  it('forbids a theory about the cause, including one phrased as a question', () => {
+    expect(prompt()).toMatch(/Never offer a theory about the cause, including as a question/)
+    expect(prompt()).toMatch(/a guess phrased as "have you considered whether\.\.\." is the most expensive/)
+    expect(prompt()).toMatch(/Do not supply candidates/)
+  })
+
+  it('tells it to answer plainly that the tests are the only entry points', () => {
+    const text = prompt()
+    expect(text).toMatch(/the two test files are the only entry points/)
+    expect(text).toMatch(/the tests are the\s+callers/)
+    expect(text).toMatch(/Refusing that/)
   })
 })

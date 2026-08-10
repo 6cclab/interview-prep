@@ -681,7 +681,30 @@ export function useVoiceSession(): VoiceSession {
     // verdict — so this request takes as long as a model turn rather than
     // returning at once. Say so, or the button reads as having done nothing.
     setStatus('Closing out — the interviewer is giving its verdict…')
-    void fetch(`/api/session/${id}/end`, { method: 'POST' })
+    void (async () => {
+      try {
+        const res = await fetch(`/api/session/${id}/end`, { method: 'POST' })
+        if (res.ok) return
+        // Anything but 200 means this press did not end anything, and the `ended`
+        // SSE event that flips `mode` is never coming. Both halves of the recovery
+        // matter: releasing the latch so the button works again, and saying what
+        // happened. Before this, the request's status was never read at all — the
+        // call was a bare `void fetch` — so a 404 (the session was already gone,
+        // usually reaped when its stream dropped) left the button silently dead
+        // for the rest of the drill. That is what "End session not working" was.
+        endingRef.current = false
+        const { error } = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { error: string }
+        setStatus(
+          res.status === 404
+            ? 'That session is no longer on the server — it was already saved. Nothing more to end.'
+            : `Could not end the session: ${error}`,
+        )
+      } catch (error) {
+        endingRef.current = false
+        setStatus('Could not reach the drill server to end the session. Try again.')
+        console.error('voice: POST /end failed', error)
+      }
+    })()
   }, [])
 
   const record = useCallback(() => {

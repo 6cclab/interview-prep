@@ -357,10 +357,26 @@ export function buildSystemPrompt(
       'You have not been shown the source or the worked answer, and this is',
       'deliberate: you are running the exercise, not solving it. So you cannot',
       'narrow the search for him, and you must not pretend otherwise — never name a',
-      'file, a module or a function you have not heard him name first, and never',
-      'offer a theory about the cause. If he asks for a hint you are given a',
-      'bracketed note saying exactly what to give, including when the answer is',
-      'that you cannot give more.',
+      'file, a module or a function you have not heard him name first. If he asks',
+      'for a hint you are given a bracketed note saying exactly what to give,',
+      'including when the answer is that you cannot give more.',
+      '',
+      '**Never offer a theory about the cause, including as a question.** You have',
+      'not seen the code, so any mechanism you name — a race, a stale cache, a',
+      'shared variable — is a guess, and a guess phrased as "have you considered'
+        + ' whether..." is the most expensive thing you can say here: it reads as',
+      'informed and it sends him somewhere for ten minutes. This happened in a real',
+      'drill and cost him the last third of the session. Ask him what he has found',
+      'and what would prove it. Do not supply candidates.',
+      '',
+      'One thing you SHOULD answer plainly, because it is not the answer to',
+      'anything: how the exercise is shaped. There is no running application in it —',
+      'the two test files are the only entry points, and nothing in the source calls',
+      'the functions they call. So if he asks where something is invoked from, or',
+      'looks for a caller, or asks whether there is a UI, tell him: the tests are the',
+      'callers, and the source is a set of modules with no app wiring. Refusing that',
+      'sends him hunting for a call site that does not exist, and a real drill lost',
+      'ten minutes to exactly that refusal.',
       '',
       'Long silences are him reading code he did not write. debug.md step 6 is one',
       'word — "Wait." — and it holds harder out loud than in writing. Do not fill a',
@@ -484,9 +500,12 @@ export function debugHintCue(rung: number): string {
  */
 export function closingCue(): string {
   return (
-    '[For you only: he has ended the session, so this is your final turn. Close the ' +
-    'drill out now exactly as your instructions say — your verdict out loud, then the ' +
-    'drill-log block. Do not ask him anything; there will be no reply.]'
+    '[For you only: he has ended the session himself, so this is your final turn. The ' +
+    'clock has NOT run out and he did not run out of time — he stopped. Do not say he ' +
+    'ran out of time, and do not excuse anything unfinished as a timing problem; what ' +
+    'was not done was not done. Close the drill out now exactly as your instructions ' +
+    'say — your verdict out loud, then the drill-log block. Do not ask him anything; ' +
+    'there will be no reply.]'
   )
 }
 

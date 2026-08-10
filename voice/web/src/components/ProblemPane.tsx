@@ -80,7 +80,22 @@ export function ProblemPane({ problem, track }: Props) {
             // — but the dependency turned out to be unnecessary (see
             // `markdown.ts`) and the raw `#`, `**` and fence lines were exactly
             // what someone stares at for forty-five minutes.
-            <Markdown source={prompt} />
+            <>
+              <Markdown source={prompt} />
+              {/* The shape of the harness, which is not the answer to anything and
+                  cost a real drill ten minutes: a debugging exercise has no running
+                  application in it. Nothing in `src/` calls the render functions —
+                  the two test files are the only entry points — so "where is this
+                  called from?" has no answer inside the source, and the interviewer
+                  (which has seen neither) refused the question as though it did. */}
+              {track === 'debug' && (
+                <p className="problem-pane__note">
+                  There is no running application here: the source is a set of modules, and{' '}
+                  <code>repro.test.ts</code> and <code>invariant.test.ts</code> are the only things that call them.
+                  Nothing in <code>src/</code> invokes them, so there is no call site to find.
+                </p>
+              )}
+            </>
           )}
         </div>
       )}

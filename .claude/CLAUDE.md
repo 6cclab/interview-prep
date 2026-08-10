@@ -197,6 +197,17 @@ hypothesis. **A refusal is not recorded as help**, so the drill-log's hint count
 stays a measurement of what was actually given, the same reason a pairing session
 is not counted as an attempt.
 
+**Two things it must answer, and one it must never volunteer**, both learned from
+a real drill on 2026-08-10. The interviewer spent two turns pushing a specific
+causal theory — async work in flight from before the switch — having been shown
+the bug report and nothing else; a guess phrased as a question reads as informed
+and costs ten minutes, so the prompt now forbids naming any mechanism. And it
+refused "where is the render call?" as though the answer were part of the puzzle,
+when in fact **no exercise here has a running application**: nothing in `src/`
+calls the render functions, and `repro.test.ts` and `invariant.test.ts` are the
+only entry points. That is the harness's shape rather than anything's answer, so
+the prompt says to state it and the problem pane says it on screen.
+
 **It writes the same drill-log table**, with `Pattern` set to `debugging` per
 `debug.md`, because `/status` and `#/history` read exactly one log. Transcripts
 land in `local/debugging/`. The history screen therefore no longer claims to cover
