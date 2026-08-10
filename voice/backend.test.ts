@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { backendSummary, chooseBackend, DEFAULT_BACKEND, describeBackend } from './backend'
+import { backendSummary, chooseBackend, DEFAULT_BACKEND, describeBackend, transportLabel } from './backend'
 
 describe('chooseBackend', () => {
   it('defaults every track to the claude CLI when nothing is set', () => {
@@ -101,5 +101,37 @@ describe('backendSummary', () => {
   // than at the first turn.
   it('throws at startup on an invalid value', () => {
     expect(() => backendSummary({ VOICE_BACKEND: 'nope' })).toThrow(/not a known backend/)
+  })
+})
+
+/**
+ * The line a transcript carries about what produced it.
+ *
+ * Exists because a drill on 2026-08-10 read wrong and the file said nothing
+ * about which model had conducted it — the diagnosis had to lean on a commit
+ * timestamp instead.
+ */
+describe('transportLabel', () => {
+  it('names the backend and the Claude model by default', () => {
+    expect(transportLabel('coding', {})).toBe('cli / claude-sonnet-5')
+  })
+
+  it('names the ollama model when a track is local', () => {
+    expect(transportLabel('mock', { VOICE_BACKEND_MOCK: 'ollama', OLLAMA_MODEL: 'Qwen3.5:9b' })).toBe(
+      'ollama / Qwen3.5:9b',
+    )
+  })
+
+  // Per track, like every other backend decision here: a hybrid is the expected
+  // arrangement, so two transcripts written the same evening can legitimately
+  // name different models.
+  it('is per track', () => {
+    const env = { VOICE_BACKEND: 'cli', VOICE_BACKEND_MOCK: 'ollama' }
+    expect(transportLabel('mock', env)).toMatch(/^ollama \//)
+    expect(transportLabel('coding', env)).toMatch(/^cli \//)
+  })
+
+  it('reports the override model rather than the default', () => {
+    expect(transportLabel('design', { VOICE_CLAUDE_MODEL: 'claude-opus-5' })).toBe('cli / claude-opus-5')
   })
 })

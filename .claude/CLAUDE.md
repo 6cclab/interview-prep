@@ -205,6 +205,35 @@ The track has its own `VOICE_BACKEND_COACH`, and that is deliberate — it teach
 rather than asks, so a confident wrong explanation is its failure mode and no
 suite contradicts it.
 
+### Two things a spoken session records about itself
+
+**The interviewer speaks to you in the second person, and the prompt says so.**
+It did not, until a drill on 2026-08-10 was conducted in the third person and
+spoken aloud that way — "He said the text reads the same forwards and backwards
+... Where do those fit into what he just told me?" — with the closing verdict
+delivered as a report filed about him rather than something said to him.
+Everything else in the prompt refers to the candidate as "he" because it is
+written *about* the drill, so the one line naming the voice to answer in has to
+be explicit. It was being inferred, which worked until the model changed.
+
+**A transcript names the backend and model that produced it** (`Interviewer: cli
+/ claude-sonnet-5`, under the heading). The startup banner says what the *server*
+is on; a transcript read days later has to say what *that session* was on. Without
+it, diagnosing the drill above meant comparing the file's timestamp against the
+commit that changed the default model — corroborating evidence from git for a
+question the artifact should answer itself.
+
+**Ending a session is latched, and `POST /end` is not re-entrant.** Two client
+paths fire it — the dock's End session button and `beforeunload`'s `sendBeacon` —
+and on the coding track it awaits a closing interviewer turn, so it is in flight
+for a model minute while the session sits in the store looking live. `store.get`
+is not a guard against a second caller: the same drill wrote **two transcripts**
+(the earlier one truncated mid-drill) and logged **`00:00`** for a session its own
+transcript stamped at `03:05`, because the finisher holding the verdict read an
+entry clock its racing partner had already deleted. The second caller now gets a
+409, the elapsed time is sampled *before* the closing turn so the model's own
+minute is not billed to you, and both client paths hold a latch of their own.
+
 ### Browser support for `mock:web`
 
 **Use Chrome.** The web drill needs `getUserMedia`, and browsers disagree about

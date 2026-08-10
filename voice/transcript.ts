@@ -129,8 +129,17 @@ function isoStamp(at: Date): string {
   return `${iso.slice(0, 10)}-${iso.slice(11, 13)}${iso.slice(14, 16)}`
 }
 
-export function formatSession(entries: Entry[], startedAt: Date): string {
+/**
+ * @param transport Which backend and model conducted the session, e.g.
+ *   `cli / claude-sonnet-5`. Optional because `cli.ts` does not pass one, and a
+ *   transcript with no line is better than a wrong one. Recorded at all because
+ *   a drill on 2026-08-10 read wrong — the interviewer conducted it in the third
+ *   person — and nothing in the file said what had produced it, so the diagnosis
+ *   rested on commit timestamps rather than on the artifact.
+ */
+export function formatSession(entries: Entry[], startedAt: Date, transport?: string): string {
   const lines = [`# Voice session — ${startedAt.toISOString()}`, '']
+  if (transport) lines.push(`Interviewer: ${transport}`, '')
   for (const entry of entries) {
     const who = entry.speaker === 'interviewer' ? 'Interviewer' : 'Andre'
     lines.push(`**${who}** [${clock(entry.at)}]`, '', entry.text, '')

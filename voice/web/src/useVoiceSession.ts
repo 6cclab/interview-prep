@@ -329,6 +329,11 @@ export function useVoiceSession(): VoiceSession {
   // from the render it was created in and let a second press through.
   const testsRunningRef = useRef(false)
   const hintPendingRef = useRef(false)
+  // Whether this session's `/end` is already in flight. Same reasoning as the
+  // guards above, and one more: a coding drill's `/end` drives a closing
+  // interviewer turn, so it is in flight for a model minute — long enough for a
+  // second button press or a `beforeunload` beacon to fire a second one.
+  const endingRef = useRef(false)
   // Consecutive `EventSource` failures — see the error handler in `connectStream`.
   const streamFailuresRef = useRef(0)
   const eventSourceRef = useRef<EventSource | null>(null)
@@ -515,6 +520,9 @@ export function useVoiceSession(): VoiceSession {
     // has since been reset back to the stub.
     setVerdict(null)
     setHintRung(0)
+    // A fresh session can be ended again; the previous one's latch must not
+    // survive into it.
+    endingRef.current = false
     setStatus('Starting session…')
     setStarting(true)
     void (async () => {
@@ -658,6 +666,13 @@ export function useVoiceSession(): VoiceSession {
   const endSession = useCallback(() => {
     const id = sessionIdRef.current
     if (!id) return
+    // A coding drill's `/end` takes a model minute, and for all of it the button
+    // is still on screen and `mode` is still not `'ended'`. A second press used
+    // to send a second `/end` — which the server now refuses with a 409, but the
+    // press should not produce a request at all: the status line below would
+    // otherwise announce a close that this call is not the one performing.
+    if (endingRef.current) return
+    endingRef.current = true
     // A coding drill's `/end` drives one last interviewer turn — its closing
     // verdict — so this request takes as long as a model turn rather than
     // returning at once. Say so, or the button reads as having done nothing.
@@ -953,7 +968,10 @@ export function useVoiceSession(): VoiceSession {
   useEffect(() => {
     const handler = (): void => {
       const id = sessionIdRef.current
-      if (id && modeRef.current !== 'ended') {
+      // `endingRef` as well as the mode: closing the tab *during* the closing
+      // turn was the other half of the double-`/end` race, and `mode` does not
+      // flip until the `ended` SSE event arrives at the end of that turn.
+      if (id && modeRef.current !== 'ended' && !endingRef.current) {
         // Best-effort — the server's SSE-disconnect handler is the real
         // guarantee that an abandoned tab still gets persisted.
         navigator.sendBeacon(`/api/session/${id}/end`)

@@ -163,6 +163,8 @@ export interface FinishOptions {
     hints: number
     elapsedMs: number
   }
+  /** Which backend and model conducted it — see `formatSession`'s `transport`. */
+  transport?: string
 }
 
 export interface FinishResult {
@@ -182,7 +184,7 @@ export function finishSession(session: Session, interviewer: Interviewer, opts: 
   const relPath = writeSession(
     opts.root,
     sessionPath(opts.track, opts.startedAt, opts.problem),
-    formatSession(session.entries(), opts.startedAt),
+    formatSession(session.entries(), opts.startedAt, opts.transport),
   )
 
   let storyLogWritten = false

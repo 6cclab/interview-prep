@@ -8,6 +8,7 @@ import {
   sessionPath,
   splitTrailer,
   writeSession,
+  type Entry,
 } from './transcript'
 
 let root: string
@@ -256,5 +257,30 @@ describe('appendStoryLog', () => {
     const body = readFileSync(join(root, 'local/stories.md'), 'utf8')
     expect(body).not.toContain('existing\n## Conflict')
     expect(body).toContain('existing\n\n## Conflict')
+  })
+})
+
+/**
+ * The transport line.
+ *
+ * A drill on 2026-08-10 read wrong — the interviewer conducted it in the third
+ * person — and nothing in the transcript said which backend or model had
+ * produced it, so the diagnosis rested on comparing the file's timestamp against
+ * a commit that changed the default model. A transcript is the only artifact a
+ * drill leaves; it should not need corroborating evidence from git.
+ */
+describe('formatSession records what conducted the session', () => {
+  const entries: Entry[] = [{ speaker: 'interviewer', text: 'Go ahead.', at: 0 }]
+
+  it('names the backend and model under the heading', () => {
+    const body = formatSession(entries, new Date('2026-08-10T18:54:30.000Z'), 'cli / claude-sonnet-5')
+    expect(body).toContain('# Voice session — 2026-08-10T18:54:30.000Z')
+    expect(body).toContain('Interviewer: cli / claude-sonnet-5')
+  })
+
+  // `cli.ts` passes nothing, and a header line asserting an unknown transport
+  // would be worse than no line at all.
+  it('omits the line rather than guessing when it is not given', () => {
+    expect(formatSession(entries, new Date('2026-08-10T18:54:30.000Z'))).not.toContain('Interviewer:')
   })
 })

@@ -90,6 +90,14 @@ describe('buildCoachPrompt', () => {
     expect(prompt).toContain('"O of n", not "O(n)"')
   })
 
+  // The same omission that produced a third-person *interview* on the coding
+  // track. It matters more here: pairing is a conversation, and a coach
+  // narrating him to an absent third party is not one.
+  it('tells the coach to address him in the second person', () => {
+    expect(prompt).toMatch(/Speak to him directly, in the second person/)
+    expect(prompt).toMatch(/never narrate him in the third person/i)
+  })
+
   // A missing worked solution would produce a coach with nothing to coach from —
   // an interviewer told it may talk freely, which is the worst of both modes.
   it('refuses to coach a problem with no worked solution', () => {

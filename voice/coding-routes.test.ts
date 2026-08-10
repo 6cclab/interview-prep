@@ -919,6 +919,144 @@ describe('GET /api/history', () => {
 })
 
 /**
+ * What conducted the drill, recorded in the transcript it leaves behind.
+ *
+ * The startup banner says what the *server* is on. A transcript read days later
+ * needs to say what *that session* was on — on 2026-08-10 one read wrong and the
+ * only way to guess the model was to compare the file's timestamp against the
+ * commit that changed the default.
+ */
+describe('the transcript names its transport', () => {
+  it('writes the backend and model into the header', async () => {
+    mkdirSync(join(root, 'local'), { recursive: true })
+    const { port } = await listen(baseDeps({ transportLabel: () => 'ollama / Qwen3.5:9b' }))
+    const { id } = (await (await startCodingSession(port)).json()) as { id: string }
+    const { relPath } = (await (
+      await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    ).json()) as { relPath: string }
+    expect(readFileSync(join(root, relPath), 'utf8')).toContain('Interviewer: ollama / Qwen3.5:9b')
+  })
+})
+
+/**
+ * Ending a session exactly once.
+ *
+ * A real drill on 2026-08-10 produced two transcripts for one session — the
+ * earlier one truncated mid-drill — and a drill-log row reading `00:00` for a
+ * session whose own transcript stamped `[03:05]`. Both fell out of one hole:
+ * POST /end awaits a closing interviewer turn, the session stays in the store
+ * for all of it, and `store.get` is not a guard against a second caller. Two
+ * client paths fire that endpoint and neither can see the other — the dock's
+ * End session button and `beforeunload`'s `sendBeacon`.
+ */
+describe('POST /api/session/:id/end is not re-entrant', () => {
+  /**
+   * A closing turn that parks until released, so the second request provably
+   * lands *inside* it.
+   *
+   * A `setTimeout` here would make this a timing test: neutering the fix and
+   * re-running showed the second request sometimes arriving after the first had
+   * already finished, which passes for the wrong reason. `entered` resolves when
+   * the closing turn has actually started.
+   */
+  function pausedClosing(): { deps: VoiceServerDeps; entered: Promise<void>; release(): void } {
+    let onEntered = (): void => {}
+    let onRelease = (): void => {}
+    const entered = new Promise<void>((resolve) => {
+      onEntered = resolve
+    })
+    const released = new Promise<void>((resolve) => {
+      onRelease = resolve
+    })
+    const deps = baseDeps({
+      now: undefined,
+      store: createSessionStore(() => 'session-1'),
+      // Parks the *closing* turn specifically, spotted by the cue POST /end
+      // interjects. Counting turns instead would depend on whether the opening
+      // question has been driven yet, which is a different thing being tested.
+      createTransport: () => async function* (_system, messages) {
+        const last = messages[messages.length - 1]
+        if (typeof last?.content === 'string' && last.content.includes('he has ended the session')) {
+          onEntered()
+          await released
+        }
+        yield 'That is where we will stop.\n```drill-log\nsolved: no\nnote: ran out of time\n```'
+      },
+    })
+    return { deps, entered, release: () => onRelease() }
+  }
+
+  async function endTwiceInsideTheClosingTurn(port: number, harness: ReturnType<typeof pausedClosing>) {
+    const { id } = (await (await startCodingSession(port)).json()) as { id: string }
+    const end = () => fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    const first = end()
+    await harness.entered
+    const second = await end()
+    harness.release()
+    return { first: await first, second }
+  }
+
+  it('writes one transcript for one session, not one per caller', async () => {
+    mkdirSync(join(root, 'local'), { recursive: true })
+    const harness = pausedClosing()
+    const { port } = await listen(harness.deps)
+    await endTwiceInsideTheClosingTurn(port, harness)
+    // The transcript is the drill's product. Two files means one of them is a
+    // truncated copy, and nothing on disk says which.
+    expect(readdirSync(join(root, 'local/drills'))).toHaveLength(1)
+  })
+
+  it('answers 409 to the second caller rather than reporting a second success', async () => {
+    mkdirSync(join(root, 'local'), { recursive: true })
+    const harness = pausedClosing()
+    const { port } = await listen(harness.deps)
+    const { first, second } = await endTwiceInsideTheClosingTurn(port, harness)
+    expect(second.status).toBe(409)
+    expect(first.status).toBe(200)
+  })
+
+  // The row the racing pair produced in the real drill: `00:00`, because the
+  // caller that had the closing verdict — and so the only one able to write a
+  // row at all — read an entry clock its racing partner had already deleted.
+  it('does not log a drill that ran for minutes as taking no time', async () => {
+    mkdirSync(join(root, 'local'), { recursive: true })
+    const harness = pausedClosing()
+    const { port } = await listen(harness.deps)
+    const { id } = (await (await startCodingSession(port)).json()) as { id: string }
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+    const first = fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    await harness.entered
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    harness.release()
+    await first
+    expect(readFileSync(join(root, 'local/drill-log.md'), 'utf8')).not.toContain('| 00:00 |')
+  })
+
+  // The number logged is how long *the drill* took. Read after the closing turn
+  // it also absorbed the model's own minute — and read by a second finisher,
+  // whose predecessor had already deleted the entry clock, it was `?? 0`.
+  it("logs the drill's own elapsed time, not zero and not the closing turn", async () => {
+    mkdirSync(join(root, 'local'), { recursive: true })
+    const harness = pausedClosing()
+    const { port } = await listen(harness.deps)
+    const { id } = (await (await startCodingSession(port)).json()) as { id: string }
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+    const ending = fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    await harness.entered
+    // A closing turn far longer than the drill itself: if this leaks into the
+    // logged time, the assertion below cannot pass by luck.
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    harness.release()
+    await ending
+    const row = readFileSync(join(root, 'local/drill-log.md'), 'utf8')
+    // Exactly one second: 1.1s of drill. `00:02` is this defect — the 1.5s
+    // closing turn folded into Andre's time — and a range that admitted it is
+    // what let an earlier version of this test pass against the unfixed server.
+    expect(row).toContain('| 00:01 |')
+  })
+})
+
+/**
  * The coaching track, server side.
  *
  * Pairing rather than interviewing: the coach is handed the worked solution and

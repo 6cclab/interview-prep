@@ -1,3 +1,5 @@
+import { DEFAULT_CLAUDE_MODEL } from './claude-cli'
+import { DEFAULT_OLLAMA_MODEL } from './ollama'
 import type { Track } from './context'
 
 /**
@@ -116,4 +118,22 @@ export function backendSummary(env: NodeJS.ProcessEnv = process.env): Record<Tra
     coding: chooseBackend('coding', env),
     coach: chooseBackend('coach', env),
   }
+}
+
+/**
+ * One track's backend and model, as a single short line for a transcript header.
+ *
+ * Recorded per session because a transcript is the only artifact left after a
+ * drill, and on 2026-08-10 a drill read wrong — the interviewer conducted it in
+ * the third person — with no way to tell from the file which model had produced
+ * it. The startup banner says what the *server* is on; a transcript kept days
+ * later needs to say what *that session* was on.
+ */
+export function transportLabel(track: Track, env: NodeJS.ProcessEnv = process.env): string {
+  const backend = chooseBackend(track, env)
+  const model =
+    backend === 'ollama'
+      ? (env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL)
+      : (env.VOICE_CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL)
+  return `${backend} / ${model}`
 }

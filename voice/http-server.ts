@@ -24,9 +24,9 @@ import { appendCoached, isoDate, readCoachedProblems } from './coached'
 import { runDrillTests, verdictCue } from './drill-tests'
 import { createInterviewer, anthropicStream, type StreamFn } from './interviewer'
 import { claudeCliStream, DEFAULT_CLAUDE_MODEL } from './claude-cli'
-import { backendSummary, chooseBackend, describeBackend } from './backend'
+import { backendSummary, chooseBackend, describeBackend, transportLabel } from './backend'
 import { DEFAULT_OLLAMA_MODEL, ollamaStream, preloadOllama } from './ollama'
-import { createSession, finishSession } from './session'
+import { createSession, finishSession, type FinishResult } from './session'
 import { createSessionStore, type Drill, type RetainedAudio, type SessionStore, type StoredSession } from './session-store'
 import { whisperTranscriber, saySpeaker, type Speaker, type Transcriber } from './speech'
 import { openDisabled, openInBrowser, openPlan } from './open-browser'
@@ -86,6 +86,12 @@ export interface VoiceServerDeps {
    * in `solution.ts`. See `DrillTestOptions.runner` for the contract.
    */
   runDrillTests?(args: string[], cwd: string, reportPath: string): Promise<void>
+  /**
+   * Which backend and model a track runs on, recorded in the transcript header.
+   * Injectable so a test's transcript does not depend on the environment the
+   * suite happens to run in; defaults to the real per-track choice.
+   */
+  transportLabel?(track: Track): string
 }
 
 // A recorded interview turn is at most a few minutes of audio; 25MB is a wide
@@ -352,6 +358,7 @@ async function streamTurn(res: ServerResponse | undefined, turn: AsyncIterable<s
 function finishOptions(deps: VoiceServerDeps, stored: StoredSession, elapsedMs: number) {
   return {
     root: deps.root,
+    transport: (deps.transportLabel ?? transportLabel)(stored.drill.track),
     // The session's own drill, not a hardcoded 'mock' — a design session's
     // transcript belongs under local/designs/<problem>-live-..., and naming it
     // as a mock would file it in the wrong place under the wrong name.
@@ -369,16 +376,40 @@ function finishOptions(deps: VoiceServerDeps, stored: StoredSession, elapsedMs: 
   }
 }
 
+/**
+ * Ends a session and writes everything it produced.
+ *
+ * `closing` is the latch, and it is not optional bookkeeping. `store.get(id)`
+ * alone is not a guard against a second caller: POST /end awaits a closing
+ * interviewer turn — a real model minute — and the session stays in the store
+ * for all of it, so any other exit path reached in that window (a second End
+ * press, `beforeunload`'s `sendBeacon`, the idle reaper, DELETE /api/session)
+ * used to persist a *second* transcript and, because the first finisher had
+ * already deleted the entry clock, log the drill's time as `00:00`. Both were
+ * observed in a real drill on 2026-08-10.
+ *
+ * Returns null when the session is gone or already ending, so a route can answer
+ * 404 or 409 rather than reporting a second success for one session.
+ */
 function endAndPersist(
   deps: VoiceServerDeps,
   store: SessionStore,
   entryClocks: Map<string, () => number>,
+  closing: Set<string>,
   id: string,
-): void {
+  /**
+   * Elapsed milliseconds, when the caller sampled it before doing something
+   * slow. POST /end must: reading the clock *after* its closing turn would fold
+   * the model's own thinking time into the drill's logged duration.
+   */
+  elapsedOverride?: number,
+): FinishResult | null {
   const stored = store.get(id)
-  if (!stored) return
-  const elapsedMs = entryClocks.get(id)?.() ?? 0
-  const { relPath } = finishSession(stored.session, stored.interviewer, finishOptions(deps, stored, elapsedMs))
+  if (!stored) return null
+  if (closing.has(id)) return null
+  closing.add(id)
+  const elapsedMs = elapsedOverride ?? entryClocks.get(id)?.() ?? 0
+  const result = finishSession(stored.session, stored.interviewer, finishOptions(deps, stored, elapsedMs))
   // A coaching session records that it happened, and nothing else — no verdict,
   // no rung, no solved flag, because none of those were measured. See
   // voice/coached.ts for why this is not a drill-log row.
@@ -398,16 +429,18 @@ function endAndPersist(
     })
   }
   if (stored.sseClient) {
-    writeSSE(stored.sseClient, 'ended', { endedEarly: stored.session.endedEarly() ?? null, relPath })
+    writeSSE(stored.sseClient, 'ended', { endedEarly: stored.session.endedEarly() ?? null, relPath: result.relPath })
     stored.sseClient.end()
   }
   store.remove(id)
   entryClocks.delete(id)
+  closing.delete(id)
   // Every session's scratch directory is created in POST /api/session and
   // must not outlive the session — per-turn files are already unlinked as
   // they're consumed, but the directory itself was never removed on any exit
   // path until now.
   rmSync(stored.scratchDir, { recursive: true, force: true })
+  return result
 }
 
 export function createVoiceServer(deps: VoiceServerDeps): Server {
@@ -449,6 +482,10 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   // that one clock, same as before. When nothing is injected (production),
   // each session gets its own clock zeroed at that session's creation.
   const entryClocks = new Map<string, () => number>()
+  // Sessions being torn down. See `endAndPersist`: a session is still in the
+  // store throughout POST /end's awaited closing turn, so this is what stops a
+  // second caller persisting the same session twice.
+  const closing = new Set<string>()
 
   function makeEntryClock(): () => number {
     if (deps.now) return deps.now
@@ -459,7 +496,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   const idleMs = deps.idleMs ?? 5 * 60_000
   const sweep = setInterval(() => {
     for (const stored of store.reapIdle(idleClock(), idleMs)) {
-      endAndPersist(deps, store, entryClocks, stored.id)
+      endAndPersist(deps, store, entryClocks, closing, stored.id)
     }
   }, Math.min(idleMs, 30_000))
   sweep.unref()
@@ -540,8 +577,12 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         sendJson(res, 404, { error: 'no active session' })
         return
       }
-      endAndPersist(deps, store, entryClocks, id)
-      sendJson(res, 200, { ended: true })
+      // `ended: false` rather than a lie: this is the "end it and start fresh"
+      // recovery path, and it must not report success for a session whose own
+      // /end is mid-closing-turn — the client would then start a new session
+      // while the old one is still writing.
+      const ended = endAndPersist(deps, store, entryClocks, closing, id) !== null
+      sendJson(res, ended ? 200 : 409, ended ? { ended } : { ended, error: 'that session is already ending' })
       return
     }
 
@@ -847,7 +888,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // `endAndPersist` and kill the session (and the brand-new
         // connection) out from under a live reconnect.
         if (store.get(id)?.sseClient !== res) return
-        endAndPersist(deps, store, entryClocks, id)
+        endAndPersist(deps, store, entryClocks, closing, id)
       })
 
       const alreadyBegun = stored.session.entries().length > 0
@@ -858,7 +899,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(res, 'entry', entry)
           }
-          if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, id)
+          if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, closing, id)
         })().catch((error: unknown) => {
           console.error('voice session opening turn failed:', error)
         })
@@ -889,7 +930,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
             writeSSE(stored.sseClient, 'entry', entry)
           }
         }
-        if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, id)
+        if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, closing, id)
       })()
         .catch((error: unknown) => {
           console.error('voice session turn failed:', error)
@@ -1118,7 +1159,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
             writeSSE(stored.sseClient, 'entry', entry)
           }
         }
-        if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, id)
+        if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, closing, id)
       })()
         .catch((error: unknown) => {
           console.error('voice session hint failed:', error)
@@ -1191,7 +1232,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
             writeSSE(stored.sseClient, 'entry', entry)
           }
         }
-        if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, id)
+        if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, closing, id)
       })()
         .catch((error: unknown) => {
           console.error('voice session test reaction failed:', error)
@@ -1210,6 +1251,22 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         notFound(res)
         return
       }
+      // Two client paths fire this endpoint — the dock's End session button and
+      // `beforeunload`'s `sendBeacon` — and neither can see the other. Latched
+      // *before* the awaited closing turn below, because that turn is where the
+      // window was: for the whole model minute it takes, the session is still in
+      // the store and a second caller sailed past the `store.get` above.
+      if (closing.has(id)) {
+        sendJson(res, 409, { error: 'this session is already ending' })
+        return
+      }
+      closing.add(id)
+
+      // Sampled here, before the closing turn, because that turn takes a model
+      // minute and this number is how long *the drill* took. Reading the clock
+      // afterwards logged the interviewer's own thinking time as part of Andre's.
+      const elapsedMs = entryClocks.get(id)?.() ?? 0
+
       // The coding track gets one final interviewer turn before anything is
       // persisted, because its closing verdict and `drill-log` trailer are
       // *produced* by that turn — `finishSession` reads them off
@@ -1241,19 +1298,16 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         }
       }
 
-      const { relPath, storyLogWritten, drillLogWritten } = finishSession(
-        stored.session,
-        stored.interviewer,
-        finishOptions(deps, stored, entryClocks.get(id)?.() ?? 0),
-      )
-      if (stored.sseClient) {
-        writeSSE(stored.sseClient, 'ended', { endedEarly: stored.session.endedEarly() ?? null, relPath })
-        stored.sseClient.end()
+      // `closing` is already held, so this releases it rather than re-taking it:
+      // one persist path for every exit, including this one.
+      closing.delete(id)
+      const result = endAndPersist(deps, store, entryClocks, closing, id, elapsedMs)
+      if (!result) {
+        // Only reachable if something removed the session mid-closing-turn.
+        notFound(res)
+        return
       }
-      store.remove(id)
-      entryClocks.delete(id)
-      rmSync(stored.scratchDir, { recursive: true, force: true })
-      sendJson(res, 200, { relPath, storyLogWritten, drillLogWritten })
+      sendJson(res, 200, result)
       return
     }
 

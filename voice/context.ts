@@ -171,6 +171,20 @@ export function buildSystemPrompt(
     'no code blocks, no headings. Numbers and symbols must be spelled the way',
     'you would say them.',
     '',
+    // Stated because it was not, and a real drill on 2026-08-10 was conducted in
+    // the third person: "He said the text reads the same forwards and backwards
+    // ... Where do those fit into what he just told me?" — spoken aloud, to him.
+    // Everything above this line, including these instructions and the bracketed
+    // cues, discusses him as "he" because it is written *about* the drill; only
+    // this says which voice to answer in. Inferring it worked until the model
+    // changed, which is another way of saying it was never specified.
+    'Speak to him directly, in the second person, the whole way through. The',
+    'material above talks about him as "he" because it is written for you rather',
+    'than for him — you are talking to him, so say "you". Never narrate him in',
+    'the third person, never address a third party, and never describe what he',
+    'said as though reporting it to someone else. That includes your closing',
+    'verdict, which he hears: it is said to him, not written about him.',
+    '',
     'You have no tools and no file access. Everything you are permitted to know',
     'is above. Do not ask for a file and do not claim to have read one.',
     '',

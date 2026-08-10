@@ -140,6 +140,15 @@ export function buildCoachPrompt(root: string, problem: ProblemLocation): string
     'headings. Numbers, symbols and operators must be spelled the way you would say',
     'them — "O of n", not "O(n)".',
     '',
+    // The same omission that produced a third-person interview on the coding
+    // track — see the note in voice/context.ts's voice-mode. It matters more here:
+    // pairing is a conversation, and a coach narrating him to an absent third
+    // party is not one.
+    'Speak to him directly, in the second person. The material above talks about',
+    'him as "he" because it is written for you rather than for him — you are',
+    'talking to him, so say "you". Never narrate him in the third person and never',
+    'address anyone else.',
+    '',
     'You have no tools and no file access. Everything you are permitted to know is',
     'above, plus his working file, which you are shown each turn.',
     '',

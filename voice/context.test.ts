@@ -322,3 +322,30 @@ describe('the timed interviewer owns the clock it is holding', () => {
     expect(prompt).not.toContain('four minutes')
   })
 })
+
+/**
+ * The register, which was never stated and so was being inferred.
+ *
+ * A real drill on 2026-08-10 was conducted in the third person and spoken aloud
+ * that way: "He said the text reads the same forwards and backwards ... Where do
+ * those fit into what he just told me?" Everything else in the prompt refers to
+ * Andre as "he" because it is written *about* the drill — only one line says
+ * which voice to answer in, and until this it did not exist. Asserted on every
+ * track, because it lives in the shared voice-mode block and the failure was not
+ * track-specific.
+ */
+describe('the spoken register', () => {
+  it.each([
+    ['mock', undefined, undefined],
+    ['design', 'rate-limiter', undefined],
+    ['coding', 'container-with-most-water', 'two-pointers'],
+  ] as const)('tells the %s interviewer to address him in the second person', (track, problem, pattern) => {
+    const prompt = buildSystemPrompt(root, track, problem, pattern)
+    expect(prompt).toMatch(/Speak to him directly, in the second person/)
+    expect(prompt).toMatch(/say "you"/)
+    expect(prompt).toMatch(/never describe what he\s+said as though reporting it to someone else/)
+    // The closing verdict was the worst offender: it read as a report filed
+    // about him rather than something said to him.
+    expect(prompt).toMatch(/closing\s+verdict, which he hears/)
+  })
+})
