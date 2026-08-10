@@ -20,6 +20,7 @@ import {
 import { findCodingProblem, listCodingProblems, problemDir } from './problems'
 import { findCompetency, listCompetencies } from './competencies'
 import { buildCoachPrompt, codeCue, readWorkingFile } from './coach'
+import { appendCoached, isoDate, readCoachedProblems } from './coached'
 import { runDrillTests, verdictCue } from './drill-tests'
 import { createInterviewer, anthropicStream, type StreamFn } from './interviewer'
 import { claudeCliStream, DEFAULT_CLAUDE_MODEL } from './claude-cli'
@@ -376,11 +377,26 @@ function endAndPersist(
 ): void {
   const stored = store.get(id)
   if (!stored) return
-  const { relPath } = finishSession(
-    stored.session,
-    stored.interviewer,
-    finishOptions(deps, stored, entryClocks.get(id)?.() ?? 0),
-  )
+  const elapsedMs = entryClocks.get(id)?.() ?? 0
+  const { relPath } = finishSession(stored.session, stored.interviewer, finishOptions(deps, stored, elapsedMs))
+  // A coaching session records that it happened, and nothing else — no verdict,
+  // no rung, no solved flag, because none of those were measured. See
+  // voice/coached.ts for why this is not a drill-log row.
+  if (stored.drill.track === 'coach' && stored.drill.problem) {
+    // `findCodingProblem` rather than `codingPattern`, which throws: this runs
+    // after the transcript is already written, and the transcript is the product
+    // of the session. A directory that has moved or been renamed since the
+    // session started must not be able to take the SSE `ended` event and the
+    // scratch-directory cleanup down with it. An unresolvable pattern is
+    // recorded as `unknown`, which is true.
+    const found = findCodingProblem(deps.root, stored.drill.problem)
+    appendCoached(deps.root, {
+      date: isoDate(stored.startedAt),
+      problem: stored.drill.problem,
+      pattern: found?.pattern ?? 'unknown',
+      minutes: Math.round(elapsedMs / 60_000),
+    })
+  }
   if (stored.sseClient) {
     writeSSE(stored.sseClient, 'ended', { endedEarly: stored.session.endedEarly() ?? null, relPath })
     stored.sseClient.end()
@@ -593,6 +609,12 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       sendJson(res, 200, {
         summary: summarise(rows),
         rows: rows.map(({ pattern, ...row }) => (withPatterns ? { ...row, pattern } : row)),
+        // Which problems have been paired on. Sent unconditionally, unlike the
+        // pattern: a coaching session is something he chose and sat through, so
+        // there is nothing to spoil by saying it happened. It is here because a
+        // cold solve of a problem he was walked through is a weaker fact than a
+        // cold solve of one he was not, and the screen leads with the cold count.
+        coached: readCoachedProblems(deps.root),
       })
       return
     }

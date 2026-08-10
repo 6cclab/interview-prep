@@ -84,11 +84,26 @@ const HEADER = {
   mock: { title: 'Mock interview', kicker: 'Behavioral · voice' },
   design: { title: 'Design interview', kicker: 'System design' },
   coding: { title: 'Coding interview', kicker: 'Coding' },
+  // Not "interview": the header is the first thing that says which mode this is,
+  // and the whole point of the track is that it is not one.
+  coach: { title: 'Pairing session', kicker: 'Coaching · unrationed' },
   // Neither `home` nor `history` reaches DrillScreen, but the record is keyed by
   // the full Route view so a new view cannot be added without deciding what the
   // header says. Adding `history` to Route is what made the compiler ask.
   home: { title: 'Mock interview', kicker: 'Behavioral · voice' },
   history: { title: 'Past drills', kicker: 'Coding drill log' },
+} as const
+
+/**
+ * What the other voice is called on each track. See Transcript's `partner`.
+ */
+const PARTNER = {
+  mock: 'Interviewer',
+  design: 'Interviewer',
+  coding: 'Interviewer',
+  coach: 'Coach',
+  home: 'Interviewer',
+  history: 'Interviewer',
 } as const
 
 interface DrillScreenProps {
@@ -147,7 +162,9 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   const problem = 'problem' in route ? route.problem : ''
   // Whether this track has a problem statement to show — the same two tracks that
   // are timed, but derived separately because they are different questions.
-  const hasPane = route.view === 'design' || route.view === 'coding'
+  // Coaching shows the problem for the same reason the drills do — you cannot
+  // pair on a question that has scrolled away.
+  const hasPane = route.view === 'design' || route.view === 'coding' || route.view === 'coach'
   // A session exists to act on. Withheld before and after, because a live button
   // that 404s is worse than a disabled one.
   const live = phase !== 'idle' && phase !== 'ended'
@@ -364,7 +381,11 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   ])
 
   let statusTitle = 'Not started'
-  let statusDetail = 'The first question is asked out loud. Nothing is recorded until you start a turn.'
+  const partner = PARTNER[route.view]
+  let statusDetail =
+    partner === 'Coach'
+      ? 'The coach opens out loud. Nothing is recorded until you start a turn.'
+      : 'The first question is asked out loud. Nothing is recorded until you start a turn.'
   if (starting) {
     statusTitle = 'Starting the session'
     statusDetail = 'Asking the server for a session. The microphone has not been touched yet.'
@@ -378,10 +399,10 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     statusTitle = 'Transcribing your answer'
     statusDetail = 'The recording has stopped and is being turned into text. Nothing is being recorded.'
   } else if (phase === 'thinking') {
-    statusTitle = 'Interviewer is thinking'
+    statusTitle = `${partner} is thinking`
     statusDetail = 'Your answer went through. The reply is being written and will start speaking on its own.'
   } else if (phase === 'speaking') {
-    statusTitle = 'Interviewer is speaking'
+    statusTitle = `${partner} is speaking`
     statusDetail = 'The reply is being spoken and written out as it goes.'
   } else if (phase === 'ready') {
     statusTitle = 'Your turn'
@@ -477,7 +498,13 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
           )}
 
           <main className="main-column">
-            <Transcript entries={entries} interimSentences={interimSentences} streaming={interviewerSpeaking} meta={meta} />
+            <Transcript
+              entries={entries}
+              interimSentences={interimSentences}
+              streaming={interviewerSpeaking}
+              meta={meta}
+              partner={PARTNER[route.view]}
+            />
           </main>
         </div>
 
@@ -498,7 +525,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
               problem so it is in the same place as every other action, and stays
               on screen through `ended` so the last verdict and the hint count are
               still readable while the interviewer delivers its closing. */}
-          {route.view === 'coding' && (
+          {(route.view === 'coding' || route.view === 'coach') && (
             <div className="dock-stack__row">
               <CodingTools
                 verdict={verdict}
@@ -507,6 +534,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
                 hintPending={hintPending}
                 onRun={live ? runTests : undefined}
                 onHint={live ? askForHint : undefined}
+                rationed={route.view === 'coding'}
               />
             </div>
           )}

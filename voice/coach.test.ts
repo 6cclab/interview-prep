@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildCoachPrompt, coachPaths, codeCue, readWorkingFile } from './coach'
+import { appendCoached, readCoachedProblems } from './coached'
 import { allowedPaths, assertNoSpoilers, buildSystemPrompt } from './context'
 
 const PROBLEM = { slug: 'two-sum-sorted', pattern: 'two-pointers' }
@@ -123,5 +124,57 @@ describe('readWorkingFile', () => {
 
   it('returns null when there is no working file, which is a real state', () => {
     expect(readWorkingFile(seedRoot({ working: null }), PROBLEM)).toBeNull()
+  })
+})
+
+/**
+ * The coached marker.
+ *
+ * Its own file rather than a drill-log row, and that is the load-bearing choice:
+ * the history screen leads with the cold-solve count, and a coaching session
+ * counted as an attempt would inflate the one number it asks you to trust.
+ */
+describe('appendCoached', () => {
+  it('creates the file with a preamble that says these are not attempts', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'coached-'))
+    mkdirSync(join(dir, 'local'), { recursive: true })
+    const rel = appendCoached(dir, { date: '2026-08-10', problem: 'two-sum-sorted', pattern: 'two-pointers', minutes: 22 })
+    expect(rel).toBe('local/coached.md')
+    const body = readFileSync(join(dir, 'local/coached.md'), 'utf8')
+    expect(body).toMatch(/\*\*Not attempts\.\*\*/)
+    expect(body).toMatch(/drill-log\.md/)
+    expect(body).toContain('| 2026-08-10 | two-sum-sorted | two-pointers | 22 |')
+  })
+
+  it('appends without repeating the preamble', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'coached-'))
+    mkdirSync(join(dir, 'local'), { recursive: true })
+    const row = { date: '2026-08-10', problem: 'a', pattern: 'p', minutes: 1 }
+    appendCoached(dir, row)
+    appendCoached(dir, { ...row, problem: 'b' })
+    const body = readFileSync(join(dir, 'local/coached.md'), 'utf8')
+    expect(body.match(/Not attempts/g)?.length).toBe(1)
+    expect(readCoachedProblems(dir).sort()).toEqual(['a', 'b'])
+  })
+
+  // A transcript is the product of a session. Losing it to a failed bookkeeping
+  // append would be the wrong trade.
+  it('reports rather than throws when it cannot write', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'coached-'))
+    // No `local/` directory, so the append cannot succeed.
+    expect(appendCoached(dir, { date: '2026-08-10', problem: 'a', pattern: 'p', minutes: 1 })).toBeNull()
+  })
+})
+
+describe('readCoachedProblems', () => {
+  it('is empty when nothing has been coached', () => {
+    expect(readCoachedProblems(mkdtempSync(join(tmpdir(), 'coached-')))).toEqual([])
+  })
+
+  it('skips the header rows rather than reading them as data', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'coached-'))
+    mkdirSync(join(dir, 'local'), { recursive: true })
+    appendCoached(dir, { date: '2026-08-10', problem: 'only-one', pattern: 'p', minutes: 3 })
+    expect(readCoachedProblems(dir)).toEqual(['only-one'])
   })
 })

@@ -80,6 +80,16 @@ export function History({ onGoHome }: { onGoHome(): void }) {
   const summary = payload?.summary
   const rows = payload?.rows ?? []
   /**
+   * Problems that have been paired on, from `local/coached.md`.
+   *
+   * A set of slugs and nothing more, deliberately: the file has dates, but this
+   * screen does not claim the pairing came before or after any particular
+   * attempt. "This problem has been walked through at some point" is what the
+   * data supports, and stating more than that would be the same flattening the
+   * cold count exists to avoid.
+   */
+  const coached = new Set(payload?.coached ?? [])
+  /**
    * Only the very first load blanks the screen.
    *
    * Toggling patterns refetches, and keying the table's visibility off `loading`
@@ -186,7 +196,17 @@ export function History({ onGoHome }: { onGoHome(): void }) {
                       </td>
                       {reveal && <td>{row.pattern ? <code>{row.pattern}</code> : '—'}</td>}
                       <td>{row.solved ? 'Solved' : 'Not solved'}</td>
-                      <td>{rungLabel(row.hints)}</td>
+                      <td>
+                        {rungLabel(row.hints)}
+                        {/* Marked on the row rather than deducted from the headline.
+                            A cold solve of a problem that has been paired on is
+                            still a cold solve — nobody helped during the attempt —
+                            but it is weaker evidence of recall than one on a
+                            problem never walked through, and only he can weigh
+                            that. Silently folding it into the count would be
+                            inventing a judgement the log never recorded. */}
+                        {coached.has(row.problem) && <span className="history__paired"> · paired</span>}
+                      </td>
                       <td>{row.elapsedMs === 0 ? '—' : fmt(Math.round(row.elapsedMs / 1000))}</td>
                       <td className="history__note">{row.note}</td>
                     </tr>
@@ -194,6 +214,15 @@ export function History({ onGoHome }: { onGoHome(): void }) {
                 </tbody>
               </table>
             </div>
+
+            {rows.some((row) => coached.has(row.problem)) && (
+              <p className="home__note">
+                <strong>Paired</strong> means that problem appears in <code>local/coached.md</code> — you have been
+                walked through it in a pairing session at some point, before or after the attempt shown. A cold solve of
+                a paired problem is still a cold solve, but it is weaker evidence of recall than one on a problem you
+                have never had explained.
+              </p>
+            )}
 
             <p className="home__note">
               Coding drills only — the design and behavioural tracks write transcripts to <code>local/</code> rather

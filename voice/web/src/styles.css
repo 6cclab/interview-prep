@@ -1430,6 +1430,11 @@ ol.md__list {
   appearance: none;
   -webkit-appearance: none;
   min-width: 220px;
+  /* Chrome sizes a select to its widest option, and the behavioural picker's
+     options are prose titles with an optional " — no story yet" suffix. Without
+     this the control grew past the card's own border. */
+  max-width: 100%;
+  text-overflow: ellipsis;
   padding: 9px 34px 9px 12px;
   border: 2px solid var(--border);
   border-radius: 0;
@@ -1535,6 +1540,25 @@ ol.md__list {
 .history__of {
   font-size: 1rem;
   color: var(--muted-foreground);
+}
+
+/* A row whose select must not exceed its card. `.home__row` is shrink-to-fit,
+   so a wide select widens the row rather than being clipped by it — this pins
+   the row to the card and lets the select shrink inside it. */
+.home__row--fill {
+  width: 100%;
+}
+
+.home__row--fill select {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+/* Reads as an annotation on the help column, not a second result. */
+.history__paired {
+  color: var(--muted-foreground);
+  white-space: nowrap;
 }
 
 .history__controls {

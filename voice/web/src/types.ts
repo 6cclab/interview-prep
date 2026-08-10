@@ -83,7 +83,7 @@ export interface StuckSession {
 
 /** Which drill a session runs. Mirrors the server's `Drill` (voice/session-store.ts). */
 export interface Drill {
-  track: 'mock' | 'design' | 'coding'
+  track: 'mock' | 'design' | 'coding' | 'coach'
   /** Required for `design` and `coding`, absent for `mock`. */
   problem?: string
   /**
@@ -97,7 +97,7 @@ export interface Drill {
 }
 
 /** The tracks that have a problem to put on screen. */
-export type ProblemTrack = 'design' | 'coding' | 'mock'
+export type ProblemTrack = 'design' | 'coding' | 'mock' | 'coach'
 
 /** A problem and its prompt, from `GET /api/problems/:problem?track=`. */
 export interface ProblemStatement {
@@ -150,4 +150,12 @@ export interface HistorySummary {
 export interface HistoryPayload {
   summary: HistorySummary
   rows: HistoryRow[]
+  /**
+   * Problem slugs that appear in `local/coached.md`.
+   *
+   * Not gated behind `?patterns=1` the way the pattern is: pairing is something
+   * he chose and sat through, so saying it happened spoils nothing. Optional
+   * because a server older than the coaching track does not send it.
+   */
+  coached?: string[]
 }

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
 import { createSessionStore } from './session-store'
+import { appendCoached } from './coached'
 import { readSSE } from './test-helpers/sse'
 
 /**
@@ -881,6 +882,32 @@ describe('GET /api/history', () => {
     expect(body).not.toContain('two-pointers')
   })
 
+  // Not gated behind ?patterns=1, unlike the pattern: a pairing session is
+  // something he chose and sat through, so reporting that it happened spoils
+  // nothing. It is on the wire because a cold solve of a paired problem is
+  // weaker evidence of recall, and the screen leads with the cold count.
+  it('reports which problems have been paired on, unconditionally', async () => {
+    seedLog(ROW)
+    appendCoached(root, {
+      date: '2026-08-08',
+      problem: 'container-with-most-water',
+      pattern: 'two-pointers',
+      minutes: 18,
+    })
+    const { port } = await listen(baseDeps())
+    const body = await (await fetch(`http://127.0.0.1:${port}/api/history`)).text()
+    expect(JSON.parse(body).coached).toEqual(['container-with-most-water'])
+    // And still without the pattern, even though `local/coached.md` records one.
+    expect(body).not.toContain('two-pointers')
+  })
+
+  it('reports an empty coached list rather than omitting the field', async () => {
+    seedLog(ROW)
+    const { port } = await listen(baseDeps())
+    const body = (await (await fetch(`http://127.0.0.1:${port}/api/history`)).json()) as { coached: string[] }
+    expect(body.coached).toEqual([])
+  })
+
   it('is an empty history rather than an error when nothing has been drilled', async () => {
     const { port } = await listen(baseDeps())
     const res = await fetch(`http://127.0.0.1:${port}/api/history`)
@@ -932,6 +959,27 @@ describe('coach track', () => {
     expect(body.track).toBe('coach')
     // A clock turns pairing back into a test.
     expect(body.budgetMs).toBeUndefined()
+  })
+
+  // The session's own record. Not a drill-log row — see voice/coached.ts — so
+  // this is the only place a coaching session leaves a trace besides its
+  // transcript, and it is what stops a later cold solve reading as untainted.
+  it('records the session in local/coached.md when it ends', async () => {
+    mkdirSync(join(root, 'local'), { recursive: true })
+    const { port } = await listen(baseDeps())
+    await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coach', problem: SLUG }),
+    })
+    const ended = await fetch(`http://127.0.0.1:${port}/api/session`, { method: 'DELETE' })
+    expect(ended.status).toBe(200)
+    const body = readFileSync(join(root, 'local/coached.md'), 'utf8')
+    expect(body).toContain(`| ${SLUG} |`)
+    expect(body).toMatch(/\*\*Not attempts\.\*\*/)
+    // The drill log is untouched: nobody was tested, so there is no attempt to
+    // count and no cold-solve figure to dilute.
+    expect(existsSync(join(root, 'local/drill-log.md'))).toBe(false)
   })
 
   it('rejects a coaching session with no problem', async () => {

@@ -22,6 +22,7 @@ outstanding.
 | Debugging | `debugging/` | `/debug` | live |
 | Feature build | `feature/` | `/feature` | live |
 | Company prep | `local/companies/` | `/prep` | live |
+| Pairing | `problems/`, `solutions/` | `mock:web` `#/coach/<slug>` | live |
 
 ### Past drills
 
@@ -84,10 +85,11 @@ pnpm mock:web           # React browser client (127.0.0.1) — builds, serves, o
                         # Chrome by name, not the default browser: per the table below Arc
                         # never offers the microphone and fails silently, so handing the URL
                         # to whatever is default is a debugging trap. VOICE_NO_OPEN=1 skips it.
-                        # Serves ALL THREE spoken tracks. The landing page chooses;
-                        # each drill then gets its own screen at its own URL
-                        # (#/mock, #/design/<p>, #/coding/<p>), so a reload comes
-                        # back to the same drill instead of the chooser.
+                        # Serves every spoken track — the three drills and the
+                        # pairing session. The landing page chooses; each then gets
+                        # its own screen at its own URL (#/mock, #/design/<p>,
+                        # #/coding/<p>, #/coach/<p>), so a reload comes back to the
+                        # same one instead of the chooser.
 pnpm mock:web:claude    # ditto, every track on the Claude subscription
 pnpm mock:web:ollama    # ditto, every track on the local ollama model
 pnpm mock:web:hybrid    # ditto, behavioural local and the rest on Claude
@@ -164,6 +166,44 @@ resolved pattern is passed once into the prompt (the interviewer needs it to giv
 rung 2 of the hint ladder) and is deliberately *not* stored on the session, and
 anything derived from test output goes through `stripPatternPaths` on the way
 out. `voice/coding-routes.test.ts` asserts every one of those.
+
+### The pairing track
+
+The one mode that is not a test. `#/coach/<slug>` on `mock:web`, reached from the
+landing page's **Pairing** card — landing page only, because a link to it from a
+drill screen is exactly the leak the hint ladder exists to prevent. Starting one
+has to be a decision made before you begin, not an escape hatch reachable while
+you are stuck.
+
+**It is a separate door, not the drill door with the lock off.** The coach reads
+the worked solution and `patterns.md`; `assertNoSpoilers` still refuses both, and
+`allowedPaths('coach', …)` **throws** rather than returning a wider allowlist.
+`voice/coach.ts` builds the prompt from `coachPaths` on its own, and
+`voice/coach.test.ts` asserts both halves: the guard still rejects every path a
+coach reads, and the drill door still refuses to open for the track. A track
+exemption inside the guard would have turned one absolute rule into a conditional
+one — which is the rule not existing.
+
+Untimed, unrationed, unscored. No clock is sent, so no turn carries a time check;
+the hint button and the rung count are **omitted from the screen, not disabled**,
+because a greyed-out "Ask for a hint" advertises a cost that does not exist.
+**Run tests** stays, and so does writing code in your own editor: the coach is fed
+`solution.ts` as it stands each turn, as a bracketed cue it never speaks and never
+mistakes for something you said — the same mechanism as the design track's time
+check and the coding track's verdict.
+
+**A session writes `local/coached.md`, never a drill-log row.** `summarise()`
+counts attempts and cold solves and the history screen leads with the cold count;
+nobody was tested in a pairing session, so counting one as an attempt would
+corrupt the only number that screen asks you to trust. `GET /api/history` reports
+the paired problems (unconditionally — pairing is something you chose and sat
+through, so saying it happened spoils nothing) and the table marks them, because
+a cold solve of a problem you were walked through is weaker evidence of recall
+than one you were not. It is a marker, not a deduction: only you can weigh it.
+
+The track has its own `VOICE_BACKEND_COACH`, and that is deliberate — it teaches
+rather than asks, so a confident wrong explanation is its failure mode and no
+suite contradicts it.
 
 ### Browser support for `mock:web`
 
@@ -249,8 +289,9 @@ behaviour depends on what is already in the environment is not a choice.
 The variables underneath, for a one-off:
 
 ```bash
-VOICE_BACKEND=ollama            # all three tracks
-VOICE_BACKEND_MOCK=ollama       # one track; beats the global
+VOICE_BACKEND=ollama            # every track
+VOICE_BACKEND_MOCK=ollama       # one track; beats the global. Also
+                                # _DESIGN, _CODING and _COACH.
 VOICE_CLAUDE_MODEL=claude-opus-5 # override the Claude model for a drill worth it
 OLLAMA_MODEL=gpt-oss:20b        # override the local model (tags are case-sensitive)
 OLLAMA_HOST=10.0.0.5:11434 # a bare host:port is accepted, as ollama's CLI does

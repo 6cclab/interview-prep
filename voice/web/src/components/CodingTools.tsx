@@ -51,6 +51,15 @@ interface Props {
   /** Both absent until a session is live — there is nothing to act on. */
   onRun?(): void
   onHint?(): void
+  /**
+   * Whether help is rationed. True on the coding drill; false when coaching.
+   *
+   * When false the hint control and the rung line are **omitted, not disabled**.
+   * There is no ladder in a coaching session — help is unrationed there by design
+   * — so a greyed-out "Ask for a hint" would advertise a cost that does not
+   * exist, and "Hints: 0 of 4" would imply a budget being tracked.
+   */
+  rationed?: boolean
 }
 
 interface Rendered {
@@ -93,12 +102,12 @@ function render(verdict: DrillVerdict): Rendered {
   }
 }
 
-export function CodingTools({ verdict, running, hintRung, hintPending, onRun, onHint }: Props) {
+export function CodingTools({ verdict, running, hintRung, hintPending, onRun, onHint, rationed = true }: Props) {
   const shown = verdict ? render(verdict) : null
   const exhausted = hintRung >= MAX_RUNG
 
   return (
-    <section className="coding-tools" aria-label="Drill tools">
+    <section className="coding-tools" aria-label={rationed ? 'Drill tools' : 'Pairing tools'}>
       <div className="coding-tools__row">
         <Button variant="brand" disabled={running || !onRun} onClick={onRun}>
           {running ? 'Running tests…' : 'Run tests'}
@@ -107,14 +116,18 @@ export function CodingTools({ verdict, running, hintRung, hintPending, onRun, on
         {/* Secondary, and worded as a cost. Not because asking is discouraged —
             it is the point of practising rather than interviewing — but because
             the button that ends the turn should stay the obvious one. */}
-        <Button variant="outline" disabled={hintPending || exhausted || !onHint} onClick={onHint}>
-          {hintPending ? 'Asking…' : exhausted ? 'No hints left' : 'Ask for a hint'}
-        </Button>
+        {rationed && (
+          <Button variant="outline" disabled={hintPending || exhausted || !onHint} onClick={onHint}>
+            {hintPending ? 'Asking…' : exhausted ? 'No hints left' : 'Ask for a hint'}
+          </Button>
+        )}
 
         <span className="coding-tools__rung" aria-live="polite">
-          {onRun
-            ? `Hints: ${hintRung} of ${MAX_RUNG} — ${RUNG_TAKEN[Math.min(hintRung, MAX_RUNG)]}`
-            : 'Available once the interview has started.'}
+          {!rationed
+            ? 'Nothing is rationed here — ask out loud.'
+            : onRun
+              ? `Hints: ${hintRung} of ${MAX_RUNG} — ${RUNG_TAKEN[Math.min(hintRung, MAX_RUNG)]}`
+              : 'Available once the interview has started.'}
         </span>
       </div>
 

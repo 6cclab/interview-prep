@@ -9,6 +9,13 @@ interface Props {
   streaming: boolean
   /** `entries[i]`'s rendered metadata — "N:NN spoken" for candidate turns, wall-clock for interviewer turns. See App.tsx. */
   meta: string[]
+  /**
+   * What the other voice is called — "Interviewer" on every drill, "Coach" when
+   * pairing. A prop rather than a constant because the coaching track's entire
+   * claim is that it is not an interview, and a transcript that labels every
+   * reply "Interviewer" contradicts that on every line of the screen.
+   */
+  partner?: string
 }
 
 // How close to the bottom (px) still counts as "pinned" — matches the
@@ -28,7 +35,7 @@ function wordCount(text: string): number {
 // streams. Never the assembled system prompt, never `interviewer.lastRaw()`,
 // which carries an unstripped story-log trailer. This is the client half of
 // the spoiler gate; the server half is enforced by voice/spoiler-gate.test.ts.
-export function Transcript({ entries, interimSentences, streaming, meta }: Props) {
+export function Transcript({ entries, interimSentences, streaming, meta, partner = 'Interviewer' }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [pinned, setPinned] = useState(true)
   const [unseen, setUnseen] = useState(0)
@@ -107,13 +114,14 @@ export function Transcript({ entries, interimSentences, streaming, meta }: Props
         <div className="transcript-empty">
           <h1>Nothing started yet.</h1>
           <p>
-            The interviewer asks out loud. You press once to start answering and once when you are finished. Nothing
-            ends a turn but you.
+            {partner === 'Interviewer'
+              ? 'The interviewer asks out loud. You press once to start answering and once when you are finished. Nothing ends a turn but you.'
+              : 'The coach speaks out loud. You press once to start talking and once when you are finished. Nothing ends a turn but you, and nothing here is timed or scored.'}
           </p>
         </div>
       )}
 
-      <div className="transcript" ref={scrollRef} onScroll={handleScroll} role="log" aria-label="Interview transcript">
+      <div className="transcript" ref={scrollRef} onScroll={handleScroll} role="log" aria-label={`${partner === 'Interviewer' ? 'Interview' : 'Pairing'} transcript`}>
         {entries.map((entry, i) => {
           const isNewest = i === newestInterviewerIndex
           if (entry.speaker === 'interviewer') {
@@ -122,7 +130,7 @@ export function Transcript({ entries, interimSentences, streaming, meta }: Props
             return (
               <div className="turn turn--interviewer" key={i}>
                 <div className="turn__head">
-                  <span className="turn__label">Interviewer</span>
+                  <span className="turn__label">{partner}</span>
                   <span className="turn__meta">{meta[i]}</span>
                 </div>
                 {collapsible ? (
@@ -156,7 +164,7 @@ export function Transcript({ entries, interimSentences, streaming, meta }: Props
         {interimSentences.length > 0 && (
           <div className="turn turn--interviewer" key="live">
             <div className="turn__head">
-              <span className="turn__label">Interviewer</span>
+              <span className="turn__label">{partner}</span>
               <span className="turn__meta" />
             </div>
             <div className="turn__body">

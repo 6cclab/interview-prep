@@ -238,7 +238,10 @@ function BehavioralCard({
         One question, cold, spoken aloud. No clock and no countdown — silence does not end a turn, and thinking time is
         the exercise. Critiqued against your own tone rules at the end.
       </p>
-      <div className="home__row">
+      {/* `--fill` because the options here are prose titles, not slugs: Chrome
+          sizes a select to its widest option, which pushed the control past the
+          card's own border. This row caps it at the card width instead. */}
+      <div className="home__row home__row--fill">
         <label className="home__label" htmlFor="home-competency">
           Competency
         </label>
@@ -283,9 +286,14 @@ export function Home({ onChoose }: Props) {
   const design = useProblems('design')
   const coding = useProblems('coding')
   const mock = useProblems('mock')
+  const coach = useProblems('coach')
 
   // Any list failing to reach the server means the server is not there.
-  const offline = design.failure === 'offline' || coding.failure === 'offline' || mock.failure === 'offline'
+  const offline =
+    design.failure === 'offline' ||
+    coding.failure === 'offline' ||
+    mock.failure === 'offline' ||
+    coach.failure === 'offline'
 
   return (
     <main className="home">
@@ -331,6 +339,19 @@ export function Home({ onChoose }: Props) {
           offline={offline}
           buttonLabel="Coding drill"
           onStart={(problem) => onChoose({ view: 'coding', problem })}
+        />
+
+        {/* Landing page only, and deliberately below the drills. A coaching link
+            on the drill screen is exactly the leak the hint ladder exists to
+            prevent — starting one has to be a decision made before you begin,
+            not an escape hatch reachable while you are stuck. */}
+        <ProblemTrackCard
+          title="Pairing"
+          blurb="Not an interview. The coach has the worked solution and the pattern notes, can see your solution.ts as you type, and will answer straight — nothing is rationed and nothing is scored. Untimed. Use it after a drill, not instead of one."
+          list={coach}
+          offline={offline}
+          buttonLabel="Start pairing"
+          onStart={(problem) => onChoose({ view: 'coach', problem })}
         />
 
         {/* Not a track, so not a card: nothing starts here. Below the three

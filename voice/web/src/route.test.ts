@@ -169,3 +169,45 @@ describe('behavioural competency in the route', () => {
     expect(parseRoute('#/coding/two-sum-sorted')).toEqual({ view: 'coding', problem: 'two-sum-sorted' })
   })
 })
+
+/**
+ * The pairing route.
+ *
+ * A separate view rather than `#/coding/<slug>?coach=1`, because the two screens
+ * differ in what they offer rather than in a setting: pairing has no hint button
+ * and no rung count, since nothing there is rationed. The route is what the
+ * screen reads to decide that.
+ */
+describe('pairing route', () => {
+  it('round-trips a problem', () => {
+    expect(parseRoute('#/coach/two-sum-sorted')).toEqual({ view: 'coach', problem: 'two-sum-sorted' })
+    expect(routeHash({ view: 'coach', problem: 'two-sum-sorted' })).toBe('#/coach/two-sum-sorted')
+    expect(parseRoute(routeHash({ view: 'coach', problem: 'celebrity' }))).toEqual({
+      view: 'coach',
+      problem: 'celebrity',
+    })
+  })
+
+  it('asks for the coach track by bare slug, like the coding track', () => {
+    // The pattern is still the answer here even though the coach may say it out
+    // loud, because the client is what a screenshot exposes and the same URL is
+    // the one you reload a *drill* from.
+    expect(routeDrill({ view: 'coach', problem: 'two-sum-sorted' })).toEqual({
+      track: 'coach',
+      problem: 'two-sum-sorted',
+    })
+  })
+
+  it.each(['#/coach', '#/coach/', '#/coach/../../patterns.md', '#/coach/Two-Sum', '#/coach/a/b'])(
+    'refuses to route %j anywhere but home',
+    (hash) => {
+      expect(parseRoute(hash).view).toBe('home')
+    },
+  )
+
+  // A bare `#/coach` is not a drill the way `#/mock` is: there is no
+  // "coach's choice" — pairing is always on one problem.
+  it('has no problem-less form', () => {
+    expect(parseRoute('#/coach')).toEqual({ view: 'home' })
+  })
+})

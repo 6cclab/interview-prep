@@ -24,6 +24,11 @@ export type Route =
   | { view: 'mock'; competency?: string }
   | { view: 'design'; problem: string }
   | { view: 'coding'; problem: string }
+  /**
+   * Pairing on a coding problem. Reachable from the landing page only — a link
+   * from the drill screen is the leak the hint ladder exists to prevent.
+   */
+  | { view: 'coach'; problem: string }
   /** Past drills. Not a drill screen — it is read between them. */
   | { view: 'history' }
 
@@ -58,7 +63,7 @@ export function parseRoute(hash: string): Route {
   if (path === '' || path === 'home') return { view: 'home' }
   if (path === 'mock') return { view: 'mock' }
   if (path === 'history') return { view: 'history' }
-  const withProblem = /^(design|coding|mock)\/([^/]+)$/.exec(path)
+  const withProblem = /^(design|coding|coach|mock)\/([^/]+)$/.exec(path)
   if (withProblem) {
     let slug: string
     try {
@@ -68,7 +73,7 @@ export function parseRoute(hash: string): Route {
       return { view: 'home' }
     }
     if (PROBLEM_SLUG.test(slug)) {
-      const view = withProblem[1] as 'design' | 'coding' | 'mock'
+      const view = withProblem[1] as 'design' | 'coding' | 'coach' | 'mock'
       return view === 'mock' ? { view: 'mock', competency: slug } : { view, problem: slug }
     }
     // A segment that is not a slug falls through to `home` below, the same as a
