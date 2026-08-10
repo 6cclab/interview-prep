@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Drill, DrillVerdict, Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
+import type { AnyVerdict, Drill, Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
 
 export interface VoiceSession {
   mode: Mode
@@ -115,7 +115,7 @@ export interface VoiceSession {
    */
   runTests(): void
   /** The most recent test run's verdict, or `null` before the first run. */
-  verdict: DrillVerdict | null
+  verdict: AnyVerdict | null
   /** True while a suite is running, so the button can say so and not be pressed twice. */
   testsRunning: boolean
   /**
@@ -127,6 +127,8 @@ export interface VoiceSession {
   askForHint(): void
   /** Highest hint rung taken, 0-4. 0 means no help taken. */
   hintRung: number
+  /** True once an ask returned nothing further to give. See `askForHint`. */
+  hintsExhausted: boolean
   /** True while a hint request is in flight. */
   hintPending: boolean
   record(): void
@@ -297,9 +299,10 @@ export function useVoiceSession(): VoiceSession {
   // a sleeping laptop — all of which stall interval callbacks and would
   // otherwise leave the clock reading long after the time was actually gone.
   const [starting, setStarting] = useState(false)
-  const [verdict, setVerdict] = useState<DrillVerdict | null>(null)
+  const [verdict, setVerdict] = useState<AnyVerdict | null>(null)
   const [testsRunning, setTestsRunning] = useState(false)
   const [hintRung, setHintRung] = useState(0)
+  const [hintsExhausted, setHintsExhausted] = useState(false)
   const [hintPending, setHintPending] = useState(false)
   const [deadlineAt, setDeadlineAt] = useState<number | null>(null)
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null)
@@ -520,6 +523,7 @@ export function useVoiceSession(): VoiceSession {
     // has since been reset back to the stub.
     setVerdict(null)
     setHintRung(0)
+    setHintsExhausted(false)
     // A fresh session can be ended again; the previous one's latch must not
     // survive into it.
     endingRef.current = false
@@ -852,7 +856,9 @@ export function useVoiceSession(): VoiceSession {
           setStatus(`Could not run the tests: ${error}`)
           return
         }
-        setVerdict((await res.json()) as DrillVerdict)
+        // Either shape; which one is decided by the drill's track, and only the
+        // screen needs to know that. See types.ts's AnyVerdict.
+        setVerdict((await res.json()) as AnyVerdict)
         setStatus('Tests finished.')
       } catch (error) {
         setStatus('Could not reach the drill server to run the tests.')
@@ -885,8 +891,15 @@ export function useVoiceSession(): VoiceSession {
           setStatus(`Could not ask for a hint: ${error}`)
           return
         }
-        const { rung } = (await res.json()) as { rung: number }
+        const { rung, servable } = (await res.json()) as { rung: number; servable?: boolean }
         setHintRung(rung)
+        // `servable: false` means the ask bought nothing — the debugging ladder
+        // runs out after rung 1, and the server refuses rather than letting the
+        // interviewer guess at the defect. Kept separate from `hintRung`, which is
+        // help actually taken and what the drill-log row records: a refusal must
+        // not read as a hint in either place. Absent on a coding drill, where
+        // every rung can be served.
+        if (servable === false) setHintsExhausted(true)
       } catch (error) {
         setStatus('Could not reach the drill server to ask for a hint.')
         console.error('voice: POST /hint failed', error)
@@ -1031,6 +1044,7 @@ export function useVoiceSession(): VoiceSession {
     testsRunning,
     askForHint,
     hintRung,
+    hintsExhausted,
     hintPending,
     record,
     stopAndSubmit,

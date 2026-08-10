@@ -83,7 +83,7 @@ export interface StuckSession {
 
 /** Which drill a session runs. Mirrors the server's `Drill` (voice/session-store.ts). */
 export interface Drill {
-  track: 'mock' | 'design' | 'coding' | 'coach'
+  track: 'mock' | 'design' | 'coding' | 'coach' | 'debug'
   /** Required for `design` and `coding`, absent for `mock`. */
   problem?: string
   /**
@@ -97,7 +97,7 @@ export interface Drill {
 }
 
 /** The tracks that have a problem to put on screen. */
-export type ProblemTrack = 'design' | 'coding' | 'mock' | 'coach'
+export type ProblemTrack = 'design' | 'coding' | 'mock' | 'coach' | 'debug'
 
 /** A problem and its prompt, from `GET /api/problems/:problem?track=`. */
 export interface ProblemStatement {
@@ -120,6 +120,24 @@ export type DrillVerdict =
   | { kind: 'correctness-red'; failed: string[] }
   | { kind: 'cost-red'; failed: string[] }
   | { kind: 'errored'; message: string }
+
+/**
+ * A debugging exercise's outcome, from the same `POST /api/session/:id/tests`.
+ * Mirrors the server's `DebugVerdict` (voice/debug-tests.ts).
+ *
+ * Where a coding drill has two kinds of *red* that mean opposite things, this has
+ * two kinds of **green** — and the misleading one is the one that looks like
+ * success. `symptom-patch` is its own case, never a shade of failure and never a
+ * partial pass: it is the finding the exercise exists to produce.
+ */
+export type DebugVerdict =
+  | { kind: 'root-cause' }
+  | { kind: 'symptom-patch'; failed: string[] }
+  | { kind: 'unfixed'; failed: string[] }
+  | { kind: 'errored'; message: string }
+
+/** Either track's outcome. The screen decides which renderer to use, by route. */
+export type AnyVerdict = DrillVerdict | DebugVerdict
 
 /**
  * One past drill, from `GET /api/history` (server: `voice/drill-log.ts`).

@@ -161,6 +161,14 @@ export function sessionPath(track: Track, startedAt: Date, problem?: string): st
     // the same problem.
     return `local/coaching/${problem}-${isoStamp(startedAt)}.md`
   }
+  if (track === 'debug') {
+    if (!problem) throw new Error('A debugging session needs an exercise name.')
+    // Its own directory rather than `local/drills/`, which is the coding track's.
+    // The two write the same drill-log table — `/status` reads exactly one log —
+    // but a transcript is read by hand and mixing the two tracks in one folder
+    // makes "what did I do on Tuesday" harder than it needs to be.
+    return `local/debugging/${problem}-live-${isoStamp(startedAt)}.md`
+  }
   if (track === 'coding') {
     if (!problem) throw new Error('A coding session needs a problem name.')
     // By problem slug, never by `problems/<pattern>/<slug>` — the pattern is the

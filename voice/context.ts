@@ -8,7 +8,7 @@ import { join, normalize, sep } from 'node:path'
  * reads its files through `voice/coach.ts`, which explains why that is a separate
  * door rather than an exemption inside this one.
  */
-export type Track = 'mock' | 'design' | 'coding' | 'coach'
+export type Track = 'mock' | 'design' | 'coding' | 'coach' | 'debug'
 
 /**
  * Paths the interviewer must never see. `.claude/rules/no-spoilers.md` states
@@ -85,6 +85,18 @@ export function allowedPaths(track: Track, problem?: string, pattern?: string): 
     // an approach once already. No `meta.yaml` either; it names the pattern in a
     // field, and the pattern reaches the prompt deliberately and once, below.
     return ['.claude/commands/drill.md', `problems/${pattern}/${problem}/README.md`]
+  }
+  if (track === 'debug') {
+    // The bug report and the command file, and deliberately nothing else.
+    //
+    // Not `src/**`: that is where the bug is, and `debug.md` is explicit — "do
+    // not read the source files looking for the bug so you can steer him toward
+    // it — you are running the exercise, not solving it." Not the two suites
+    // either: they are the objective standard and the server reports their
+    // verdict, exactly as on the coding track. And not
+    // `solutions/debugging/<exercise>.md`, which `assertNoSpoilers` denies
+    // outright by the `^solutions/` rule, for every track, with no exception.
+    return ['.claude/commands/debug.md', `debugging/${problem}/README.md`]
   }
   return [
     '.claude/commands/design.md',
@@ -304,11 +316,94 @@ export function buildSystemPrompt(
     )
   }
 
+  if (track === 'debug') {
+    voiceMode.push(
+      '',
+      'You are holding the clock, so you are responsible for how it is spent. Each',
+      'turn you are given is preceded by a time check; treat it as instruction to',
+      'you, not as something he said, and never read it aloud.',
+      '',
+      'debug.md is written for a chat session with file tools. What it asks you to',
+      'do yourself is done for you instead:',
+      '',
+      'Step 2, resetting the exercise: not yours. If he has attempted this before,',
+      'that is his to reset from the terminal.',
+      '',
+      'Step 3, pasting the README: he can already see the bug report on screen. Do',
+      'not read it out, and do not name its file path. Open with step 5 instead —',
+      'ask what he thinks is happening and what would prove it — because that is',
+      'the one question debug.md wants asked before he touches any code.',
+      '',
+      'Step 4, starting a timer: the clock runs on screen.',
+      '',
+      'The `pnpm test` run under "When he says he is done": he runs it, and you are',
+      'given the outcome as a bracketed note. It tells you which of the two suites',
+      'passed, and that distinction is the exercise. Report it against debug.md\'s',
+      'three questions, in its order, starting with root cause or symptom.',
+      '',
+      'The drill log: you cannot write it, but it does get written. Say your',
+      'verdict out loud as your closing turn, then end that final turn with this',
+      'block, exactly as shown:',
+      '',
+      '```drill-log',
+      'solved: yes or no',
+      'note: one line, saying whether it was root cause or a symptom patch',
+      '```',
+      '',
+      'It is stripped before your words reach him — do not speak it, name it, or',
+      'introduce it. `solved: yes` means the root cause, both suites green. A',
+      'symptom patch is `solved: no`, whatever else it turned green.',
+      '',
+      'You have not been shown the source or the worked answer, and this is',
+      'deliberate: you are running the exercise, not solving it. So you cannot',
+      'narrow the search for him, and you must not pretend otherwise — never name a',
+      'file, a module or a function you have not heard him name first, and never',
+      'offer a theory about the cause. If he asks for a hint you are given a',
+      'bracketed note saying exactly what to give, including when the answer is',
+      'that you cannot give more.',
+      '',
+      'Long silences are him reading code he did not write. debug.md step 6 is one',
+      'word — "Wait." — and it holds harder out loud than in writing. Do not fill a',
+      'pause, do not ask how it is going, and do not comment on an investigation in',
+      'progress.',
+    )
+  }
+
   voiceMode.push('</voice-mode>')
   sections.push(voiceMode.join('\n'))
 
   return sections.join('\n\n')
 }
+
+/**
+ * The debugging track's ladder, from `debug.md`'s step 7.
+ *
+ * A different ladder, not a relabelling of the coding one: a debugging exercise
+ * has no pattern to name, and its rungs walk in from "where does behaviour
+ * diverge" to the defect itself.
+ *
+ * **Only rung 1 can actually be served, and that is a real limit rather than an
+ * oversight.** Rungs 2 to 4 all name some part of the answer, and the answer is
+ * `solutions/debugging/<exercise>.md` — a file `assertNoSpoilers` denies for
+ * every track. The coding track gets around the same problem by having its one
+ * spoiler be a *pattern name*, cheap enough to pass into the prompt deliberately;
+ * there is no equivalent here, because the smallest useful unit of a debugging
+ * answer is the defect. An interviewer asked for rung 2 without it would invent a
+ * module, and a confident wrong pointer costs more than silence in an exercise
+ * whose whole subject is forming a hypothesis. So `debugHintCue` says outright
+ * that it cannot give more, which is the same choice `pnpm drill` makes for an
+ * unauthored rung.
+ */
+export const DEBUG_HINT_RUNGS = [
+  'no help taken',
+  'a question about where the behaviour diverges from expectation',
+  'which module the defect lives in',
+  'the nature of the defect, in words',
+  'the root cause and the fix',
+] as const
+
+/** The last debugging rung the interviewer can serve without the answer. See `DEBUG_HINT_RUNGS`. */
+export const MAX_SERVABLE_DEBUG_RUNG = 1
 
 /** The hint ladder's rungs, per `.claude/rules/no-spoilers.md`. Index 0 is no help taken. */
 export const HINT_RUNGS = [
@@ -350,6 +445,34 @@ export function hintCue(rung: number): string {
 }
 
 /**
+ * One rung of the *debugging* ladder, or an honest refusal past rung 1.
+ *
+ * The refusal is the interesting half. Past rung 1 every rung names part of the
+ * root cause, which this interviewer has not been given and must not be — see
+ * `DEBUG_HINT_RUNGS`. Telling him plainly that the help has run out lets him
+ * decide what to do with the information; a guessed module would read as
+ * authoritative and send him digging in the wrong file for ten minutes.
+ */
+export function debugHintCue(rung: number): string {
+  if (rung <= MAX_SERVABLE_DEBUG_RUNG) {
+    return (
+      `[Hint request, for you only: give rung ${rung} and stop — ${DEBUG_HINT_RUNGS[rung]}. ` +
+      'Ask it as a question about the reported behaviour, using only the bug report. ' +
+      'Do not name a file, a module or a function, and do not guess at the cause. ' +
+      'Do not announce which rung it is or say how many remain.]'
+    )
+  }
+  return (
+    '[Hint request, for you only: he has asked for more help than you can give. The ' +
+    'remaining rungs all name part of the defect, and you have not been shown the ' +
+    'source or the worked answer — deliberately. Tell him plainly, in one sentence, ' +
+    'that you cannot narrow it further and that the worked answer is his to read after ' +
+    'the session with /review. Then let him keep working. Do not guess at a module, a ' +
+    'file or a cause: a wrong pointer stated confidently costs him more than no hint.]'
+  )
+}
+
+/**
  * The cue that asks a coding interviewer to close the drill out, now.
  *
  * Needed because the closing verdict and its `drill-log` trailer are instructed
@@ -366,6 +489,15 @@ export function closingCue(): string {
     'drill-log block. Do not ask him anything; there will be no reply.]'
   )
 }
+
+/**
+ * The live debugging track's budget.
+ *
+ * `debug.md` says "start a timer" without naming a length, so this is a choice
+ * rather than a quotation: the same forty-five minutes the design and coding
+ * tracks get, because it is the length of the round being rehearsed.
+ */
+export const DEBUG_BUDGET_MS = 45 * 60 * 1000
 
 /** The live design track's budget, per `design.md`: "45 minutes unless he says otherwise." */
 export const DESIGN_BUDGET_MS = 45 * 60 * 1000

@@ -179,14 +179,18 @@ function ProblemTrackCard({ title, blurb, list, offline, buttonLabel, onStart }:
                 <optgroup key={group.label} label={group.label}>
                   {group.problems.map((problem) => (
                     <option key={problem} value={problem}>
-                      {problem}
+                      {list.titles[problem] ?? problem}
                     </option>
                   ))}
                 </optgroup>
               ))
             : list.problems.map((problem) => (
                 <option key={problem} value={problem}>
-                  {problem}
+                  {/* A title when the track sends one — the debugging track sends
+                      the bug report's headline, which is what makes its picker
+                      readable. Design and coding send none, so they show slugs
+                      exactly as before. */}
+                  {list.titles[problem] ?? problem}
                 </option>
               ))}
         </select>
@@ -287,13 +291,15 @@ export function Home({ onChoose }: Props) {
   const coding = useProblems('coding')
   const mock = useProblems('mock')
   const coach = useProblems('coach')
+  const debug = useProblems('debug')
 
   // Any list failing to reach the server means the server is not there.
   const offline =
     design.failure === 'offline' ||
     coding.failure === 'offline' ||
     mock.failure === 'offline' ||
-    coach.failure === 'offline'
+    coach.failure === 'offline' ||
+    debug.failure === 'offline'
 
   return (
     <main className="home">
@@ -339,6 +345,15 @@ export function Home({ onChoose }: Props) {
           offline={offline}
           buttonLabel="Coding drill"
           onStart={(problem) => onChoose({ view: 'coding', problem })}
+        />
+
+        <ProblemTrackCard
+          title="Debugging"
+          blurb="Forty-five minutes, spoken, timed. A bug report for code you did not write — read it in your own editor, say what you think is happening before you change anything, and run both suites when you are ready. A fix that turns the reported symptom green while the second suite stays red is a symptom patch, and it is reported as one."
+          list={debug}
+          offline={offline}
+          buttonLabel="Debugging round"
+          onStart={(problem) => onChoose({ view: 'debug', problem })}
         />
 
         {/* Landing page only, and deliberately below the drills. A coaching link

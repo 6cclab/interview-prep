@@ -197,7 +197,10 @@ export function finishSession(session: Session, interviewer: Interviewer, opts: 
   }
 
   let drillLogWritten = false
-  if (opts.track === 'coding' && opts.problem && opts.drill) {
+  // Coding and debugging both. The row's shape is identical — the track
+  // difference is entirely in what `opts.drill.pattern` holds, which the caller
+  // resolved.
+  if ((opts.track === 'coding' || opts.track === 'debug') && opts.problem && opts.drill) {
     // Only the interviewer's judgement comes from the trailer. The row's facts
     // come from `opts.drill`, which the server counted.
     const { log } = splitDrillLog(interviewer.lastRaw())

@@ -123,8 +123,8 @@ export function History({ onGoHome }: { onGoHome(): void }) {
         {!firstLoad && !failed && summary?.attempts === 0 && (
           <div className="history__empty">
             <p>
-              Nothing logged yet. A drill writes a row here when it finishes — from <code>/drill</code> or from the
-              spoken coding track, both of which append to the same log.
+              Nothing logged yet. A drill writes a row here when it finishes — from <code>/drill</code>,{' '}
+              <code>/debug</code>, or the spoken coding and debugging tracks, all of which append to the same log.
             </p>
             <p className="home__note">
               There is no score to show and nothing is wrong. This screen is only useful once there are a few rows in
@@ -225,9 +225,11 @@ export function History({ onGoHome }: { onGoHome(): void }) {
             )}
 
             <p className="home__note">
-              Coding drills only — the design and behavioural tracks write transcripts to <code>local/</code> rather
-              than scores, so there is nothing comparable to list. For the full debrief on any row, run{' '}
-              <code>/review &lt;problem&gt;</code>.
+              Coding drills and debugging exercises — the two tracks that write a scored row. The design and
+              behavioural tracks write transcripts to <code>local/</code> rather than scores, so there is nothing
+              comparable to list. A debugging row is the one whose pattern reads <code>debugging</code>, and{' '}
+              <strong>solved</strong> there means the root cause rather than a symptom patch. For the full debrief on
+              any row, run <code>/review &lt;problem&gt;</code>.
             </p>
           </>
         )}

@@ -28,6 +28,9 @@ beforeEach(() => {
   // shared voice-mode assertions can cover all three tracks rather than two.
   seed('.claude/commands/drill.md', 'DRILL COMMAND')
   seed('problems/two-pointers/container-with-most-water/README.md', 'Given heights, find the best pair.')
+  // The debugging track: its command file and one exercise's bug report.
+  seed('.claude/commands/debug.md', 'DEBUG COMMAND')
+  seed('debugging/loyalty-discount/README.md', '# Bug report: loyalty discount is inconsistent\n')
 })
 
 afterEach(() => {
@@ -334,11 +337,48 @@ describe('the timed interviewer owns the clock it is holding', () => {
  * track, because it lives in the shared voice-mode block and the failure was not
  * track-specific.
  */
+/**
+ * The debugging track's allowlist.
+ *
+ * Two files, and the two omissions are the point: `src/**` holds the planted bug
+ * ("you are running the exercise, not solving it"), and
+ * `solutions/debugging/<exercise>.md` holds the worked answer, which the guard
+ * denies for every track by the `^solutions/` rule with no exception for this one.
+ */
+describe('allowedPaths on the debug track', () => {
+  it('is the command file and the bug report, and nothing else', () => {
+    expect(allowedPaths('debug', 'loyalty-discount')).toEqual([
+      '.claude/commands/debug.md',
+      'debugging/loyalty-discount/README.md',
+    ])
+  })
+
+  it('names no source file and no suite', () => {
+    const paths = allowedPaths('debug', 'loyalty-discount')
+    expect(paths.some((path) => path.includes('/src/'))).toBe(false)
+    expect(paths.some((path) => path.endsWith('.test.ts'))).toBe(false)
+  })
+
+  it('needs an exercise name', () => {
+    expect(() => allowedPaths('debug')).toThrow(/needs a problem name/)
+  })
+
+  it('validates the exercise name like every other path segment', () => {
+    expect(() => allowedPaths('debug', '../../solutions')).toThrow(/Invalid problem name/)
+  })
+
+  // The worked answer, denied without the track having to remember to exclude it.
+  it('is still refused by the guard if a caller ever adds the worked answer', () => {
+    expect(() => assertNoSpoilers(['solutions/debugging/loyalty-discount.md'])).toThrow(/spoiler/i)
+  })
+})
+
 describe('the spoken register', () => {
   it.each([
     ['mock', undefined, undefined],
     ['design', 'rate-limiter', undefined],
     ['coding', 'container-with-most-water', 'two-pointers'],
+    ['debug', 'loyalty-discount', undefined],
   ] as const)('tells the %s interviewer to address him in the second person', (track, problem, pattern) => {
     const prompt = buildSystemPrompt(root, track, problem, pattern)
     expect(prompt).toMatch(/Speak to him directly, in the second person/)

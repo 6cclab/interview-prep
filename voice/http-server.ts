@@ -12,13 +12,19 @@ import {
   hintCue,
   timeCue,
   CODING_BUDGET_MS,
+  DEBUG_BUDGET_MS,
+  DEBUG_HINT_RUNGS,
   DESIGN_BUDGET_MS,
+  MAX_SERVABLE_DEBUG_RUNG,
+  debugHintCue,
   MAX_HINT_RUNG,
   PROBLEM_SLUG,
   type Track,
 } from './context'
 import { findCodingProblem, listCodingProblems, problemDir } from './problems'
 import { findCompetency, listCompetencies } from './competencies'
+import { findExercise, listExercises } from './exercises'
+import { runDebugTests, debugVerdictCue, type DebugVerdict } from './debug-tests'
 import { buildCoachPrompt, codeCue, readWorkingFile } from './coach'
 import { appendCoached, isoDate, readCoachedProblems } from './coached'
 import { runDrillTests, verdictCue } from './drill-tests'
@@ -86,6 +92,8 @@ export interface VoiceServerDeps {
    * in `solution.ts`. See `DrillTestOptions.runner` for the contract.
    */
   runDrillTests?(args: string[], cwd: string, reportPath: string): Promise<void>
+  /** The same contract as `runDrillTests`, for the debugging track's two suites. */
+  runDebugTests?(args: string[], cwd: string, reportPath: string): Promise<void>
   /**
    * Which backend and model a track runs on, recorded in the transcript header.
    * Injectable so a test's transcript does not depend on the environment the
@@ -137,7 +145,7 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
  */
 export function parseDrill(body: Record<string, unknown> | null): Drill {
   const track = body?.track ?? 'mock'
-  if (track !== 'mock' && track !== 'design' && track !== 'coding' && track !== 'coach') {
+  if (track !== 'mock' && track !== 'design' && track !== 'coding' && track !== 'coach' && track !== 'debug') {
     throw new Error(`Unknown track: ${String(track)}`)
   }
   if (track === 'mock') {
@@ -170,7 +178,8 @@ export function parseDrill(body: Record<string, unknown> | null): Drill {
   // overridable — bounded, because it drives a countdown the drill is graded
   // against and a nonsense value would quietly make the timing meaningless.
   const raw = body?.budgetMinutes
-  let budgetMs = track === 'coding' ? CODING_BUDGET_MS : DESIGN_BUDGET_MS
+  let budgetMs =
+    track === 'coding' ? CODING_BUDGET_MS : track === 'debug' ? DEBUG_BUDGET_MS : DESIGN_BUDGET_MS
   if (raw !== undefined) {
     if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 5 || raw > 180) {
       throw new Error('budgetMinutes must be a number between 5 and 180.')
@@ -396,10 +405,16 @@ function finishOptions(deps: VoiceServerDeps, stored: StoredSession, elapsedMs: 
     track: stored.drill.track,
     problem: stored.drill.problem,
     startedAt: stored.startedAt,
+    // Both drilling tracks write a row, into the same table, because `/status`
+    // and the history screen read exactly one log. `debug.md` says to set
+    // `Pattern` to `debugging`, which is why that column is a plain string here
+    // rather than something resolved off a directory: on the coding track the
+    // pattern *is* a directory, and on this one there is no pattern at all.
     drill:
-      stored.drill.track === 'coding' && stored.drill.problem
+      (stored.drill.track === 'coding' || stored.drill.track === 'debug') && stored.drill.problem
         ? {
-            pattern: codingPattern(deps.root, stored.drill.problem),
+            pattern:
+              stored.drill.track === 'debug' ? 'debugging' : codingPattern(deps.root, stored.drill.problem),
             hints: stored.hintRung,
             elapsedMs,
           }
@@ -624,7 +639,13 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // is what the only client sent before the coding track existed.
     if (req.method === 'GET' && url.pathname === '/api/problems') {
       const track = url.searchParams.get('track') ?? 'design'
-      if (track !== 'design' && track !== 'coding' && track !== 'mock' && track !== 'coach') {
+      if (
+        track !== 'design' &&
+        track !== 'coding' &&
+        track !== 'mock' &&
+        track !== 'coach' &&
+        track !== 'debug'
+      ) {
         sendJson(res, 400, { error: `Unknown track: ${track}` })
         return
       }
@@ -640,6 +661,18 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
           problems: competencies.map((c) => c.slug),
           titles: Object.fromEntries(competencies.map((c) => [c.slug, c.title])),
           hasStory: Object.fromEntries(competencies.map((c) => [c.slug, c.hasStory])),
+        })
+        return
+      }
+      if (track === 'debug') {
+        // Names plus titles, in the same shape the behavioural branch uses. The
+        // title is the bug report's headline and is the only thing worth showing
+        // in a picker — an exercise name is barely readable, and the report says
+        // the same thing in its first line anyway.
+        const exercises = listExercises(deps.root)
+        sendJson(res, 200, {
+          problems: exercises.map((exercise) => exercise.name),
+          titles: Object.fromEntries(exercises.map((exercise) => [exercise.name, exercise.title])),
         })
         return
       }
@@ -704,7 +737,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     if (req.method === 'GET' && problemMatch) {
       const problem = decodeURIComponent(problemMatch[1]!)
       const track = url.searchParams.get('track') ?? 'design'
-      if (track !== 'design' && track !== 'coding' && track !== 'coach') {
+      if (track !== 'design' && track !== 'coding' && track !== 'coach' && track !== 'debug') {
         sendJson(res, 400, { error: `Unknown track: ${track}` })
         return
       }
@@ -718,7 +751,18 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // through a route the browser can call — putting the worked solution on
       // screen would spoil a re-drill of the same problem later, and this route
       // has no idea which mode the page thinks it is in.
-      if (track === 'coding' || track === 'coach') {
+      if (track === 'debug') {
+        // The bug report, and only ever that. `src/**` is where the defect is and
+        // no route serves it — he reads the code in his own editor, the same way
+        // the coding track has him write code in his own editor. Resolved off disk
+        // so an unknown exercise is a 404 rather than a path built from a slug.
+        const found = findExercise(deps.root, problem)
+        if (!found) {
+          notFound(res)
+          return
+        }
+        relPath = `debugging/${found.name}/README.md`
+      } else if (track === 'coding' || track === 'coach') {
         // Resolved off disk rather than built from the slug, because only the
         // resolver knows the pattern directory — and the response deliberately
         // carries the slug back, never the path it was found at.
@@ -1165,10 +1209,13 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         notFound(res)
         return
       }
-      if (stored.drill.track !== 'coding') {
+      const laddered = stored.drill.track
+      if (laddered !== 'coding' && laddered !== 'debug') {
         // The behavioural and design tracks have no ladder — `mock.md` and
-        // `design.md` define no rungs, so there is nothing here to ration.
-        sendJson(res, 400, { error: 'only a coding drill has a hint ladder' })
+        // `design.md` define no rungs, so there is nothing here to ration. Nor
+        // does pairing, where nothing is rationed at all and the button is not on
+        // the screen to begin with.
+        sendJson(res, 400, { error: 'this track has no hint ladder' })
         return
       }
       if (stored.session.endedEarly()) {
@@ -1186,13 +1233,29 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // solution, so there is genuinely nothing further to give — but asking
       // again after it is not an error, and answering a 409 would leave the
       // button looking broken at the exact moment he is most stuck.
-      const rung = Math.min(stored.hintRung + 1, MAX_HINT_RUNG)
-      stored.hintRung = rung
-      sendJson(res, 200, { rung })
+      //
+      // The debugging ladder needs the two numbers kept apart, and this is the
+      // only place that matters. `requested` is how far he has asked; `hintRung`
+      // is how far he was actually *given*, which is what the drill-log row means
+      // by hints and what `/status` reads to tell rust from coverage. On the
+      // coding track they are the same number. On the debugging track everything
+      // past rung 1 names part of the defect, which this interviewer has not been
+      // given and must not be — see DEBUG_HINT_RUNGS — so it says so, and a
+      // refusal must not be recorded as help. Counting it would inflate the one
+      // number the history screen asks him to trust, the same way a coaching
+      // session counted as an attempt would.
+      const requested = Math.min(stored.hintRung + 1, laddered === 'debug' ? DEBUG_HINT_RUNGS.length - 1 : MAX_HINT_RUNG)
+      const given = laddered === 'debug' ? Math.min(requested, MAX_SERVABLE_DEBUG_RUNG) : requested
+      stored.hintRung = given
+      // `rung` stays the help taken, so the count on screen keeps meaning the
+      // same thing on both tracks. `servable` is how the client knows the ask
+      // bought nothing, without having to know the ladder's shape.
+      sendJson(res, 200, { rung: given, servable: given === requested })
 
       void (async () => {
         const before = stored.session.entries().length
-        await streamTurn(stored.sseClient, stored.session.interject(hintCue(rung)), deps.speaker, () => hasListener(store, id))
+        const hint = laddered === 'debug' ? debugHintCue(requested) : hintCue(requested)
+        await streamTurn(stored.sseClient, stored.session.interject(hint), deps.speaker, () => hasListener(store, id))
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -1231,8 +1294,9 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         notFound(res)
         return
       }
-      if (stored.drill.track !== 'coding') {
-        sendJson(res, 400, { error: 'only a coding drill has tests to run' })
+      const testable = stored.drill.track
+      if (testable !== 'coding' && testable !== 'coach' && testable !== 'debug') {
+        sendJson(res, 400, { error: 'this track has no tests to run' })
         return
       }
       if (stored.session.endedEarly()) {
@@ -1246,18 +1310,37 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       turnsInFlight.add(id)
       store.touch(id, idleClock())
 
-      let verdict: Awaited<ReturnType<typeof runDrillTests>>
+      // Two different verdicts, because the tracks are asking different questions
+      // of the same button. A coding drill's suite splits into correctness and
+      // cost; a debugging exercise's two files split into root cause and symptom
+      // patch. Both reach the interviewer as a bracketed cue that states what the
+      // outcome *means*, because in both cases the distinction is the lesson and
+      // an interviewer left to infer it gets it wrong in the same direction.
+      //
+      // Pairing runs the coding suite: the coach is looking at the same
+      // `solution.ts` and half of a pairing session is reading a red test
+      // together. It was rejected here until the debug track needed the same
+      // branch — the button was on the pairing screen and answered 400.
+      let verdict: DebugVerdict | Awaited<ReturnType<typeof runDrillTests>>
       try {
-        verdict = await runDrillTests({
-          root: deps.root,
-          problem: { slug: stored.drill.problem!, pattern: codingPattern(deps.root, stored.drill.problem!) },
-          runner: deps.runDrillTests,
-        })
+        verdict =
+          testable === 'debug'
+            ? await runDebugTests({
+                root: deps.root,
+                exercise: stored.drill.problem!,
+                runner: deps.runDebugTests,
+              })
+            : await runDrillTests({
+                root: deps.root,
+                problem: { slug: stored.drill.problem!, pattern: codingPattern(deps.root, stored.drill.problem!) },
+                runner: deps.runDrillTests,
+              })
       } catch (error) {
         turnsInFlight.delete(id)
         sendJson(res, 500, { error: errorMessage(error) })
         return
       }
+      const cue = testable === 'debug' ? debugVerdictCue(verdict as DebugVerdict) : verdictCue(verdict as Awaited<ReturnType<typeof runDrillTests>>)
 
       // Answered before the interviewer's reaction streams, same ordering as a
       // spoken turn's 202: the client gets the outcome now, the sentences follow
@@ -1265,7 +1348,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       sendJson(res, 200, verdict)
       void (async () => {
         const before = stored.session.entries().length
-        await streamTurn(stored.sseClient, stored.session.interject(verdictCue(verdict)), deps.speaker, () => hasListener(store, id))
+        await streamTurn(stored.sseClient, stored.session.interject(cue), deps.speaker, () => hasListener(store, id))
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -1318,7 +1401,14 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       //
       // Also skipped once `endedEarly` is set — the interviewer's stream is
       // already broken, and asking it for one more turn would just fail again.
-      if (stored.drill.track === 'coding' && !turnsInFlight.has(id) && !stored.session.endedEarly()) {
+      // Debugging too, and for exactly the same reason: its closing verdict and
+      // its drill-log trailer are *produced* by this turn, so without it a row
+      // existed only for exercises that ran the clock all the way down.
+      if (
+        (stored.drill.track === 'coding' || stored.drill.track === 'debug') &&
+        !turnsInFlight.has(id) &&
+        !stored.session.endedEarly()
+      ) {
         turnsInFlight.add(id)
         try {
           const before = stored.session.entries().length

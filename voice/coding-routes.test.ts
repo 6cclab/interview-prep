@@ -499,7 +499,9 @@ describe('POST /api/session/:id/hint', () => {
     for (const expected of [1, 2, 3, 4]) {
       const res = await fetch(`http://127.0.0.1:${port}/api/session/session-1/hint`, { method: 'POST' })
       expect(res.status).toBe(200)
-      expect(await res.json()).toEqual({ rung: expected })
+      // `servable` is always true on this track: every coding rung can be given.
+      // It exists for the debugging ladder, which runs out at rung 1.
+      expect(await res.json()).toEqual({ rung: expected, servable: true })
     }
   })
 
@@ -1164,6 +1166,45 @@ describe('POST /api/session/:id/end is not re-entrant', () => {
     // closing turn folded into Andre's time — and a range that admitted it is
     // what let an earlier version of this test pass against the unfixed server.
     expect(row).toContain('| 00:01 |')
+  })
+})
+
+/**
+ * Pairing runs the suite too.
+ *
+ * The pairing screen ships a **Run tests** button — half of a pairing session is
+ * reading a red test together, and the coach is looking at the same
+ * `solution.ts`. The route rejected the track with a 400 when the screen was
+ * built, so the button did nothing; nothing covered it, which is why. Found while
+ * adding the debugging track, which needed the same branch.
+ */
+describe('POST /api/session/:id/tests on the coach track', () => {
+  it('runs the coding suite for a pairing session', async () => {
+    const { port } = await listen(baseDeps({ runDrillTests: reports([]) }))
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coach', problem: SLUG }),
+    })
+    const { id } = (await created.json()) as { id: string }
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/tests`, { method: 'POST' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ kind: 'green' })
+  })
+
+  // Nothing is rationed in a pairing session and the hint button is not on the
+  // screen. A route that answered anyway would be a second door to a ladder the
+  // track does not have.
+  it('still has no hint ladder', async () => {
+    const { port } = await listen(baseDeps())
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coach', problem: SLUG }),
+    })
+    const { id } = (await created.json()) as { id: string }
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/hint`, { method: 'POST' })
+    expect(res.status).toBe(400)
   })
 })
 

@@ -19,7 +19,7 @@ outstanding.
 | Coding | `problems/`, `solutions/` | `/drill` | live |
 | System design | `system-design/` | `/design` | live |
 | Behavioral | `behavioral/`, `local/stories.md` | `/mock` | live |
-| Debugging | `debugging/` | `/debug` | live |
+| Debugging | `debugging/` | `/debug`, `mock:web` `#/debug/<ex>` | live |
 | Feature build | `feature/` | `/feature` | live |
 | Company prep | `local/companies/` | `/prep` | live |
 | Pairing | `problems/`, `solutions/` | `mock:web` `#/coach/<slug>` | live |
@@ -82,14 +82,15 @@ pnpm reset <problem>    # restore stub.ts over solution.ts
 pnpm domains            # domains the exercise set covers; `--for <company>` to tailor
 pnpm mock:voice         # spoken behavioral drill
 pnpm mock:web           # React browser client (127.0.0.1) — builds, serves, opens Chrome.
+                        # PORT=4199 to serve a second one alongside a running drill.
                         # Chrome by name, not the default browser: per the table below Arc
                         # never offers the microphone and fails silently, so handing the URL
                         # to whatever is default is a debugging trap. VOICE_NO_OPEN=1 skips it.
-                        # Serves every spoken track — the three drills and the
+                        # Serves every spoken track — the four drills and the
                         # pairing session. The landing page chooses; each then gets
                         # its own screen at its own URL (#/mock, #/design/<p>,
-                        # #/coding/<p>, #/coach/<p>), so a reload comes back to the
-                        # same one instead of the chooser.
+                        # #/coding/<p>, #/debug/<ex>, #/coach/<p>), so a reload
+                        # comes back to the same one instead of the chooser.
 pnpm mock:web:claude    # ditto, every track on the Claude subscription
 pnpm mock:web:ollama    # ditto, every track on the local ollama model
 pnpm mock:web:hybrid    # ditto, behavioural local and the rest on Claude
@@ -166,6 +167,41 @@ resolved pattern is passed once into the prompt (the interviewer needs it to giv
 rung 2 of the hint ladder) and is deliberately *not* stored on the session, and
 anything derived from test output goes through `stripPatternPaths` on the way
 out. `voice/coding-routes.test.ts` asserts every one of those.
+
+### The spoken debugging track
+
+Browser only, like the coding track, and for the same reason: the bug report has
+to stay on screen for forty-five minutes and there has to be a button that runs
+the suites.
+
+**The verdict is the exercise.** Where a coding drill has two kinds of red that
+mean opposite things, this has two kinds of **green** — and the flattering one is
+the wrong one. `repro` green with `invariant` red is a *symptom patch*, and
+`debug.md` says to "say it plainly rather than congratulating a partial fix", so
+`voice/debug-tests.ts` returns it as its own verdict kind rather than a count of
+passing suites, and the bracketed cue states what it means. The classification
+reads which **file** a failure came from, not suite names: the `describe` names
+are the exercise author's, while `repro.test.ts` and `invariant.test.ts` are the
+track's own.
+
+**The interviewer has no answer to ration, and the ladder says so.** Its
+allowlist is `debug.md` plus the bug report — not `src/**`, where the bug is
+("you are running the exercise, not solving it"), and not
+`solutions/debugging/<exercise>.md`, which `assertNoSpoilers` denies for every
+track by the `^solutions/` rule. So of `debug.md`'s four rungs only the first can
+be served, and past it the server tells the interviewer to say outright that it
+cannot narrow further. That is deliberate: every later rung names part of the
+defect, and a model asked for one without the answer invents a module — a
+confident wrong pointer costs more than silence in an exercise about forming a
+hypothesis. **A refusal is not recorded as help**, so the drill-log's hint count
+stays a measurement of what was actually given, the same reason a pairing session
+is not counted as an attempt.
+
+**It writes the same drill-log table**, with `Pattern` set to `debugging` per
+`debug.md`, because `/status` and `#/history` read exactly one log. Transcripts
+land in `local/debugging/`. The history screen therefore no longer claims to cover
+coding drills alone — it covers the two tracks that write a scored row, and on a
+debugging row `solved` means the root cause rather than a symptom patch.
 
 ### The pairing track
 
@@ -320,7 +356,7 @@ The variables underneath, for a one-off:
 ```bash
 VOICE_BACKEND=ollama            # every track
 VOICE_BACKEND_MOCK=ollama       # one track; beats the global. Also
-                                # _DESIGN, _CODING and _COACH.
+                                # _DESIGN, _CODING, _COACH and _DEBUG.
 VOICE_CLAUDE_MODEL=claude-opus-5 # override the Claude model for a drill worth it
 OLLAMA_MODEL=gpt-oss:20b        # override the local model (tags are case-sensitive)
 OLLAMA_HOST=10.0.0.5:11434 # a bare host:port is accepted, as ollama's CLI does

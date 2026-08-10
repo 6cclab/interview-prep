@@ -81,6 +81,7 @@ describe('describeBackend', () => {
 describe('backendSummary', () => {
   it('reports every track', () => {
     expect(backendSummary({ VOICE_BACKEND_MOCK: 'ollama' })).toEqual({
+      debug: 'cli',
       mock: 'ollama',
       design: 'cli',
       coding: 'cli',

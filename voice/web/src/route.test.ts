@@ -211,3 +211,44 @@ describe('pairing route', () => {
     expect(parseRoute('#/coach')).toEqual({ view: 'home' })
   })
 })
+
+/**
+ * The debugging route.
+ *
+ * `problem` is an exercise name under `debugging/`. Unlike a coding problem's
+ * pattern, the name is not the answer — the bug report's first line says the same
+ * thing — but it still reaches a filesystem path on the server, so it gets the
+ * same treatment as every other segment off a hand-editable hash.
+ */
+describe('debugging route', () => {
+  it('round-trips an exercise', () => {
+    expect(parseRoute('#/debug/loyalty-discount')).toEqual({ view: 'debug', problem: 'loyalty-discount' })
+    expect(routeHash({ view: 'debug', problem: 'loyalty-discount' })).toBe('#/debug/loyalty-discount')
+    expect(parseRoute(routeHash({ view: 'debug', problem: 'account-switcher' }))).toEqual({
+      view: 'debug',
+      problem: 'account-switcher',
+    })
+  })
+
+  it('asks for the debug track by exercise name', () => {
+    expect(routeDrill({ view: 'debug', problem: 'loyalty-discount' })).toEqual({
+      track: 'debug',
+      problem: 'loyalty-discount',
+    })
+  })
+
+  it.each([
+    '#/debug',
+    '#/debug/',
+    '#/debug/../../solutions/debugging/loyalty-discount.md',
+    '#/debug/Loyalty-Discount',
+    '#/debug/a/b',
+  ])('refuses to route %j anywhere but home', (hash) => {
+    expect(parseRoute(hash).view).toBe('home')
+  })
+
+  it('does not confuse an exercise with a coding problem or a competency', () => {
+    expect(parseRoute('#/coding/two-sum-sorted')).toEqual({ view: 'coding', problem: 'two-sum-sorted' })
+    expect(parseRoute('#/mock/failure')).toEqual({ view: 'mock', competency: 'failure' })
+  })
+})

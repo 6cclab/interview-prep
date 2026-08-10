@@ -14,10 +14,11 @@ import { History } from './components/History'
 import { HomeHeader } from './components/HomeHeader'
 import { ProblemPane } from './components/ProblemPane'
 import { CodingTools } from './components/CodingTools'
+import { DebugTools } from './components/DebugTools'
 import { routeDrill, routeHash, useRoute, type Route } from './route'
 import { useTheme } from './theme'
 import { derivePhase, fmt, wallClock, stuckBody, TIMED_BUDGET_MINUTES, ERROR_COPY, ANNOUNCEMENTS } from './phase'
-import type { ErrorKind } from './types'
+import type { DebugVerdict, DrillVerdict, ErrorKind } from './types'
 
 // Status title/detail for the dock's left-hand block. The `requesting`
 // detail's short/long split mirrors the watchdog already in
@@ -87,6 +88,9 @@ const HEADER = {
   // Not "interview": the header is the first thing that says which mode this is,
   // and the whole point of the track is that it is not one.
   coach: { title: 'Pairing session', kicker: 'Coaching · unrationed' },
+  // "Debugging round", not "Debugging interview": the thing being rehearsed is
+  // the "here is some code, something is wrong with it" round.
+  debug: { title: 'Debugging round', kicker: 'Root cause, not symptom' },
   // Neither `home` nor `history` reaches DrillScreen, but the record is keyed by
   // the full Route view so a new view cannot be added without deciding what the
   // header says. Adding `history` to Route is what made the compiler ask.
@@ -102,6 +106,7 @@ const PARTNER = {
   design: 'Interviewer',
   coding: 'Interviewer',
   coach: 'Coach',
+  debug: 'Interviewer',
   home: 'Interviewer',
   history: 'Interviewer',
 } as const
@@ -137,6 +142,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     testsRunning,
     askForHint,
     hintRung,
+    hintsExhausted,
     hintPending,
     drill,
     remainingSeconds,
@@ -164,7 +170,8 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   // are timed, but derived separately because they are different questions.
   // Coaching shows the problem for the same reason the drills do — you cannot
   // pair on a question that has scrolled away.
-  const hasPane = route.view === 'design' || route.view === 'coding' || route.view === 'coach'
+  const hasPane =
+    route.view === 'design' || route.view === 'coding' || route.view === 'coach' || route.view === 'debug'
   // A session exists to act on. Withheld before and after, because a live button
   // that 404s is worse than a disabled one.
   const live = phase !== 'idle' && phase !== 'ended'
@@ -528,13 +535,31 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
           {(route.view === 'coding' || route.view === 'coach') && (
             <div className="dock-stack__row">
               <CodingTools
-                verdict={verdict}
+                verdict={verdict as DrillVerdict | null}
                 running={testsRunning}
                 hintRung={hintRung}
                 hintPending={hintPending}
                 onRun={live ? runTests : undefined}
                 onHint={live ? askForHint : undefined}
                 rationed={route.view === 'coding'}
+              />
+            </div>
+          )}
+          {/* Its own panel, not a mode of the coding one: the verdict states are
+              different (two kinds of green, and the flattering one is the wrong
+              one) and so is the ladder, which runs out after a single rung. The
+              cast is the route deciding which shape the server sent — see
+              AnyVerdict. */}
+          {route.view === 'debug' && (
+            <div className="dock-stack__row">
+              <DebugTools
+                verdict={verdict as DebugVerdict | null}
+                running={testsRunning}
+                hintRung={hintRung}
+                hintPending={hintPending}
+                hintsExhausted={hintsExhausted}
+                onRun={live ? runTests : undefined}
+                onHint={live ? askForHint : undefined}
               />
             </div>
           )}

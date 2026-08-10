@@ -50,6 +50,11 @@ const TRACK_VAR: Record<Track, string> = {
   // in the loop to contradict it. Its own knob, so putting the drills on a local
   // model does not silently move the teaching there too.
   coach: 'VOICE_BACKEND_COACH',
+  // Debugging is like coding on the two counts that matter for a weaker model:
+  // it has a spoiler to leak and a fenced drill-log trailer to emit. Its own knob
+  // all the same, so the arrangement stays "one variable per track" rather than
+  // "one per track except the ones that were added later".
+  debug: 'VOICE_BACKEND_DEBUG',
 }
 
 /** The global variable, applied to any track without its own override. */
@@ -117,6 +122,7 @@ export function backendSummary(env: NodeJS.ProcessEnv = process.env): Record<Tra
     design: chooseBackend('design', env),
     coding: chooseBackend('coding', env),
     coach: chooseBackend('coach', env),
+    debug: chooseBackend('debug', env),
   }
 }
 
