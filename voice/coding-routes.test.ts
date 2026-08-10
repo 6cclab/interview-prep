@@ -164,7 +164,10 @@ describe('GET /api/problems?track=coding', () => {
     expect(await res.json()).toEqual({ problems: ['rate-limiter'] })
   })
 
-  it.each(['mock', 'nonsense', ''])('rejects track=%j', async (track) => {
+  // `mock` used to belong in this list. It is a real track here now — the
+  // behavioural card offers a competency picker rather than one button — so the
+  // list is unknown tracks only, which is what the check was ever about.
+  it.each(['nonsense', ''])('rejects track=%j', async (track) => {
     const { port } = await listen(baseDeps())
     const res = await fetch(`http://127.0.0.1:${port}/api/problems?track=${track}`)
     expect(res.status).toBe(400)

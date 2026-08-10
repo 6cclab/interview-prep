@@ -16,7 +16,12 @@ import type { Drill } from './types'
  */
 export type Route =
   | { view: 'home' }
-  | { view: 'mock' }
+  /**
+   * The behavioural drill. `competency` is the slug of one competency to stay on;
+   * absent means the interviewer chooses, which is the default and the only mode
+   * that still tests recognising the competency behind the phrasing.
+   */
+  | { view: 'mock'; competency?: string }
   | { view: 'design'; problem: string }
   | { view: 'coding'; problem: string }
   /** Past drills. Not a drill screen — it is read between them. */
@@ -25,13 +30,20 @@ export type Route =
 /** The route's drill, or `null` on `home`. What `start()` is called with. */
 export function routeDrill(route: Route): Drill | null {
   if (route.view === 'home' || route.view === 'history') return null
-  if (route.view === 'mock') return { track: 'mock' }
+  if (route.view === 'mock') {
+    // Omitted rather than sent as undefined: the server treats an absent
+    // competency as the interviewer's choice, and a key present with no value is
+    // one more shape for it to have to tolerate.
+    return route.competency ? { track: 'mock', competency: route.competency } : { track: 'mock' }
+  }
   return { track: route.view, problem: route.problem }
 }
 
 export function routeHash(route: Route): string {
   if (route.view === 'home') return '#/'
-  if (route.view === 'mock') return '#/mock'
+  if (route.view === 'mock') {
+    return route.competency ? `#/mock/${encodeURIComponent(route.competency)}` : '#/mock'
+  }
   if (route.view === 'history') return '#/history'
   return `#/${route.view}/${encodeURIComponent(route.problem)}`
 }
@@ -46,16 +58,23 @@ export function parseRoute(hash: string): Route {
   if (path === '' || path === 'home') return { view: 'home' }
   if (path === 'mock') return { view: 'mock' }
   if (path === 'history') return { view: 'history' }
-  const withProblem = /^(design|coding)\/([^/]+)$/.exec(path)
+  const withProblem = /^(design|coding|mock)\/([^/]+)$/.exec(path)
   if (withProblem) {
-    let problem: string
+    let slug: string
     try {
-      problem = decodeURIComponent(withProblem[2]!)
+      slug = decodeURIComponent(withProblem[2]!)
     } catch {
       // A malformed escape sequence in a hand-edited URL.
       return { view: 'home' }
     }
-    if (PROBLEM_SLUG.test(problem)) return { view: withProblem[1] as 'design' | 'coding', problem }
+    if (PROBLEM_SLUG.test(slug)) {
+      const view = withProblem[1] as 'design' | 'coding' | 'mock'
+      return view === 'mock' ? { view: 'mock', competency: slug } : { view, problem: slug }
+    }
+    // A segment that is not a slug falls through to `home` below, the same as a
+    // bad design or coding problem. Deliberately not "drop the focus and run the
+    // unfocused behavioural drill": silently running something adjacent to what
+    // the URL asked for is worse than landing on the chooser.
   }
   // An unknown route is the chooser, not a blank screen or an error: there is
   // always somewhere sensible to be.

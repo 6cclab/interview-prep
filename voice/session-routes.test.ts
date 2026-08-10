@@ -1401,3 +1401,89 @@ describe('transcription vocabulary reaches the transcriber', () => {
     }
   })
 })
+
+/**
+ * The behavioural competency picker.
+ *
+ * The unfocused drill is the default and every pre-existing client sent exactly
+ * `{ track: 'mock' }`, so that shape has to keep working untouched.
+ */
+describe('behavioural competency', () => {
+  it('lists competencies with titles and story coverage', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/problems?track=mock`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      problems: ['conflict'],
+      titles: { conflict: 'Conflict' },
+      hasStory: { conflict: false },
+    })
+  })
+
+  it('starts an unfocused drill when no competency is sent', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'mock' }),
+    })
+    expect(res.status).toBe(201)
+  })
+
+  it('starts a focused drill for a known competency', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'mock', competency: 'conflict' }),
+    })
+    expect(res.status).toBe(201)
+  })
+
+  // A 400, not a drill that quietly ignores the focus: the candidate picked a
+  // competency and would have no way to know it was dropped.
+  it('rejects a competency that resolves to nothing', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'mock', competency: 'teamwork' }),
+    })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/teamwork/)
+  })
+
+  it('rejects a competency that is not a plain slug', async () => {
+    const { port } = await listen(baseDeps())
+    for (const competency of ['../../etc/passwd', 'Conflict', 'a b']) {
+      const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ track: 'mock', competency }),
+      })
+      expect(res.status).toBe(400)
+    }
+  })
+
+  it('puts the competency in the prompt without telling the interviewer to announce it', async () => {
+    let system = ''
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* (prompt: string) {
+          system = prompt
+          yield 'Ready.'
+        },
+      }),
+    )
+    await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'mock', competency: 'conflict' }),
+    })
+    // The SSE stream is what drives the first turn, so connect to it.
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/session-1/stream`)
+    await stream.body?.getReader().read()
+    expect(system).toContain('Conflict')
+    expect(system).toMatch(/Do not announce the competency by name/)
+  })
+})

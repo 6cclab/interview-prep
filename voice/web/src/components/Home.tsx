@@ -52,11 +52,23 @@ interface ProblemList {
    * one — in both cases the picker falls back to a flat list.
    */
   difficulties: Record<string, string>
+  /** Slug to display name. Only the behavioural track sends these — a competency's title is prose, not a slug. */
+  titles: Record<string, string>
+  /** Slug to whether `local/stories.md` has a story for it. Behavioural only; a competency with none is the gap. */
+  hasStory: Record<string, boolean>
   selected: string
   failure: ListFailure
 }
 
-const EMPTY: ProblemList = { loading: false, problems: [], difficulties: {}, selected: '', failure: null }
+const EMPTY: ProblemList = {
+  loading: false,
+  problems: [],
+  difficulties: {},
+  titles: {},
+  hasStory: {},
+  selected: '',
+  failure: null,
+}
 
 const LOADING: ProblemList = { ...EMPTY, loading: true }
 
@@ -90,13 +102,30 @@ function useProblems(track: ProblemTrack): ProblemList {
       }
       try {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const body = (await res.json()) as { problems: string[]; difficulties?: Record<string, string> }
+        const body = (await res.json()) as {
+          problems: string[]
+          difficulties?: Record<string, string>
+          titles?: Record<string, string>
+          hasStory?: Record<string, boolean>
+        }
         const { problems } = body
         if (!live) return
         // The easiest problem is the default where tiers are known, rather than
         // whichever slug happens to sort first alphabetically.
         const difficulties = body.difficulties ?? {}
-        setState({ loading: false, problems, difficulties, selected: easiest(problems, difficulties), failure: null })
+        setState({
+          loading: false,
+          problems,
+          difficulties,
+          titles: body.titles ?? {},
+          hasStory: body.hasStory ?? {},
+          // The behavioural track defaults to no selection, which means the
+          // interviewer chooses — being told the competency removes the
+          // recognition the question bank opens by teaching. The other tracks
+          // have no such default and pick their easiest.
+          selected: track === 'mock' ? '' : easiest(problems, difficulties),
+          failure: null,
+        })
       } catch (error) {
         if (live) setState({ ...EMPTY, failure: 'route' })
         console.error(`voice: /api/problems?track=${track} returned something unusable`, error)
@@ -178,12 +207,85 @@ function ProblemTrackCard({ title, blurb, list, offline, buttonLabel, onStart }:
   )
 }
 
+/**
+ * The behavioural card.
+ *
+ * Not a `ProblemTrackCard`, because the choice here is *optional* and that card's
+ * button is disabled until something is selected. The default — and the entry at
+ * the top of the list — is the interviewer choosing, since
+ * `behavioral/questions.md` opens by teaching how to spot the competency behind
+ * unfamiliar phrasing, and a screen that names it first has removed that.
+ *
+ * Picking one is still worth having: it is how you drill a competency you know is
+ * weak, and the list marks which have no story in `local/stories.md` yet, which is
+ * the gap worth attacking first.
+ */
+function BehavioralCard({
+  list,
+  offline,
+  onStart,
+}: {
+  list: ProblemList
+  offline: boolean
+  onStart(competency: string): void
+}) {
+  const [selected, setSelected] = useState('')
+
+  return (
+    <section className="home__card">
+      <h2 className="home__card-title">Behavioral</h2>
+      <p className="home__card-body">
+        One question, cold, spoken aloud. No clock and no countdown — silence does not end a turn, and thinking time is
+        the exercise. Critiqued against your own tone rules at the end.
+      </p>
+      <div className="home__row">
+        <label className="home__label" htmlFor="home-competency">
+          Competency
+        </label>
+        <select
+          id="home-competency"
+          value={selected}
+          aria-busy={list.loading}
+          onChange={(event) => setSelected(event.target.value)}
+        >
+          {/* Always first and always available, including while the list loads or
+              after it fails: an unreachable competency list must not be able to
+              block the drill that does not need one. */}
+          <option value="">Interviewer&rsquo;s choice</option>
+          {list.problems.map((slug) => (
+            <option key={slug} value={slug}>
+              {list.titles[slug] ?? slug}
+              {list.hasStory[slug] === false ? ' — no story yet' : ''}
+            </option>
+          ))}
+        </select>
+        <Button variant="brand" disabled={offline} onClick={() => onStart(selected)}>
+          Behavioral drill
+        </Button>
+      </div>
+      {selected !== '' && (
+        <p className="home__note">
+          Staying on one competency. The interviewer will not say which — but you know, so this is deliberate practice
+          rather than a test of spotting it.
+        </p>
+      )}
+      {list.failure === 'route' && (
+        <p className="home__note">
+          The server could not list the competencies, so only the interviewer&rsquo;s choice is available. The drill
+          itself is unaffected.
+        </p>
+      )}
+    </section>
+  )
+}
+
 export function Home({ onChoose }: Props) {
   const design = useProblems('design')
   const coding = useProblems('coding')
+  const mock = useProblems('mock')
 
-  // Either list failing to reach the server means the server is not there.
-  const offline = design.failure === 'offline' || coding.failure === 'offline'
+  // Any list failing to reach the server means the server is not there.
+  const offline = design.failure === 'offline' || coding.failure === 'offline' || mock.failure === 'offline'
 
   return (
     <main className="home">
@@ -203,16 +305,11 @@ export function Home({ onChoose }: Props) {
           </div>
         )}
 
-        <section className="home__card">
-          <h2 className="home__card-title">Behavioral</h2>
-          <p className="home__card-body">
-            One question, cold, spoken aloud. No clock and no countdown — silence does not end a turn, and thinking time
-            is the exercise. Critiqued against your own tone rules at the end.
-          </p>
-          <Button variant="brand" disabled={offline} onClick={() => onChoose({ view: 'mock' })}>
-            Behavioral drill
-          </Button>
-        </section>
+        <BehavioralCard
+          list={mock}
+          offline={offline}
+          onStart={(competency) => onChoose(competency ? { view: 'mock', competency } : { view: 'mock' })}
+        />
 
         <ProblemTrackCard
           title="System design"

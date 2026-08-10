@@ -86,12 +86,18 @@ export interface Drill {
   track: 'mock' | 'design' | 'coding'
   /** Required for `design` and `coding`, absent for `mock`. */
   problem?: string
+  /**
+   * Behavioural track only: one competency slug to stay on. Absent means the
+   * interviewer chooses, which is the default — being told the competency up
+   * front removes the recognition `behavioral/questions.md` opens by teaching.
+   */
+  competency?: string
   /** A timed drill's budget in ms; absent when the drill is untimed. */
   budgetMs?: number
 }
 
 /** The tracks that have a problem to put on screen. */
-export type ProblemTrack = 'design' | 'coding'
+export type ProblemTrack = 'design' | 'coding' | 'mock'
 
 /** A problem and its prompt, from `GET /api/problems/:problem?track=`. */
 export interface ProblemStatement {

@@ -18,6 +18,7 @@ import {
   type Track,
 } from './context'
 import { findCodingProblem, listCodingProblems, problemDir } from './problems'
+import { findCompetency, listCompetencies } from './competencies'
 import { runDrillTests, verdictCue } from './drill-tests'
 import { createInterviewer, anthropicStream, type StreamFn } from './interviewer'
 import { claudeCliStream, DEFAULT_CLAUDE_MODEL } from './claude-cli'
@@ -131,7 +132,18 @@ export function parseDrill(body: Record<string, unknown> | null): Drill {
   if (track !== 'mock' && track !== 'design' && track !== 'coding') {
     throw new Error(`Unknown track: ${String(track)}`)
   }
-  if (track === 'mock') return { track }
+  if (track === 'mock') {
+    // Optional: absent means the interviewer picks, which is the default. The
+    // slug is validated here like every other client-supplied path segment, and
+    // resolved against the real headings at session creation — an unknown slug
+    // is a 400 there rather than a silently unfocused drill.
+    const competency = body?.competency
+    if (competency === undefined || competency === null || competency === '') return { track }
+    if (typeof competency !== 'string' || !PROBLEM_SLUG.test(competency)) {
+      throw new Error(`Invalid competency name: ${String(competency)}`)
+    }
+    return { track, competency }
+  }
 
   const problem = body?.problem
   if (typeof problem !== 'string' || problem === '') {
@@ -518,8 +530,23 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // is what the only client sent before the coding track existed.
     if (req.method === 'GET' && url.pathname === '/api/problems') {
       const track = url.searchParams.get('track') ?? 'design'
-      if (track !== 'design' && track !== 'coding') {
+      if (track !== 'design' && track !== 'coding' && track !== 'mock') {
         sendJson(res, 400, { error: `Unknown track: ${track}` })
+        return
+      }
+      if (track === 'mock') {
+        // Titles and story coverage alongside the slugs, in the same
+        // slugs-are-the-payload shape the coding branch uses: `problems` stays a
+        // bare string array, so a client that ignores the extra maps still gets a
+        // complete list. `hasStory` comes from headings in `local/stories.md` and
+        // never its bodies — `mock.md` allows the story bank to be consulted for
+        // gaps only, and that stays true of what reaches the browser.
+        const competencies = listCompetencies(deps.root)
+        sendJson(res, 200, {
+          problems: competencies.map((c) => c.slug),
+          titles: Object.fromEntries(competencies.map((c) => [c.slug, c.title])),
+          hasStory: Object.fromEntries(competencies.map((c) => [c.slug, c.hasStory])),
+        })
         return
       }
       if (track !== 'coding') {
@@ -654,7 +681,16 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // shipped to the browser. `POST .../tests` re-resolves it instead —
         // a directory scan, which costs nothing next to running a test suite.
         const pattern = drill.track === 'coding' ? codingPattern(deps.root, drill.problem!) : undefined
-        system = buildSystemPrompt(deps.root, drill.track, drill.problem, pattern)
+        // Resolved against the real headings, so an unknown slug fails here as a
+        // 400 rather than quietly producing an unfocused drill the candidate
+        // thinks is focused.
+        let focus: string | undefined
+        if (drill.competency) {
+          const found = findCompetency(deps.root, drill.competency)
+          if (!found) throw new Error(`Unknown competency "${drill.competency}": no such behavioral competency.`)
+          focus = found.title
+        }
+        system = buildSystemPrompt(deps.root, drill.track, drill.problem, pattern, focus)
       } catch (error) {
         // An unknown problem slug reaches here as a missing-file throw from
         // buildSystemPrompt. That is the client asking for something that does

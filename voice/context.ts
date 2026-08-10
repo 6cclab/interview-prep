@@ -99,7 +99,19 @@ export function competencyCoverage(root: string): { all: string[]; covered: stri
   return { all, covered }
 }
 
-export function buildSystemPrompt(root: string, track: Track, problem?: string, pattern?: string): string {
+/**
+ * @param focus For the behavioural track only: one competency title to drill,
+ *   when the candidate picked one instead of leaving the choice open. Passed as
+ *   the authored title rather than a slug — `voice/competencies.ts` owns that
+ *   mapping, and the prompt should name the competency the way the file does.
+ */
+export function buildSystemPrompt(
+  root: string,
+  track: Track,
+  problem?: string,
+  pattern?: string,
+  focus?: string,
+): string {
   const paths = allowedPaths(track, problem, pattern)
   assertNoSpoilers(paths)
 
@@ -116,6 +128,25 @@ export function buildSystemPrompt(root: string, track: Track, problem?: string, 
     const { all, covered } = competencyCoverage(root)
     const lines = all.map((c) => `- ${c}${covered.includes(c) ? '' : ' (no story yet)'}`)
     sections.push(`<competency-coverage>\n${lines.join('\n')}\n</competency-coverage>`)
+
+    if (focus) {
+      // Named, but the phrasing is still the interviewer's to choose from the
+      // bank — "drill this competency" is deliberate practice, while "ask me
+      // this exact question" would remove the recall the drill is for. The
+      // instruction not to announce it matters for the same reason: he picked a
+      // competency, and hearing it read back as a label turns a question into a
+      // form to fill in.
+      sections.push(
+        [
+          '<focus>',
+          `He has asked to drill this competency: ${focus}`,
+          'Choose phrasings for it from the question bank above and stay on it for',
+          'the session. Do not announce the competency by name or say that he',
+          'chose it — ask the question as an interviewer would.',
+          '</focus>',
+        ].join('\n'),
+      )
+    }
   }
 
   const voiceMode = [

@@ -31,6 +31,12 @@ export interface Drill {
   track: Track
   /** Required for `design`, absent for `mock` — see `allowedPaths`. */
   problem?: string
+  /**
+   * Behavioural track only: the competency slug to drill, when one was picked.
+   * Absent means the interviewer chooses, which is the default and the mode that
+   * still tests recognising the competency behind the phrasing.
+   */
+  competency?: string
   /** The design track's time budget in ms; absent when the drill is untimed. */
   budgetMs?: number
 }

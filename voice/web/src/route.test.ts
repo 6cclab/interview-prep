@@ -131,3 +131,41 @@ describe('history route', () => {
     expect(parseRoute('#/history/celebrity')).toEqual({ view: 'home' })
   })
 })
+
+/**
+ * The behavioural competency, which arrives as a second path segment on a track
+ * that never had one. The unfocused form has to keep working unchanged — it is
+ * the default, and every existing bookmark is that shape.
+ */
+describe('behavioural competency in the route', () => {
+  it('keeps #/mock meaning the interviewer chooses', () => {
+    expect(parseRoute('#/mock')).toEqual({ view: 'mock' })
+    expect(routeHash({ view: 'mock' })).toBe('#/mock')
+    expect(routeDrill({ view: 'mock' })).toEqual({ track: 'mock' })
+  })
+
+  it('round-trips a competency slug', () => {
+    expect(parseRoute('#/mock/failure')).toEqual({ view: 'mock', competency: 'failure' })
+    expect(routeHash({ view: 'mock', competency: 'failure' })).toBe('#/mock/failure')
+    expect(routeDrill({ view: 'mock', competency: 'failure' })).toEqual({
+      track: 'mock',
+      competency: 'failure',
+    })
+  })
+
+  it('omits the key entirely when there is no competency, rather than sending undefined', () => {
+    expect(Object.keys(routeDrill({ view: 'mock' }) ?? {})).toEqual(['track'])
+  })
+
+  // The chooser, not the unfocused drill: silently running something adjacent to
+  // what the URL asked for is worse than landing somewhere neutral.
+  it('falls back to home when the segment is not a slug', () => {
+    expect(parseRoute('#/mock/Not A Slug')).toEqual({ view: 'home' })
+    expect(parseRoute('#/mock/%E0%A4%A')).toEqual({ view: 'home' })
+  })
+
+  it('does not confuse a competency with a design or coding problem', () => {
+    expect(parseRoute('#/design/rate-limiter')).toEqual({ view: 'design', problem: 'rate-limiter' })
+    expect(parseRoute('#/coding/two-sum-sorted')).toEqual({ view: 'coding', problem: 'two-sum-sorted' })
+  })
+})
