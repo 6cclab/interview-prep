@@ -143,6 +143,15 @@ export function sessionPath(track: Track, startedAt: Date, problem?: string): st
     if (!problem) throw new Error('A design session needs a problem name.')
     return `local/designs/${problem}-live-${isoStamp(startedAt)}.md`
   }
+  if (track === 'coach') {
+    if (!problem) throw new Error('A coaching session needs a problem name.')
+    // Its own directory, not `local/drills/`: a coaching session is not an
+    // attempt, and `/status` and the history screen read attempts. Same
+    // slug-only rule as below — the pattern is the answer, and here it is also
+    // the subject, so a filename that named it would spoil a future re-drill of
+    // the same problem.
+    return `local/coaching/${problem}-${isoStamp(startedAt)}.md`
+  }
   if (track === 'coding') {
     if (!problem) throw new Error('A coding session needs a problem name.')
     // By problem slug, never by `problems/<pattern>/<slug>` — the pattern is the

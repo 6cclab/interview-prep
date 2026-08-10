@@ -19,6 +19,7 @@ import {
 } from './context'
 import { findCodingProblem, listCodingProblems, problemDir } from './problems'
 import { findCompetency, listCompetencies } from './competencies'
+import { buildCoachPrompt, codeCue, readWorkingFile } from './coach'
 import { runDrillTests, verdictCue } from './drill-tests'
 import { createInterviewer, anthropicStream, type StreamFn } from './interviewer'
 import { claudeCliStream, DEFAULT_CLAUDE_MODEL } from './claude-cli'
@@ -129,7 +130,7 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
  */
 export function parseDrill(body: Record<string, unknown> | null): Drill {
   const track = body?.track ?? 'mock'
-  if (track !== 'mock' && track !== 'design' && track !== 'coding') {
+  if (track !== 'mock' && track !== 'design' && track !== 'coding' && track !== 'coach') {
     throw new Error(`Unknown track: ${String(track)}`)
   }
   if (track === 'mock') {
@@ -152,6 +153,11 @@ export function parseDrill(body: Record<string, unknown> | null): Drill {
   if (!PROBLEM_SLUG.test(problem)) {
     throw new Error(`Invalid problem name: ${problem}`)
   }
+
+  // Coaching is untimed, and deliberately so: a clock turns pairing back into a
+  // test. An untimed session gets no `turnCue` time check either, so nothing
+  // downstream tells the coach it has a deadline.
+  if (track === 'coach') return { track, problem }
 
   // `design.md` says 45 minutes "unless he says otherwise", so the budget is
   // overridable — bounded, because it drives a countdown the drill is graded
@@ -530,7 +536,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // is what the only client sent before the coding track existed.
     if (req.method === 'GET' && url.pathname === '/api/problems') {
       const track = url.searchParams.get('track') ?? 'design'
-      if (track !== 'design' && track !== 'coding' && track !== 'mock') {
+      if (track !== 'design' && track !== 'coding' && track !== 'mock' && track !== 'coach') {
         sendJson(res, 400, { error: `Unknown track: ${track}` })
         return
       }
@@ -549,7 +555,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         })
         return
       }
-      if (track !== 'coding') {
+      if (track !== 'coding' && track !== 'coach') {
         sendJson(res, 200, { problems: listDesignProblems(deps.root) })
         return
       }
@@ -559,6 +565,8 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // means the design branch above and every existing client keep working
       // unchanged, and a client that ignores `difficulties` still gets a
       // complete, correct list.
+      // `coach` shares the coding problem set — it is the same thirty problems,
+      // approached the other way round.
       const coding = listCodingProblems(deps.root)
       sendJson(res, 200, {
         problems: coding.map((problem) => problem.slug),
@@ -602,7 +610,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     if (req.method === 'GET' && problemMatch) {
       const problem = decodeURIComponent(problemMatch[1]!)
       const track = url.searchParams.get('track') ?? 'design'
-      if (track !== 'design' && track !== 'coding') {
+      if (track !== 'design' && track !== 'coding' && track !== 'coach') {
         sendJson(res, 400, { error: `Unknown track: ${track}` })
         return
       }
@@ -611,7 +619,12 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         return
       }
       let relPath: string
-      if (track === 'coding') {
+      // Coaching serves the same README as a coding drill and nothing more. The
+      // spoilers a coach may read reach the model through `coachPaths`, never
+      // through a route the browser can call — putting the worked solution on
+      // screen would spoil a re-drill of the same problem later, and this route
+      // has no idea which mode the page thinks it is in.
+      if (track === 'coding' || track === 'coach') {
         // Resolved off disk rather than built from the slug, because only the
         // resolver knows the pattern directory — and the response deliberately
         // carries the slug back, never the path it was found at.
@@ -680,17 +693,27 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // bodies, so anything living there is one field-add away from being
         // shipped to the browser. `POST .../tests` re-resolves it instead —
         // a directory scan, which costs nothing next to running a test suite.
-        const pattern = drill.track === 'coding' ? codingPattern(deps.root, drill.problem!) : undefined
-        // Resolved against the real headings, so an unknown slug fails here as a
-        // 400 rather than quietly producing an unfocused drill the candidate
-        // thinks is focused.
-        let focus: string | undefined
-        if (drill.competency) {
-          const found = findCompetency(deps.root, drill.competency)
-          if (!found) throw new Error(`Unknown competency "${drill.competency}": no such behavioral competency.`)
-          focus = found.title
+        const pattern =
+          drill.track === 'coding' || drill.track === 'coach'
+            ? codingPattern(deps.root, drill.problem!)
+            : undefined
+        if (drill.track === 'coach') {
+          // A separate builder, not a branch of `buildSystemPrompt`: that
+          // function goes through `allowedPaths` and `assertNoSpoilers`, both of
+          // which refuse this track on purpose. See voice/coach.ts.
+          system = buildCoachPrompt(deps.root, { slug: drill.problem!, pattern: pattern! })
+        } else {
+          // Resolved against the real headings, so an unknown slug fails here as a
+          // 400 rather than quietly producing an unfocused drill the candidate
+          // thinks is focused.
+          let focus: string | undefined
+          if (drill.competency) {
+            const found = findCompetency(deps.root, drill.competency)
+            if (!found) throw new Error(`Unknown competency "${drill.competency}": no such behavioral competency.`)
+            focus = found.title
+          }
+          system = buildSystemPrompt(deps.root, drill.track, drill.problem, pattern, focus)
         }
-        system = buildSystemPrompt(deps.root, drill.track, drill.problem, pattern, focus)
       } catch (error) {
         // An unknown problem slug reaches here as a missing-file throw from
         // buildSystemPrompt. That is the client asking for something that does
@@ -704,7 +727,17 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         now: () => entryClock(),
         // Only the timed track gets a cue; a behavioural mock has no budget and
         // must not be told it has one.
-        turnCue: drill.budgetMs === undefined ? undefined : () => timeCue(entryClock(), drill.budgetMs),
+        // One cue slot, two uses, mutually exclusive by track. Coaching is
+        // untimed and instead gets the working file every turn — that is what
+        // makes it pairing rather than another interview, and it is re-read per
+        // turn rather than captured once because the whole point is that he is
+        // editing it while they talk.
+        turnCue:
+          drill.track === 'coach'
+            ? () => codeCue(readWorkingFile(deps.root, { slug: drill.problem!, pattern: codingPattern(deps.root, drill.problem!) }))
+            : drill.budgetMs === undefined
+              ? undefined
+              : () => timeCue(entryClock(), drill.budgetMs),
       })
       const scratchDir = mkdtempSync(join(tmpdir(), 'voice-web-'))
       const stored = store.create(session, interviewer, new Date(), scratchDir, drill)

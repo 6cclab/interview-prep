@@ -79,12 +79,22 @@ describe('describeBackend', () => {
 })
 
 describe('backendSummary', () => {
-  it('reports all three tracks', () => {
+  it('reports every track', () => {
     expect(backendSummary({ VOICE_BACKEND_MOCK: 'ollama' })).toEqual({
       mock: 'ollama',
       design: 'cli',
       coding: 'cli',
+      coach: 'cli',
     })
+  })
+
+  // Coaching teaches rather than asks, and no suite contradicts a confident
+  // wrong explanation — so putting the drills on a local model must not move
+  // the teaching there by implication.
+  it('does not move coaching onto a local model with the drills', () => {
+    const env = { VOICE_BACKEND_MOCK: 'ollama', VOICE_BACKEND_CODING: 'ollama' }
+    expect(backendSummary(env).coach).toBe('cli')
+    expect(chooseBackend('coach', { VOICE_BACKEND_COACH: 'ollama' })).toBe('ollama')
   })
 
   // Startup calls this, so an invalid value surfaces before a drill rather

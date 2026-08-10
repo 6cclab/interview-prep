@@ -40,6 +40,9 @@ function seedContext() {
   seed('.claude/commands/drill.md', 'DRILL COMMAND')
   seed(`problems/${PATTERN}/${SLUG}/README.md`, '# Container\n\nGiven heights, find the best pair.\n')
   seed(`problems/${PATTERN}/${SLUG}/solution.ts`, 'export {}')
+  // The suite: excluded from a drill's allowlist on purpose, but required by
+  // `coachPaths` — half of pairing on a red suite is reading the failing test.
+  seed(`problems/${PATTERN}/${SLUG}/solution.test.ts`, "describe('x — correctness', () => {})")
   // The worked answer, seeded on purpose: a root with no spoiler in it cannot
   // demonstrate that the spoiler stays unread.
   seed(`solutions/${PATTERN}/${SLUG}.md`, 'WORKED-SOLUTION-SPOILER two pointers converging')
@@ -885,5 +888,132 @@ describe('GET /api/history', () => {
     const body = (await res.json()) as { summary: { attempts: number }; rows: unknown[] }
     expect(body.rows).toEqual([])
     expect(body.summary.attempts).toBe(0)
+  })
+})
+
+/**
+ * The coaching track, server side.
+ *
+ * Pairing rather than interviewing: the coach is handed the worked solution and
+ * the pattern notes, plus the candidate's working file on every turn. The routes
+ * the browser can call stay exactly as tight as they were — the spoilers reach
+ * the model, never the page.
+ */
+describe('coach track', () => {
+  it('lists the same problems as the coding track', async () => {
+    const { port } = await listen(baseDeps())
+    const coach = await (await fetch(`http://127.0.0.1:${port}/api/problems?track=coach`)).json()
+    const coding = await (await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)).json()
+    expect(coach).toEqual(coding)
+  })
+
+  it('serves the README, and only the README', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/problems/${SLUG}?track=coach`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { problem: string; prompt: string }
+    expect(body.problem).toBe(SLUG)
+    expect(body.prompt).toContain('Given heights')
+    // The worked solution is what makes coaching coaching, and it must still
+    // never be reachable from the browser — a page cannot spoil a future
+    // re-drill of the same problem.
+    expect(JSON.stringify(body)).not.toMatch(/WORKED|SPOILER/i)
+  })
+
+  it('starts an untimed session with no budget', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coach', problem: SLUG }),
+    })
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as { track: string; budgetMs?: number }
+    expect(body.track).toBe('coach')
+    // A clock turns pairing back into a test.
+    expect(body.budgetMs).toBeUndefined()
+  })
+
+  it('rejects a coaching session with no problem', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coach' }),
+    })
+    expect(res.status).toBe(400)
+  })
+})
+
+/**
+ * The code feed — the thing that makes this pairing rather than a friendlier
+ * interview. Asserted through the transport, because the prompt is the only
+ * place it can be observed.
+ */
+describe('coach sees the working file', () => {
+  /** Opening the SSE stream is what drives the interviewer's first turn. */
+  async function driveFirstTurn(port: number): Promise<void> {
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/session-1/stream`)
+    await stream.body?.getReader().read()
+  }
+
+  it('hands the coach the current solution.ts, framed as state and not as speech', async () => {
+    let messages: { role: string; content: string }[] = []
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* (_system: string, msgs: { role: string; content: string }[]) {
+          messages = msgs
+          yield 'Right, let us look at it.'
+        },
+      }),
+    )
+    writeFileSync(join(root, `problems/${PATTERN}/${SLUG}/solution.ts`), 'const MARKER = 1\n')
+    await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coach', problem: SLUG }),
+    })
+    await driveFirstTurn(port)
+
+    const joined = messages.map((m) => m.content).join('\n')
+    expect(joined).toContain('const MARKER = 1')
+    expect(joined).toMatch(/For you only, not spoken/)
+    expect(joined).toMatch(/not a message from him/)
+  })
+
+  it('re-reads the file each turn rather than capturing it once', async () => {
+    const seenPerTurn: string[] = []
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () => async function* (_system: string, msgs: { role: string; content: string }[]) {
+          seenPerTurn.push(msgs.map((m) => m.content).join('\n'))
+          yield 'Go on.'
+        },
+        transcriber: { transcribe: async () => ({ text: 'I changed it.' }) },
+        transcode: async () => {},
+      }),
+    )
+    const solution = join(root, `problems/${PATTERN}/${SLUG}/solution.ts`)
+    writeFileSync(solution, 'const FIRST = 1\n')
+    await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coach', problem: SLUG }),
+    })
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/session-1/stream`)
+    const reader = stream.body!.getReader()
+    await reader.read()
+
+    // He edits between turns — the whole reason the file is re-read.
+    writeFileSync(solution, 'const SECOND = 2\n')
+    await fetch(`http://127.0.0.1:${port}/api/session/session-1/turn`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: new Uint8Array([1, 2, 3]),
+    })
+
+    expect(seenPerTurn.length).toBeGreaterThanOrEqual(2)
+    expect(seenPerTurn[0]).toContain('const FIRST = 1')
+    expect(seenPerTurn[seenPerTurn.length - 1]).toContain('const SECOND = 2')
   })
 })

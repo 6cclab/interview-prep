@@ -42,6 +42,12 @@ const TRACK_VAR: Record<Track, string> = {
   mock: 'VOICE_BACKEND_MOCK',
   design: 'VOICE_BACKEND_DESIGN',
   coding: 'VOICE_BACKEND_CODING',
+  // Coaching is the one track where a weaker model is most likely to be wrong in
+  // a way that is hard to notice: it is teaching rather than asking, so a
+  // confident wrong explanation is the failure mode, and there is no test suite
+  // in the loop to contradict it. Its own knob, so putting the drills on a local
+  // model does not silently move the teaching there too.
+  coach: 'VOICE_BACKEND_COACH',
 }
 
 /** The global variable, applied to any track without its own override. */
@@ -108,5 +114,6 @@ export function backendSummary(env: NodeJS.ProcessEnv = process.env): Record<Tra
     mock: chooseBackend('mock', env),
     design: chooseBackend('design', env),
     coding: chooseBackend('coding', env),
+    coach: chooseBackend('coach', env),
   }
 }

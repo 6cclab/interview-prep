@@ -1,7 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, normalize, sep } from 'node:path'
 
-export type Track = 'mock' | 'design' | 'coding'
+/**
+ * `coach` is not a drill. It is included here because a session, a transcript and
+ * a route all need to name it, but every spoiler guard in this file refuses it —
+ * `allowedPaths` throws, and therefore so does `buildSystemPrompt`. Coaching
+ * reads its files through `voice/coach.ts`, which explains why that is a separate
+ * door rather than an exemption inside this one.
+ */
+export type Track = 'mock' | 'design' | 'coding' | 'coach'
 
 /**
  * Paths the interviewer must never see. `.claude/rules/no-spoilers.md` states
@@ -48,6 +55,14 @@ export const PROBLEM_SLUG = /^[a-z0-9-]+$/
  * a client — the client never sends a pattern, because the pattern is the answer.
  */
 export function allowedPaths(track: Track, problem?: string, pattern?: string): string[] {
+  // The drill door does not open for coaching, and says so rather than falling
+  // through to some track's list. A coach reads `solutions/`, `patterns.md` and
+  // the suite; handing those to this function would mean `assertNoSpoilers` had
+  // to be taught an exception, and an exception in a guard that "does not trust
+  // its callers" is the guard being wrong for one caller.
+  if (track === 'coach') {
+    throw new Error('The coach track does not use allowedPaths — see coachPaths in voice/coach.ts.')
+  }
   if (track === 'mock') {
     return [
       '.claude/commands/mock.md',
