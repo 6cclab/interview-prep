@@ -75,6 +75,10 @@ pnpm mock:web           # React browser client (127.0.0.1) — builds, serves, o
                         # each drill then gets its own screen at its own URL
                         # (#/mock, #/design/<p>, #/coding/<p>), so a reload comes
                         # back to the same drill instead of the chooser.
+pnpm mock:web:claude    # ditto, every track on the Claude subscription
+pnpm mock:web:ollama    # ditto, every track on the local ollama model
+pnpm mock:web:hybrid    # ditto, behavioural local and the rest on Claude
+                        # See "Which model the interviewer runs on" below.
 pnpm build:web          # build the React client only (voice/web -> voice/dist)
 pnpm dev:web            # Vite dev server with HMR for voice/web (proxies /api)
 pnpm dev:web:api        # the node:http API/session server alone, for use alongside dev:web
@@ -213,11 +217,30 @@ spends, at startup and at session creation.
 | `api` | the Messages API | Console credits |
 | `ollama` | a local model over HTTP | nothing |
 
+Three serving commands, so the choice is made by which one you type rather than
+by remembering what is exported:
+
+```bash
+pnpm mock:web:claude    # every track on the subscription
+pnpm mock:web:ollama    # every track local
+pnpm mock:web:hybrid    # behavioural local, design and coding on Claude
+pnpm mock:web           # whatever the environment says; the default is claude
+```
+
+**Each of the three sets every variable, including the ones it does not want.**
+`VOICE_BACKEND_MOCK=` with an empty value reads as unset, so
+`pnpm mock:web:claude` genuinely means all-Claude even with a stale
+`VOICE_BACKEND_MOCK=ollama` exported in a shell profile. A command whose
+behaviour depends on what is already in the environment is not a choice.
+
+The variables underneath, for a one-off:
+
 ```bash
 VOICE_BACKEND=ollama            # all three tracks
 VOICE_BACKEND_MOCK=ollama       # one track; beats the global
 VOICE_CLAUDE_MODEL=claude-opus-5 # override the Claude model for a drill worth it
 OLLAMA_MODEL=gpt-oss:20b        # override the local model (tags are case-sensitive)
+OLLAMA_HOST=192.168.3.168:11434 # a bare host:port is accepted, as ollama's CLI does
 ```
 
 An unrecognised value **throws at startup** rather than falling back — a typo
