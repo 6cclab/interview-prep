@@ -19,6 +19,19 @@ export interface Transcriber {
 
 export interface Speaker {
   speak(text: string): Promise<void>
+  /**
+   * Cuts off whatever is being spoken right now.
+   *
+   * Needed because TTS happens *here*, on the server, not in the browser: a
+   * page that reloads or closes has no effect on a running `say`. Without this,
+   * refreshing mid-turn left the interviewer reading its reply aloud to an empty
+   * room — and on the coding track, `beforeunload`'s `/end` beacon then started
+   * a whole closing verdict that nobody was there to hear.
+   *
+   * Optional so a test stub need not implement it. A speaker with nothing to
+   * stop implements it as a no-op.
+   */
+  stop?(): void
 }
 
 const SEGMENT = /^\[\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}\]\s*(.*)$/
@@ -125,16 +138,42 @@ export function sayArgs(text: string, opts: SayOptions = {}): string[] {
 
 /** macOS `say`. Robotic but free and instant; swap this out, not the loop. */
 export function saySpeaker(opts: SayOptions = {}): Speaker {
+  // The utterance in flight, so `stop` has something to kill. At most one:
+  // `streamTurn` awaits each sentence before starting the next, precisely so
+  // two `say` processes never overlap into gibberish.
+  let current: ReturnType<typeof execFile> | null = null
+
   return {
     async speak(text: string): Promise<void> {
+      // `execFile` rather than the promisified `run` used elsewhere in this
+      // file: the child handle is the whole point here, and the promisified
+      // form does not hand it back.
+      const child = execFile('say', sayArgs(text, opts))
+      current = child
       try {
-        await run('say', sayArgs(text, opts))
+        await new Promise<void>((resolve, reject) => {
+          child.once('error', reject)
+          child.once('close', (code, signal) => {
+            // A killed utterance is a cancellation, not a failure — `stop` was
+            // called on purpose, and throwing here would log a TTS error for
+            // every ordinary page refresh.
+            if (signal !== null) resolve()
+            else if (code === 0) resolve()
+            else reject(new Error(`say exited with code ${String(code)}`))
+          })
+        })
       } catch (err) {
         throw new Error(
           `macOS \`say\` failed to speak text (voice: ${opts.voice ?? 'default'}, length: ${text.length})`,
           { cause: err },
         )
+      } finally {
+        if (current === child) current = null
       }
+    },
+    stop(): void {
+      current?.kill()
+      current = null
     },
   }
 }

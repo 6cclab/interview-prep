@@ -328,6 +328,24 @@ async function speakSentence(speaker: Speaker | undefined, text: string): Promis
   }
 }
 
+/**
+ * Whether anyone is listening.
+ *
+ * TTS runs on the server, so nothing about a closed or reloaded page stops a
+ * `say` already in progress — and the reply generator is deliberately drained to
+ * completion even with no client attached, so the session's state advances. Those
+ * two facts together meant a refresh left the interviewer talking to an empty
+ * room, and on the coding track `beforeunload`'s `/end` beacon then started a
+ * whole closing verdict for nobody.
+ *
+ * Draining is still right; *speaking* while nobody is connected never was. This
+ * is checked per sentence rather than once per turn, because the page can go away
+ * mid-reply — which is the case that was actually audible.
+ */
+function hasListener(store: SessionStore, id: string): boolean {
+  return store.get(id)?.sseClient !== undefined
+}
+
 // `res` is optional: a turn can be submitted with no live SSE connection (the
 // browser tab closed, or never reconnected), and the reply must still be
 // drained to completion so the session's entries/endedEarly state advances —
@@ -339,10 +357,23 @@ async function speakSentence(speaker: Speaker | undefined, text: string): Promis
 // Awaiting each `speakSentence` in turn — rather than firing them all — is
 // what prevents overlapping, gibberish-inducing calls to `say`; it does not
 // stall the SSE stream, because the write already happened.
-async function streamTurn(res: ServerResponse | undefined, turn: AsyncIterable<string>, speaker?: Speaker): Promise<void> {
+async function streamTurn(
+  res: ServerResponse | undefined,
+  turn: AsyncIterable<string>,
+  speaker?: Speaker,
+  /**
+   * Re-checked before every sentence. Absent means "always speak", which is what
+   * the design track's CLI path wants — it has no SSE client to lose.
+   */
+  listening?: () => boolean,
+): Promise<void> {
   for await (const sentence of turn) {
     if (res) writeSSE(res, 'sentence', { speaker: 'interviewer', text: sentence })
-    await speakSentence(speaker, sentence)
+    // The sentence is already on the wire and already in the transcript; only
+    // the audio is conditional. A reader who reconnects sees everything said
+    // while they were gone — they just do not hear the part they missed, which
+    // is the same deal a spoken interview gives you.
+    if (listening === undefined || listening()) await speakSentence(speaker, sentence)
   }
 }
 
@@ -888,6 +919,14 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // `endAndPersist` and kill the session (and the brand-new
         // connection) out from under a live reconnect.
         if (store.get(id)?.sseClient !== res) return
+        // Mark the client gone *before* anything else, so a turn mid-flight sees
+        // it on its next sentence — `streamTurn` re-reads `hasListener` per
+        // sentence and this is what makes that check true-to-life.
+        stored.sseClient = undefined
+        // And cut the sentence already in the speaker's mouth. Nothing else can:
+        // `say` is a server-side subprocess, so the page closing does not touch
+        // it, and a sentence takes seconds to read out.
+        deps.speaker?.stop?.()
         endAndPersist(deps, store, entryClocks, closing, id)
       })
 
@@ -895,7 +934,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       if (!alreadyBegun) {
         void (async () => {
           const before = stored.session.entries().length
-          await streamTurn(res, stored.session.begin(), deps.speaker)
+          await streamTurn(res, stored.session.begin(), deps.speaker, () => hasListener(store, id))
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(res, 'entry', entry)
           }
@@ -924,7 +963,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // No live SSE connection is a normal state (a turn submitted between
         // reconnects, say), not a reason to stop draining the reply — the
         // session's entries/endedEarly state must still advance either way.
-        await streamTurn(stored.sseClient, iterable, deps.speaker)
+        await streamTurn(stored.sseClient, iterable, deps.speaker, () => hasListener(store, id))
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before + 1)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -1153,7 +1192,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
 
       void (async () => {
         const before = stored.session.entries().length
-        await streamTurn(stored.sseClient, stored.session.interject(hintCue(rung)), deps.speaker)
+        await streamTurn(stored.sseClient, stored.session.interject(hintCue(rung)), deps.speaker, () => hasListener(store, id))
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -1226,7 +1265,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       sendJson(res, 200, verdict)
       void (async () => {
         const before = stored.session.entries().length
-        await streamTurn(stored.sseClient, stored.session.interject(verdictCue(verdict)), deps.speaker)
+        await streamTurn(stored.sseClient, stored.session.interject(verdictCue(verdict)), deps.speaker, () => hasListener(store, id))
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -1283,7 +1322,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         turnsInFlight.add(id)
         try {
           const before = stored.session.entries().length
-          await streamTurn(stored.sseClient, stored.session.interject(closingCue()), deps.speaker)
+          await streamTurn(stored.sseClient, stored.session.interject(closingCue()), deps.speaker, () => hasListener(store, id))
           if (stored.sseClient) {
             for (const entry of stored.session.entries().slice(before)) {
               writeSSE(stored.sseClient, 'entry', entry)

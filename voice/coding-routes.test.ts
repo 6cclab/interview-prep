@@ -919,6 +919,117 @@ describe('GET /api/history', () => {
 })
 
 /**
+ * Speech stops when the listener leaves.
+ *
+ * TTS runs on the server — `say`, a subprocess — so nothing about a reloaded or
+ * closed page touches it, and the reply generator is deliberately drained to
+ * completion even with no client attached. Together that left the interviewer
+ * talking to an empty room after a refresh, and on the coding track
+ * `beforeunload`'s `/end` beacon then started a whole closing verdict for
+ * nobody. Reported from a real session: "when you refresh the page, audio is
+ * still coming through".
+ */
+describe('nothing is spoken to an empty room', () => {
+  /** Records what was spoken, and whether it was ever cut off. */
+  function recordingSpeaker() {
+    const spoken: string[] = []
+    let stopped = 0
+    return {
+      spoken,
+      stopCount: () => stopped,
+      speaker: {
+        speak: async (text: string) => {
+          spoken.push(text)
+        },
+        stop: () => {
+          stopped += 1
+        },
+      },
+    }
+  }
+
+  // The `/end` beacon a refresh fires. Its closing turn exists for the
+  // transcript and the drill-log trailer; there is nobody to hear it.
+  it('does not speak a closing verdict when no client is attached', async () => {
+    mkdirSync(join(root, 'local'), { recursive: true })
+    const rec = recordingSpeaker()
+    const { port } = await listen(
+      baseDeps({
+        speaker: rec.speaker,
+        createTransport: () => async function* () {
+          yield 'Here is the verdict.'
+          yield '```drill-log\nsolved: no\nnote: refreshed away\n```'
+        },
+      }),
+    )
+    const { id } = (await (await startCodingSession(port)).json()) as { id: string }
+    const { relPath } = (await (
+      await fetch(`http://127.0.0.1:${port}/api/session/${id}/end`, { method: 'POST' })
+    ).json()) as { relPath: string }
+
+    expect(rec.spoken).toEqual([])
+    // Silent, not skipped: the closing turn still happened, so the transcript and
+    // the log row are exactly as they would have been.
+    expect(readFileSync(join(root, relPath), 'utf8')).toContain('Here is the verdict.')
+    expect(readFileSync(join(root, 'local/drill-log.md'), 'utf8')).toContain('refreshed away')
+  })
+
+  // The audible case: the page goes away *during* a reply.
+  it('stops mid-turn when the page goes away, and speaks no further sentences', async () => {
+    mkdirSync(join(root, 'local'), { recursive: true })
+    const rec = recordingSpeaker()
+    let onFirstSpoken = (): void => {}
+    const firstSpoken = new Promise<void>((resolve) => {
+      onFirstSpoken = resolve
+    })
+    let release = (): void => {}
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const speaker = {
+      speak: async (text: string) => {
+        rec.spoken.push(text)
+        // The first sentence parks in the speaker's mouth, which is where a real
+        // one is when someone hits reload.
+        if (rec.spoken.length === 1) {
+          onFirstSpoken()
+          await released
+        }
+      },
+      stop: rec.speaker.stop,
+    }
+    const { port } = await listen(
+      baseDeps({
+        speaker,
+        // Trailing spaces on purpose: `voice/chunk.ts` only treats a terminator
+        // as ending a sentence when whitespace follows it, so without them these
+        // three arrive as one blob and there is no per-sentence gate to observe.
+        createTransport: () => async function* () {
+          yield 'First sentence. '
+          yield 'Second sentence. '
+          yield 'Third sentence. '
+        },
+      }),
+    )
+    const { id } = (await (await startCodingSession(port)).json()) as { id: string }
+
+    // The opening turn is driven by the stream connection, so this is the turn
+    // being spoken when the reload lands.
+    const controller = new AbortController()
+    await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`, { signal: controller.signal })
+    await firstSpoken
+    controller.abort()
+    // Give the server's 'close' handler a tick to run before the speaker is let go.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    expect(rec.spoken).toEqual(['First sentence.'])
+    expect(rec.stopCount()).toBeGreaterThan(0)
+  })
+})
+
+/**
  * What conducted the drill, recorded in the transcript it leaves behind.
  *
  * The startup banner says what the *server* is on. A transcript read days later
