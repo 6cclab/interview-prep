@@ -95,6 +95,20 @@ export function ProblemPane({ problem, track }: Props) {
                   Nothing in <code>src/</code> invokes them, so there is no call site to find.
                 </p>
               )}
+              {/* The second thing a real drill lost time to, after the missing call
+                  site: an id from the bug report that is not in the fixture. The
+                  report describes accounts as though a whole system existed behind
+                  them; the harness is whatever `src/` hardcodes. Absence is a state
+                  the code has to handle, so it is usually a condition under test —
+                  which is a fact about how to read the exercise, not a hint about
+                  the defect. */}
+              {track === 'debug' && (
+                <p className="problem-pane__note">
+                  The fixtures in <code>src/</code> are the whole world. If the report names an account or an id that is
+                  not in them, that absence is a state the code is being asked to handle — not a missing file. The
+                  report is written the way a real one would be, by someone describing a system they cannot see.
+                </p>
+              )}
             </>
           )}
         </div>

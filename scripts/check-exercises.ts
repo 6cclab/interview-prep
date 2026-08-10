@@ -37,6 +37,12 @@ interface Finding {
 
 const findings: Finding[] = []
 
+/**
+ * Lines that need a human's judgement rather than a verdict. Printed under the
+ * counts and never affecting the exit code — see `danglingLiterals`.
+ */
+const inventory: string[] = []
+
 function broken(where: string, what: string): void {
   findings.push({ severity: 'broken', where, what })
 }
@@ -248,6 +254,50 @@ function checkProblems(): ProblemRow[] {
 // debugging/ and feature/ — the two-suite tracks
 // ---------------------------------------------------------------------------
 
+/**
+ * Ids the **bug report** names that appear nowhere in the exercise's source.
+ *
+ * **Information, not a finding**, and narrowed hard to stay worth reading. The
+ * broad version — every literal in the suites that is missing from `src/` — was
+ * tried first and produced forty entries for one feature exercise, because those
+ * tests legitimately construct their own inputs. Noise gets a check switched off.
+ *
+ * What is left is the case that actually confused a real drill: the report is
+ * written as though a whole system stood behind it, naming an account or an id,
+ * and the fixture does not contain that id at all. In `entitlements-gate` that is
+ * `cust_48213` — deliberate, since both suites' third test is "when the customer
+ * entitlements cannot be resolved", and absence is how that state is expressed.
+ * Deliberate or not, it is where "this exercise is incomplete" comes from, so it
+ * gets printed and a human decides.
+ */
+function reportedButAbsent(dir: string, suites: string[]): string[] {
+  const srcDir = join(ROOT, dir, 'src')
+  if (!existsSync(srcDir)) return []
+  const source = readdirSync(srcDir)
+    .filter((name) => name.endsWith('.ts'))
+    .map((name) => read(`${dir}/src/${name}`) ?? '')
+    .join('\n')
+
+  const readme = read(`${dir}/README.md`)
+  if (!readme) return []
+
+  const referenced = new Set<string>()
+  for (const suite of suites) {
+    const body = read(`${dir}/${suite}`)
+    if (!body) continue
+    for (const match of body.matchAll(/['"`]([^'"`\s]{3,})['"`]/g)) {
+      const literal = match[1]!
+      // Import specifiers are not data.
+      if (literal.startsWith('.') || literal === 'vitest') continue
+      referenced.add(literal)
+    }
+  }
+  // The intersection with the report is the whole point: a literal only the tests
+  // know about is a test's own input, and a literal the report names is a promise
+  // about the world.
+  return [...referenced].filter((literal) => readme.includes(literal) && !source.includes(literal)).sort()
+}
+
 function checkTwoSuiteTrack(
   track: 'debugging' | 'feature',
   suites: [string, string],
@@ -278,6 +328,16 @@ function checkTwoSuiteTrack(
 
     if (track === 'debugging' && !existsSync(join(ROOT, `solutions/debugging/${name}.md`))) {
       broken(where, `no worked answer at solutions/debugging/${name}.md`)
+    }
+
+    // Debugging only. A feature brief names example data because it is describing
+    // what to build, and the tests create it — `menu-modifiers`' report mentions
+    // "Cheeseburger" and no fixture should contain one. A bug report is the other
+    // way round: it describes a system that already exists, and `src/` is that
+    // system, so a named id missing from it is worth a second look.
+    const absent = track === 'debugging' ? reportedButAbsent(dir, suites) : []
+    if (absent.length > 0) {
+      inventory.push(`  ${dir}: the report names ${absent.join(', ')}, and src/ has no such id`)
     }
   }
   return names
@@ -337,6 +397,14 @@ for (const [label, list] of [
   if (list.length === 0) continue
   console.log(`\n${label} (${list.length})`)
   for (const finding of list) console.log(`  ${finding.where}: ${finding.what}`)
+}
+
+if (inventory.length > 0) {
+  console.log(
+    '\nfor your judgement — usually deliberate (absence is a state under test), but this is\n' +
+      'where "this exercise is incomplete" comes from',
+  )
+  for (const line of inventory) console.log(line)
 }
 
 if (brokenFindings.length === 0) {

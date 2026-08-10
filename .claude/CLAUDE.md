@@ -208,6 +208,18 @@ hypothesis. **A refusal is not recorded as help**, so the drill-log's hint count
 stays a measurement of what was actually given, the same reason a pairing session
 is not counted as an attempt.
 
+**A bug report describes a system; `src/` is the whole of it.** Both confusions a
+real drill hit were this: `account-switcher`'s report describes a dashboard and a
+global nav, and nothing in `src/` calls the render functions at all; `entitlements-gate`'s
+report describes Northwind Traders as a free-plan account with a billing record,
+and `cust_48213` is deliberately not in the fixture — which is how "entitlements
+cannot be resolved", the third test in each of its suites, is expressed. Both read
+as a half-written exercise. The report is *meant* to be written by someone
+describing a system they cannot see, so the problem pane now says the fixtures are
+the whole world and an absent id is a state rather than a missing file, and
+`pnpm exercises` prints every id a bug report names that its `src/` does not
+contain — for judgement, not as a finding, since it is usually the point.
+
 **Two things it must answer, and one it must never volunteer**, both learned from
 a real drill on 2026-08-10. The interviewer spent two turns pushing a specific
 causal theory — async work in flight from before the switch — having been shown

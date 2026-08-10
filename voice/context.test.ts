@@ -434,6 +434,19 @@ describe('what the debugging interviewer may and may not say', () => {
     expect(prompt()).toMatch(/Do not supply candidates/)
   })
 
+  // The second thing a real drill read as an incomplete exercise: an id from the
+  // bug report that is not in the fixture. It is usually the condition under test —
+  // `entitlements-gate`'s third test in each suite is "when the customer
+  // entitlements cannot be resolved", and the customer from the report is
+  // deliberately absent from the data. The interviewer must be able to say how to
+  // read that without saying what it means.
+  it('tells it that an absent fixture id is a state, without confirming what it means', () => {
+    const text = prompt()
+    expect(text).toMatch(/the fixtures are the whole world/)
+    expect(text).toMatch(/an\s+absent id is a state the code is being asked to handle/)
+    expect(text).toMatch(/do not confirm\s+or deny what it means/)
+  })
+
   it('tells it to answer plainly that the tests are the only entry points', () => {
     const text = prompt()
     expect(text).toMatch(/the two test files are the only entry points/)
