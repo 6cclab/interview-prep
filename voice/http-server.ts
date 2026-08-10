@@ -202,6 +202,14 @@ function listDesignProblems(root: string): string[] {
   if (!existsSync(dir)) return []
   return readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && PROBLEM_SLUG.test(entry.name))
+    // A directory with no README is not an exercise yet, and offering it in the
+    // picker is worse than omitting it: the prompt is the whole drill, so
+    // selecting one produced a 400 from `buildSystemPrompt`'s missing-file throw
+    // and no way to tell from the screen whether the server or the choice was
+    // broken. Authoring an exercise starts by creating a directory, so this state
+    // is a normal few minutes rather than a corrupt repo — `listExercises` on the
+    // debugging track has required the same thing from the start.
+    .filter((entry) => existsSync(join(dir, entry.name, 'README.md')))
     .map((entry) => entry.name)
     .sort()
 }

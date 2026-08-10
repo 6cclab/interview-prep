@@ -1288,6 +1288,21 @@ describe('GET /api/problems', () => {
     expect(await res.json()).toEqual({ problems: ['notification-fanout', 'rate-limiter'] })
   })
 
+  // Authoring an exercise starts by making a directory, so a prompt-less one is a
+  // normal few minutes rather than a corrupt repo — and for those minutes the
+  // picker used to offer it, which produced a 400 on selection with nothing on
+  // screen to say whether the server or the choice was at fault. Caught for real:
+  // a half-authored `system-design/file-scan-pipeline/` was listed by a running
+  // server while it held only a meta.yaml.
+  it('omits a directory that has no README yet, rather than offering a drill that cannot start', async () => {
+    mkdirSync(join(root, 'system-design/half-authored'), { recursive: true })
+    writeFileSync(join(root, 'system-design/half-authored/meta.yaml'), 'title: Half authored\n')
+    const { port } = await listen(baseDeps())
+    const body = (await (await fetch(`http://127.0.0.1:${port}/api/problems`)).json()) as { problems: string[] }
+    expect(body.problems).not.toContain('half-authored')
+    expect(body.problems).toEqual(['notification-fanout', 'rate-limiter'])
+  })
+
   it('serves a problem statement for the design pane', async () => {
     const { port } = await listen(baseDeps())
     const res = await fetch(`http://127.0.0.1:${port}/api/problems/rate-limiter`)

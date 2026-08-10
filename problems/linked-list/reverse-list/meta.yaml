@@ -1,6 +1,13 @@
 pattern: linked-list
 title: Reverse a Linked List
 difficulty: warmup
+# The prompt says "linked list", which is this problem's pattern — normally a
+# spoiler and refused by `pnpm exercises`. Accepted here because the pattern is
+# the data structure the question is about: "reverse a linked list" cannot be
+# asked without naming it, and what the drill actually tests is the pointer
+# dance, not recognising the structure. Declared rather than special-cased in the
+# checker, so the exemption lives with the exercise that needs it.
+pattern-in-prompt: accepted
 budget: none — warm-up tier, correctness only. See ".claude/CLAUDE.md" > "The warm-up tier".
 companies:
   - name: unknown

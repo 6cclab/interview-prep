@@ -80,6 +80,17 @@ pnpm test <problem>     # run one drill
 pnpm test               # everything, as a regression check
 pnpm reset <problem>    # restore stub.ts over solution.ts
 pnpm domains            # domains the exercise set covers; `--for <company>` to tailor
+pnpm exercises          # audits every authored exercise against its track's contract:
+                        # files present, meta.yaml fields, a README that does not name
+                        # its own pattern, a cost mechanism unless the tier is warmup,
+                        # a stub that ships red, a worked answer to debrief from.
+                        # **Reports on files without printing their contents** — it opens
+                        # patterns.md and solutions/** to answer yes/no questions, so it
+                        # is safe to run mid-session and safe for a model to run, which
+                        # those files are not. Two severities: `broken` (cannot be
+                        # drilled; exit 1) and `unauthored` (works, a part was never
+                        # written; exit 0, because a script that fails over a to-do list
+                        # gets ignored).
 pnpm mock:voice         # spoken behavioral drill
 pnpm mock:web           # React browser client (127.0.0.1) — builds, serves, opens Chrome.
                         # PORT=4199 to serve a second one alongside a running drill.
@@ -449,6 +460,18 @@ problem hands the solver an expensive operation:
 When authoring a new problem, prove the suite three ways before committing: it
 must fail a wrong solution, fail a brute-force solution, and pass the reference.
 A suite a brute-force answer passes is broken, whatever the reference does.
+
+### Declaring a pattern that is also the question
+
+`pnpm exercises` refuses a README that contains its own pattern name, because the
+prompt naming the pattern is the answer. One case is legitimate: `reverse-list`
+lives under `linked-list`, and "reverse a linked list" cannot be asked without
+saying it — what that drill tests is the pointer dance, not recognising the
+structure. No checker can tell that from a leak, so the exercise declares it with
+`pattern-in-prompt: accepted` in its `meta.yaml` and the check honours the
+declaration. An undeclared match stays broken, which keeps the default strict and
+puts the exemption next to the exercise that needs it rather than in a list inside
+the checker.
 
 ### The warm-up tier
 
