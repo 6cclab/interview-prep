@@ -10,9 +10,9 @@ import type { Track } from './context'
  *
  * Four exist and they are not interchangeable:
  *
- * - `cli` — `claude -p` against the logged-in subscription. The default,
- *   because it is the only one every prompt rule in `context.ts` was written
- *   and tested against.
+ * - `cli` — `claude -p` against the logged-in subscription. The one every
+ *   prompt rule in `context.ts` was written and tested against. There is
+ *   deliberately no default: see `chooseBackend`.
  * - `api` — the Anthropic Messages API, spending Console credits.
  * - `ollama` — a local model over HTTP. Cheap and private, and materially
  *   worse at following the dense rules the prompts carry (exactly one
@@ -37,9 +37,6 @@ export type Backend = 'cli' | 'api' | 'ollama' | 'openai'
 
 const BACKENDS: readonly Backend[] = ['cli', 'api', 'ollama', 'openai']
 
-/** The default when nothing is set. See `Backend` for why it is not `ollama`. */
-export const DEFAULT_BACKEND: Backend = 'cli'
-
 /**
  * Per-track override variable names.
  *
@@ -63,6 +60,9 @@ const TRACK_VAR: Record<Track, string> = {
   debug: 'VOICE_BACKEND_DEBUG',
 }
 
+/** Every per-track variable name, for tests and for error messages. */
+export const TRACK_VARS: readonly string[] = Object.values(TRACK_VAR)
+
 /** The global variable, applied to any track without its own override. */
 const GLOBAL_VAR = 'VOICE_BACKEND'
 
@@ -77,10 +77,11 @@ function parse(value: string, varName: string): Backend {
 /**
  * The backend for `track`, from `env`.
  *
- * Precedence: the track's own variable, then the global one, then the default.
- * An unrecognised value throws rather than falling back — a typo
- * (`VOICE_BACKEND=olama`) silently running a whole session on the expensive
- * path is the failure this refuses to have.
+ * Precedence: the track's own variable, then the global one. There is no
+ * default — nothing set throws, because a transport you did not choose is a
+ * transport you discover mid-drill. An unrecognised value also throws rather
+ * than falling back — a typo (`VOICE_BACKEND=olama`) silently running a whole
+ * session on the expensive path is the failure this refuses to have.
  *
  * An empty or whitespace-only value is treated as unset, so
  * `VOICE_BACKEND= pnpm mock:web` clears an inherited export instead of
@@ -94,7 +95,15 @@ export function chooseBackend(track: Track, env: NodeJS.ProcessEnv = process.env
   const globalValue = env[GLOBAL_VAR]
   if (globalValue !== undefined && globalValue.trim() !== '') return parse(globalValue, GLOBAL_VAR)
 
-  return DEFAULT_BACKEND
+  throw new Error(
+    `VOICE_BACKEND is not set, and there is no default — a transport you did not ` +
+      `choose is one you discover mid-drill. Use one of:\n` +
+      `  pnpm mock:web:claude   ${describeBackend('cli', DEFAULT_CLAUDE_MODEL)}\n` +
+      `  pnpm mock:web:openai   ${describeBackend('openai', DEFAULT_OPENAI_MODEL)}\n` +
+      `  pnpm mock:web:ollama   ${describeBackend('ollama', DEFAULT_OLLAMA_MODEL)}\n` +
+      `  pnpm mock:web:hybrid   behavioural local, the rest on Claude\n` +
+      `Or set ${GLOBAL_VAR} / ${trackVar} yourself.`,
+  )
 }
 
 /**

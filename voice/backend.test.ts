@@ -2,18 +2,22 @@ import { describe, expect, it } from 'vitest'
 import {
   backendSummary,
   chooseBackend,
-  DEFAULT_BACKEND,
   describeBackend,
   modelFor,
   transportLabel,
 } from './backend'
 
 describe('chooseBackend', () => {
-  it('defaults every track to the claude CLI when nothing is set', () => {
-    expect(chooseBackend('mock', {})).toBe('cli')
-    expect(chooseBackend('design', {})).toBe('cli')
-    expect(chooseBackend('coding', {})).toBe('cli')
-    expect(DEFAULT_BACKEND).toBe('cli')
+  it('refuses to guess when nothing is set', () => {
+    expect(() => chooseBackend('coding', {})).toThrow(/VOICE_BACKEND is not set/)
+  })
+
+  it('names the scripts in the error, since that is what the reader will type', () => {
+    expect(() => chooseBackend('coding', {})).toThrow(/mock:web:claude/)
+  })
+
+  it('still treats an empty value as unset, so a stale export can be cleared', () => {
+    expect(() => chooseBackend('coding', { VOICE_BACKEND: '  ' })).toThrow(/not set/)
   })
 
   it('applies the global variable to every track', () => {
@@ -33,7 +37,7 @@ describe('chooseBackend', () => {
   // behavioural track, which has no spoiler to leak and no fenced trailer to
   // emit, and Claude on the two that do.
   it('expresses the recommended hybrid', () => {
-    const env = { VOICE_BACKEND_MOCK: 'ollama' }
+    const env = { VOICE_BACKEND: 'cli', VOICE_BACKEND_MOCK: 'ollama' }
     expect(chooseBackend('mock', env)).toBe('ollama')
     expect(chooseBackend('design', env)).toBe('cli')
     expect(chooseBackend('coding', env)).toBe('cli')
@@ -45,11 +49,12 @@ describe('chooseBackend', () => {
   })
 
   // `VOICE_BACKEND= pnpm mock:web` is the documented way to clear an inherited
-  // export for one run; treating an empty string as an error would make that
-  // idiom fail instead of doing the obvious thing.
+  // export for one run; an empty string has to behave exactly like the
+  // variable being absent, in both directions — falling through to a lower
+  // precedence value, or to the same refusal as truly unset.
   it('treats an empty or blank value as unset', () => {
-    expect(chooseBackend('mock', { VOICE_BACKEND: '' })).toBe('cli')
-    expect(chooseBackend('mock', { VOICE_BACKEND: '   ' })).toBe('cli')
+    expect(() => chooseBackend('mock', { VOICE_BACKEND: '' })).toThrow(/not set/)
+    expect(() => chooseBackend('mock', { VOICE_BACKEND: '   ' })).toThrow(/not set/)
     expect(chooseBackend('mock', { VOICE_BACKEND: 'ollama', VOICE_BACKEND_MOCK: '' })).toBe('ollama')
   })
 
@@ -67,7 +72,7 @@ describe('chooseBackend', () => {
   })
 
   it('does not read the wrong track variable', () => {
-    const env = { VOICE_BACKEND_MOCK: 'ollama' }
+    const env = { VOICE_BACKEND: 'cli', VOICE_BACKEND_MOCK: 'ollama' }
     expect(chooseBackend('design', env)).toBe('cli')
     expect(chooseBackend('coding', env)).toBe('cli')
   })
@@ -87,7 +92,7 @@ describe('describeBackend', () => {
 
 describe('backendSummary', () => {
   it('reports every track', () => {
-    expect(backendSummary({ VOICE_BACKEND_MOCK: 'ollama' })).toEqual({
+    expect(backendSummary({ VOICE_BACKEND: 'cli', VOICE_BACKEND_MOCK: 'ollama' })).toEqual({
       debug: 'cli',
       mock: 'ollama',
       design: 'cli',
@@ -100,7 +105,7 @@ describe('backendSummary', () => {
   // wrong explanation — so putting the drills on a local model must not move
   // the teaching there by implication.
   it('does not move coaching onto a local model with the drills', () => {
-    const env = { VOICE_BACKEND_MOCK: 'ollama', VOICE_BACKEND_CODING: 'ollama' }
+    const env = { VOICE_BACKEND: 'cli', VOICE_BACKEND_MOCK: 'ollama', VOICE_BACKEND_CODING: 'ollama' }
     expect(backendSummary(env).coach).toBe('cli')
     expect(chooseBackend('coach', { VOICE_BACKEND_COACH: 'ollama' })).toBe('ollama')
   })
@@ -120,8 +125,8 @@ describe('backendSummary', () => {
  * timestamp instead.
  */
 describe('transportLabel', () => {
-  it('names the backend and the Claude model by default', () => {
-    expect(transportLabel('coding', {})).toBe('cli / claude-sonnet-5')
+  it('names the backend and the Claude model when cli is chosen', () => {
+    expect(transportLabel('coding', { VOICE_BACKEND: 'cli' })).toBe('cli / claude-sonnet-5')
   })
 
   it('names the ollama model when a track is local', () => {
@@ -140,7 +145,9 @@ describe('transportLabel', () => {
   })
 
   it('reports the override model rather than the default', () => {
-    expect(transportLabel('design', { VOICE_CLAUDE_MODEL: 'claude-opus-5' })).toBe('cli / claude-opus-5')
+    expect(
+      transportLabel('design', { VOICE_BACKEND: 'cli', VOICE_CLAUDE_MODEL: 'claude-opus-5' }),
+    ).toBe('cli / claude-opus-5')
   })
 })
 

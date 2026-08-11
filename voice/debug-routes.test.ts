@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
 import { createSessionStore } from './session-store'
+import { useCliBackend } from './test-helpers/backend-env'
+
+useCliBackend()
 
 /**
  * The debugging track's HTTP surface.

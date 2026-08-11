@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, startVoiceServer } from './http-server'
 import { readSSE } from './test-helpers/sse'
+import { useCliBackend } from './test-helpers/backend-env'
+
+useCliBackend()
 
 let server: Server | undefined
 let distDir: string | undefined

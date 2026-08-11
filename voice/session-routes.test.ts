@@ -7,6 +7,9 @@ import { createVoiceServer, type VoiceServerDeps } from './http-server'
 import { createSessionStore } from './session-store'
 import { connect } from 'node:net'
 import { readSSE } from './test-helpers/sse'
+import { useCliBackend } from './test-helpers/backend-env'
+
+useCliBackend()
 
 let server: Server | undefined
 let root: string
