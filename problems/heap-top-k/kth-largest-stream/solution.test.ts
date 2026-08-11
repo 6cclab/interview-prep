@@ -75,7 +75,7 @@ describe('KthLargest — scale', () => {
    *
    * The 5s budget asserted below is what fails it, NOT the 10s testTimeout —
    * Vitest cannot preempt synchronous JavaScript, so a blocking brute force
-   * runs to completion and only then reports. See ".claude/CLAUDE.md" > "Tests
+   * runs to completion and only then reports. See "AGENTS.md" > "Tests
    * encode the insight".
    *
    * The stream is generated deterministically via `mulberry32` so the

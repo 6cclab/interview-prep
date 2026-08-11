@@ -12,7 +12,7 @@ describe('openPlan', () => {
   const URL = 'http://127.0.0.1:4174/'
 
   // The reason this module exists rather than a bare `open <url>`: per
-  // .claude/CLAUDE.md, Arc does not work at all and Safari needs HTTPS, and both
+  // AGENTS.md, Arc does not work at all and Safari needs HTTPS, and both
   // fail silently — no prompt, no rejection, mediaDevices simply absent.
   it('names Chrome explicitly rather than trusting the default browser', () => {
     expect(openPlan(URL, { platform: 'darwin', hasChrome: true })).toEqual({

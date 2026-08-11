@@ -26,7 +26,7 @@ import type { DebugVerdict, DrillVerdict, ErrorKind } from './types'
 // `requestingLong` below for how the ~4s threshold is reconciled with that
 // hook-owned status string instead of duplicating a second timer.
 // The "Show me where" expansion for a blocked microphone. Chrome is named
-// because .claude/CLAUDE.md makes it the supported browser for this drill; the
+// because AGENTS.md makes it the supported browser for this drill; the
 // second line covers the macOS layer, which is a separate grant from the site
 // permission and the one that actually bites (see the same file's notes).
 const PERMISSION_HELP = [

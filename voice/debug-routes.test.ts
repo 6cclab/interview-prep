@@ -38,7 +38,7 @@ function seed(relPath: string, body: string) {
 }
 
 function seedContext() {
-  seed('.claude/commands/debug.md', 'DEBUG COMMAND')
+  seed('prompts/debug.md', 'DEBUG COMMAND')
   seed(`debugging/${EXERCISE}/README.md`, '# Bug report: loyalty discount is inconsistent\n\nSupport escalated this.\n')
   seed(`debugging/${EXERCISE}/meta.yaml`, 'title: Loyalty discount is inconsistent\ndomains:\n  - checkout\n')
   seed(`debugging/${EXERCISE}/repro.test.ts`, 'export {}')

@@ -92,7 +92,7 @@ backend abstraction (record, speak, list devices) with an ALSA/PulseAudio and
 
 Model backends, when you do want one, are per track and explicit — a Claude
 subscription, the Anthropic API, or a local ollama model. See
-`.claude/CLAUDE.md` under "Which model the interviewer runs on".
+`AGENTS.md` under "Which model the interviewer runs on".
 
 ## How this differs from grinding leetcode
 

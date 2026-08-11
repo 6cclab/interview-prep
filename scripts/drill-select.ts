@@ -6,7 +6,7 @@ import type { CodingProblem } from '../voice/problems'
 /**
  * The decisions `/drill` makes, as functions.
  *
- * `.claude/commands/drill.md` describes a drill a language model runs. Almost
+ * `prompts/drill.md` describes a drill a language model runs. Almost
  * none of it actually needs one: selecting by rust is a sort over the log,
  * classifying a red is already `voice/drill-tests.ts`, and two of the four hint
  * rungs are authored files sitting on disk. What genuinely needed a model was

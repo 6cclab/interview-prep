@@ -1200,7 +1200,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       return
     }
 
-    // "Ask for a hint" — the ladder in `.claude/rules/no-spoilers.md`, made a
+    // "Ask for a hint" — the ladder in `prompts/rules/no-spoilers.md`, made a
     // button rather than a thing to remember to phrase carefully.
     //
     // The rung is counted here, not by the interviewer. The ladder's whole value
@@ -1602,7 +1602,7 @@ function main(): void {
       console.log(
         plan.args[0] === '-a'
           ? 'Opening Chrome. Set VOICE_NO_OPEN=1 to stop doing that.'
-          : 'Chrome not found — opening your default browser instead. Check the table in .claude/CLAUDE.md if the ' +
+          : 'Chrome not found — opening your default browser instead. Check the table in AGENTS.md if the ' +
               'microphone is never offered.',
       )
     } else if (disabled) {

@@ -23,7 +23,7 @@ import type { ProblemLocation } from './problems'
  *
  * **Nothing is rationed.** The hint ladder exists because help *during* an
  * attempt has to cost something. Coaching happens after one, so there is no
- * ladder, no rung count, no score and no verdict — `.claude/CLAUDE.md`: "help
+ * ladder, no rung count, no score and no verdict — `AGENTS.md`: "help
  * after one is complete and unrationed".
  */
 

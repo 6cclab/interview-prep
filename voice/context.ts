@@ -11,7 +11,7 @@ import { join, normalize, sep } from 'node:path'
 export type Track = 'mock' | 'design' | 'coding' | 'coach' | 'debug'
 
 /**
- * Paths the interviewer must never see. `.claude/rules/no-spoilers.md` states
+ * Paths the interviewer must never see. `prompts/rules/no-spoilers.md` states
  * these as instructions to a reader; here they are a runtime invariant, because
  * a drill is destroyed the moment the answer enters context. Case-insensitive:
  * macOS filesystems are case-insensitive by default, so `Patterns.MD` must be
@@ -65,7 +65,7 @@ export function allowedPaths(track: Track, problem?: string, pattern?: string): 
   }
   if (track === 'mock') {
     return [
-      '.claude/commands/mock.md',
+      'prompts/mock.md',
       'behavioral/competencies.md',
       'behavioral/questions.md',
     ]
@@ -84,7 +84,7 @@ export function allowedPaths(track: Track, problem?: string, pattern?: string): 
     // verdict. Its comments explain fixture construction, and they have leaked
     // an approach once already. No `meta.yaml` either; it names the pattern in a
     // field, and the pattern reaches the prompt deliberately and once, below.
-    return ['.claude/commands/drill.md', `problems/${pattern}/${problem}/README.md`]
+    return ['prompts/drill.md', `problems/${pattern}/${problem}/README.md`]
   }
   if (track === 'debug') {
     // The bug report and the command file, and deliberately nothing else.
@@ -96,10 +96,10 @@ export function allowedPaths(track: Track, problem?: string, pattern?: string): 
     // verdict, exactly as on the coding track. And not
     // `solutions/debugging/<exercise>.md`, which `assertNoSpoilers` denies
     // outright by the `^solutions/` rule, for every track, with no exception.
-    return ['.claude/commands/debug.md', `debugging/${problem}/README.md`]
+    return ['prompts/debug.md', `debugging/${problem}/README.md`]
   }
   return [
-    '.claude/commands/design.md',
+    'prompts/design.md',
     `system-design/${problem}/README.md`,
     `system-design/${problem}/rubric.md`,
   ]
@@ -430,7 +430,7 @@ export const DEBUG_HINT_RUNGS = [
 /** The last debugging rung the interviewer can serve without the answer. See `DEBUG_HINT_RUNGS`. */
 export const MAX_SERVABLE_DEBUG_RUNG = 1
 
-/** The hint ladder's rungs, per `.claude/rules/no-spoilers.md`. Index 0 is no help taken. */
+/** The hint ladder's rungs, per `prompts/rules/no-spoilers.md`. Index 0 is no help taken. */
 export const HINT_RUNGS = [
   'no help taken',
   'a nudge, phrased as a question, that does not name the pattern',

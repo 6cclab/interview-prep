@@ -2,10 +2,10 @@
  * Warm-up tier: **correctness only, by design.**
  *
  * Every other suite in `problems/` rejects a correct-but-brute-force answer,
- * because `.claude/CLAUDE.md` says a drill is only worth doing if it does. This
+ * because `AGENTS.md` says a drill is only worth doing if it does. This
  * one cannot: there is no asymptotically-worse-but-correct approach to reject.
  * The obvious solution is the only solution, which is exactly why it is here —
- * see ".claude/CLAUDE.md" > "The warm-up tier" for why that exemption exists.
+ * see "AGENTS.md" > "The warm-up tier" for why that exemption exists.
  */
 
 import { describe, expect, it } from 'vitest'

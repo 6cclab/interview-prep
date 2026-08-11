@@ -11,7 +11,7 @@ import { join } from 'node:path'
  * rows in it. This removes the second step.
  *
  * **Chrome by name, not the default browser.** That is the whole reason this is
- * not a one-line `open <url>`: `.claude/CLAUDE.md`'s browser table says Arc does
+ * not a one-line `open <url>`: `AGENTS.md`'s browser table says Arc does
  * not work at all and Safari needs HTTPS, and the failure is silent — no prompt,
  * no rejection, `navigator.mediaDevices` simply absent. Handing the URL to
  * whatever browser happens to be the default is how someone ends up debugging a

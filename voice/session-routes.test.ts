@@ -20,12 +20,12 @@ function seedContext() {
     mkdirSync(join(full, '..'), { recursive: true })
     writeFileSync(full, body)
   }
-  seed('.claude/commands/mock.md', 'MOCK COMMAND')
+  seed('prompts/mock.md', 'MOCK COMMAND')
   seed('behavioral/competencies.md', '# C\n\n## Conflict\n\nbody\n')
   seed('behavioral/questions.md', 'QUESTIONS')
   // The design track. `reference.md` is seeded on purpose: it is a DENIED
   // spoiler, and a test root without one cannot show that it stays unread.
-  seed('.claude/commands/design.md', 'DESIGN COMMAND')
+  seed('prompts/design.md', 'DESIGN COMMAND')
   seed('system-design/rate-limiter/README.md', '# Rate limiter\n\nDesign a rate limiter.\n')
   seed('system-design/rate-limiter/rubric.md', '## Estimation\n\nnumbers appear\n')
   seed('system-design/rate-limiter/reference.md', 'WORKED-DESIGN-SPOILER token-bucket')

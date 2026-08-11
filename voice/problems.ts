@@ -7,7 +7,7 @@ import { PROBLEM_SLUG } from './context'
  *
  * A coding problem lives at `problems/<pattern>/<problem>/`, so **the path is a
  * spoiler**: the directory it sits in is the pattern, which is the single thing
- * the drill exists to test recall of. `.claude/commands/drill.md` says it
+ * the drill exists to test recall of. `prompts/drill.md` says it
  * outright — "do not display its file path". `assertNoSpoilers` cannot help
  * here, because it guards what gets *read*, not what gets *shown*, and reading
  * the README is both necessary and safe.

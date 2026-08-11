@@ -58,7 +58,7 @@ describe('lengthOfLongestSubstring — scale', () => {
    * 15.6s: three orders of magnitude of margin.
    *
    * The elapsed-time assertion below is what fails it, NOT the 10s testTimeout
-   * — Vitest cannot preempt synchronous JavaScript. See ".claude/CLAUDE.md" >
+   * — Vitest cannot preempt synchronous JavaScript. See "AGENTS.md" >
    * "Tests encode the insight".
    */
   it('finishes well within the timeout on a large, all-distinct input', () => {

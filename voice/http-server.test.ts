@@ -31,7 +31,7 @@ function seededRoot(): string {
     mkdirSync(join(full, '..'), { recursive: true })
     writeFileSync(full, body)
   }
-  seed('.claude/commands/mock.md', 'MOCK COMMAND')
+  seed('prompts/mock.md', 'MOCK COMMAND')
   seed('behavioral/competencies.md', '# C\n\n## Conflict\n\nbody\n')
   seed('behavioral/questions.md', 'QUESTIONS')
   return dir

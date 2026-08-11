@@ -56,7 +56,7 @@ export class ClaudeCliTimeoutError extends Error {
 }
 
 /**
- * This repo's `.claude/CLAUDE.md` names where the spoiler files
+ * This repo's `AGENTS.md` names where the spoiler files
  * (`solutions/`, `system-design/**\/reference.md`, `patterns.md`) live, which
  * is exactly the map you don't want handed to a model that has working
  * tools (see the security note on `claudeCliStream`). `REPO_ROOT` is derived
@@ -156,7 +156,7 @@ export function formatPrompt(messages: Message[]): string {
  * working tools here.
  *
  * `--setting-sources ''` is real: it stops the CLI loading this repo's
- * `.claude/CLAUDE.md`, which names where the spoiler files
+ * `AGENTS.md`, which names where the spoiler files
  * (`solutions/`, `system-design/**\/reference.md`, `patterns.md`) live —
  * without this flag the model would at least know the map, even without
  * being able to reach it.

@@ -126,7 +126,7 @@ function patternPhrases(pattern: string): string[] {
 /**
  * A cost mechanism, spotted by the names the two documented ones are built from.
  *
- * `.claude/CLAUDE.md`: a drill is only worth doing if a correct but brute-force
+ * `AGENTS.md`: a drill is only worth doing if a correct but brute-force
  * solution fails it, by an oracle budget (`assertWithinBudget`) or a scale test
  * (an explicit `elapsed` assertion, because the `testTimeout` provably does not
  * enforce it). Presence of the name is not proof the assertion is right — only

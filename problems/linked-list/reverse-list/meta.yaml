@@ -8,7 +8,7 @@ difficulty: warmup
 # dance, not recognising the structure. Declared rather than special-cased in the
 # checker, so the exemption lives with the exercise that needs it.
 pattern-in-prompt: accepted
-budget: none — warm-up tier, correctness only. See ".claude/CLAUDE.md" > "The warm-up tier".
+budget: none — warm-up tier, correctness only. See "AGENTS.md" > "The warm-up tier".
 companies:
   - name: unknown
     confidence: low

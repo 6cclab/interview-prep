@@ -40,7 +40,7 @@ describe('maxArea — scale', () => {
    * micro-benchmark.
    *
    * The elapsed-time assertion below is what fails it, NOT the 10s testTimeout
-   * — Vitest cannot preempt synchronous JavaScript. See ".claude/CLAUDE.md" >
+   * — Vitest cannot preempt synchronous JavaScript. See "AGENTS.md" >
    * "Tests encode the insight".
    *
    * The array can't just be n random numbers, though — with no way to

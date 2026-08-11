@@ -34,14 +34,14 @@ function seedContext() {
     mkdirSync(join(full, '..'), { recursive: true })
     writeFileSync(full, body)
   }
-  seed('.claude/commands/mock.md', 'MOCK COMMAND')
+  seed('prompts/mock.md', 'MOCK COMMAND')
   seed('behavioral/competencies.md', '# C\n\n## Conflict\n\nbody\n')
   seed('behavioral/questions.md', 'QUESTIONS')
-  seed('.claude/commands/design.md', 'DESIGN COMMAND')
+  seed('prompts/design.md', 'DESIGN COMMAND')
   seed('system-design/rate-limiter/README.md', '# Rate limiter\n')
   seed('system-design/rate-limiter/rubric.md', '## Estimation\n')
 
-  seed('.claude/commands/drill.md', 'DRILL COMMAND')
+  seed('prompts/drill.md', 'DRILL COMMAND')
   seed(`problems/${PATTERN}/${SLUG}/README.md`, '# Container\n\nGiven heights, find the best pair.\n')
   seed(`problems/${PATTERN}/${SLUG}/solution.ts`, 'export {}')
   // The suite: excluded from a drill's allowlist on purpose, but required by

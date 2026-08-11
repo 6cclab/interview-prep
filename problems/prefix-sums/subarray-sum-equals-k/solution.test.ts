@@ -57,7 +57,7 @@ describe('subarraySum — scale', () => {
   // finishes in single-digit milliseconds.
   //
   // The elapsed-time assertion below is what fails it, NOT the 10s testTimeout
-  // — Vitest cannot preempt synchronous JavaScript. See ".claude/CLAUDE.md" >
+  // — Vitest cannot preempt synchronous JavaScript. See "AGENTS.md" >
   // "Tests encode the insight".
   //
   // The array is generated deterministically with mulberry32 rather than

@@ -9,7 +9,7 @@ import { formatLogRow, readAuthored, resolveTarget, rungFor, selectByRust } from
 /**
  * `pnpm drill [problem|pattern]` — a coding drill with no model involved.
  *
- * The same drill `.claude/commands/drill.md` describes, run by a script. It
+ * The same drill `prompts/drill.md` describes, run by a script. It
  * presents the problem cold, asks for the brute force before you write anything,
  * rations hints one rung per request, runs the suite, distinguishes the two kinds
  * of red, asks for complexity before confirming a green, and appends a log row.

@@ -23,7 +23,7 @@ function seed() {
     mkdirSync(join(full, '..'), { recursive: true })
     writeFileSync(full, body)
   }
-  seedFile('.claude/commands/mock.md', 'MOCK COMMAND')
+  seedFile('prompts/mock.md', 'MOCK COMMAND')
   seedFile('behavioral/competencies.md', '# C\n\n## Conflict\n\nbody\n')
   seedFile('behavioral/questions.md', 'QUESTIONS')
   // A denied file present in the checkout, exactly as it would be in the real repo.
@@ -31,7 +31,7 @@ function seed() {
   // The design track. `reference.md` is a worked design and a DENIED file, so
   // it is seeded with the same marker — a design drill reads two files out of
   // this directory and must never touch the third.
-  seedFile('.claude/commands/design.md', 'DESIGN COMMAND')
+  seedFile('prompts/design.md', 'DESIGN COMMAND')
   seedFile('system-design/rate-limiter/README.md', 'Design a rate limiter.')
   seedFile('system-design/rate-limiter/rubric.md', 'RUBRIC-DIMENSIONS estimation, failure modes')
   seedFile('system-design/rate-limiter/reference.md', DENIED_STRING)

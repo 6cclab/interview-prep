@@ -1,6 +1,6 @@
 # Longest Substring Without Repeating Characters — worked solution
 
-**Spoilers.** See `.claude/rules/no-spoilers.md`.
+**Spoilers.** See `prompts/rules/no-spoilers.md`.
 
 ## The observation
 

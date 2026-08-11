@@ -1,7 +1,7 @@
 pattern: two-pointers
 title: Valid Palindrome
 difficulty: warmup
-budget: none — warm-up tier, correctness only. See ".claude/CLAUDE.md" > "The warm-up tier".
+budget: none — warm-up tier, correctness only. See "AGENTS.md" > "The warm-up tier".
 companies:
   - name: unknown
     confidence: low

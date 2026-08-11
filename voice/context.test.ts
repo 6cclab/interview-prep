@@ -15,8 +15,8 @@ function seed(relPath: string, body: string) {
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'voice-context-'))
-  seed('.claude/commands/mock.md', 'MOCK COMMAND')
-  seed('.claude/commands/design.md', 'DESIGN COMMAND')
+  seed('prompts/mock.md', 'MOCK COMMAND')
+  seed('prompts/design.md', 'DESIGN COMMAND')
   seed('behavioral/competencies.md', '# C\n\n## Conflict\n\nbody\n\n## Ambiguity\n\nbody\n')
   seed('behavioral/questions.md', 'QUESTIONS')
   seed('system-design/rate-limiter/README.md', 'Design a rate limiter.')
@@ -26,10 +26,10 @@ beforeEach(() => {
   seed('patterns.md', 'THE ANSWER')
   // The coding track needs its own command file and a problem README, so the
   // shared voice-mode assertions can cover all three tracks rather than two.
-  seed('.claude/commands/drill.md', 'DRILL COMMAND')
+  seed('prompts/drill.md', 'DRILL COMMAND')
   seed('problems/two-pointers/container-with-most-water/README.md', 'Given heights, find the best pair.')
   // The debugging track: its command file and one exercise's bug report.
-  seed('.claude/commands/debug.md', 'DEBUG COMMAND')
+  seed('prompts/debug.md', 'DEBUG COMMAND')
   seed('debugging/loyalty-discount/README.md', '# Bug report: loyalty discount is inconsistent\n')
 })
 
@@ -219,7 +219,7 @@ describe('buildSystemPrompt on the design track', () => {
 
 describe('buildSystemPrompt on the coding track', () => {
   beforeEach(() => {
-    seed('.claude/commands/drill.md', 'DRILL COMMAND')
+    seed('prompts/drill.md', 'DRILL COMMAND')
     seed('problems/two-pointers/container-with-most-water/README.md', 'Given n heights, find the largest container.')
     seed('problems/two-pointers/container-with-most-water/meta.yaml', 'pattern: two-pointers\ntitle: Container')
     seed('problems/two-pointers/container-with-most-water/solution.test.ts', 'FIXTURE-RATIONALE-COMMENTS')
@@ -227,7 +227,7 @@ describe('buildSystemPrompt on the coding track', () => {
 
   it('reads the prompt and the protocol, and nothing else from the problem directory', () => {
     expect(allowedPaths('coding', 'container-with-most-water', 'two-pointers')).toEqual([
-      '.claude/commands/drill.md',
+      'prompts/drill.md',
       'problems/two-pointers/container-with-most-water/README.md',
     ])
   })
@@ -348,7 +348,7 @@ describe('the timed interviewer owns the clock it is holding', () => {
 describe('allowedPaths on the debug track', () => {
   it('is the command file and the bug report, and nothing else', () => {
     expect(allowedPaths('debug', 'loyalty-discount')).toEqual([
-      '.claude/commands/debug.md',
+      'prompts/debug.md',
       'debugging/loyalty-discount/README.md',
     ])
   })

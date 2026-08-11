@@ -1,6 +1,6 @@
 # Subarray Sum Equals K — worked solution
 
-> Spoiler. `.claude/rules/no-spoilers.md` forbids reading this into context
+> Spoiler. `prompts/rules/no-spoilers.md` forbids reading this into context
 > unless Andre explicitly asks for it.
 
 ## The observation

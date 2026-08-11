@@ -44,7 +44,7 @@ describe('dailyTemperatures — scale', () => {
   // The elapsed-time assertion at the bottom is what fails it, NOT the 10s
   // testTimeout — Vitest cannot preempt synchronous JavaScript, so a blocking
   // brute force runs to completion and only then reports. See
-  // ".claude/CLAUDE.md" > "Tests encode the insight".
+  // "AGENTS.md" > "Tests encode the insight".
   //
   // Random data defeats this: a forward scan from day i usually hits a
   // warmer day within a few steps, so the naive solution behaves close to

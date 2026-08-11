@@ -44,7 +44,7 @@ describe('minEatingSpeed — scale', () => {
   // finishes in about a millisecond. Measured: 41.7s for the linear scan.
   //
   // The elapsed-time assertion below is what fails it, NOT the 10s testTimeout
-  // — Vitest cannot preempt synchronous JavaScript. See ".claude/CLAUDE.md" >
+  // — Vitest cannot preempt synchronous JavaScript. See "AGENTS.md" >
   // "Tests encode the insight".
   //
   // The trap with a scale test built from a big array is that the array
