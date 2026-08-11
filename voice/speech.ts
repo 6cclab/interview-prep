@@ -257,7 +257,8 @@ export function piperSpeaker(opts: SayOptions = {}): Speaker {
     async speak(text: string): Promise<void> {
       const piper = spawn('piper', piperArgs(opts), { stdio: ['pipe', 'pipe', 'pipe'] })
       const player = spawn('ffplay', ffplayArgs(), { stdio: ['pipe', 'ignore', 'pipe'] })
-      current = { piper, player }
+      const call = { piper, player }
+      current = call
       piper.stdout?.pipe(player.stdin!)
       piper.stdin?.end(text)
 
@@ -282,7 +283,10 @@ export function piperSpeaker(opts: SayOptions = {}): Speaker {
           { cause: err },
         )
       } finally {
-        current = null
+        // Same guard `saySpeaker` applies: a finishing call must not clear a
+        // newer, still-running call's handle out from under it, or `stop()`
+        // loses the ability to reach the orphaned pair.
+        if (current === call) current = null
       }
     },
 

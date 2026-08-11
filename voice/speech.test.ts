@@ -5,6 +5,7 @@ import {
   isWhisperLogLine,
   parseWhisperOutput,
   piperArgs,
+  piperSpeaker,
   resolveEngine,
   sayArgs,
   whisperArgs,
@@ -244,6 +245,21 @@ describe('ffplayArgs', () => {
     expect(args).toEqual(expect.arrayContaining(['-nodisp', '-autoexit', '-']))
     expect(args).toEqual(expect.arrayContaining(['-f', 's16le']))
   })
+})
+
+/**
+ * `piper` is not installed on this machine (checked: `which piper` finds
+ * nothing) while `ffplay` is, so this exercises the real spawn-failure path
+ * rather than a mock of it: piper ENOENTs while ffplay is alive with an open
+ * stdin. This pins the observed behaviour — `speak` rejects naming piper,
+ * rather than hanging (ffplay waiting on stdin forever) or crashing the
+ * process (an unhandled stream 'error' event). The explicit test timeout
+ * means a regression that hangs fails the test instead of stalling the suite.
+ */
+describe('piperSpeaker', () => {
+  it('rejects, naming piper, when piper fails to spawn — instead of hanging or crashing', async () => {
+    await expect(piperSpeaker({}).speak('hello')).rejects.toThrow(/piper/i)
+  }, 10_000)
 })
 
 describe('checkSpeechEngine', () => {
