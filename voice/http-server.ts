@@ -729,8 +729,14 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // is `problems/<pattern>/<slug>` and the pattern is the answer, so it never
     // crosses this boundary. See `stripPatternPaths` for the same rule applied
     // to anything derived from test output.
+    // POST is accepted as an alias for PUT here solely for
+    // `navigator.sendBeacon`, which the browser client's `beforeunload`/
+    // unmount best-effort save uses (`voice/web/src/useSolution.ts`) — it is
+    // POST-only and the only mechanism guaranteed to still deliver a request
+    // once the page has started tearing down. The write path below does not
+    // otherwise distinguish the two methods.
     const solutionRoute = /^\/api\/coding\/([^/]+)\/solution$/.exec(url.pathname)
-    if (solutionRoute && (req.method === 'GET' || req.method === 'PUT')) {
+    if (solutionRoute && (req.method === 'GET' || req.method === 'PUT' || req.method === 'POST')) {
       const slug = solutionRoute[1]!
       if (!PROBLEM_SLUG.test(slug)) {
         sendJson(res, 400, { error: 'Invalid problem name.' })

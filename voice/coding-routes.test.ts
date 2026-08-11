@@ -1402,6 +1402,29 @@ describe('the solution routes', () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/coding/no-such-drill/solution`)
     expect(res.status).toBe(404)
   })
+
+  // navigator.sendBeacon is POST-only, and it is the mechanism
+  // voice/web/src/useSolution.ts uses for its best-effort save on unmount and
+  // `beforeunload` (see the comment there) — a request that must still be
+  // deliverable after the page has started tearing down, which rules out a
+  // regular fetch. POST is accepted here as an alias for PUT for exactly that
+  // caller; nothing else in the write path distinguishes the two methods.
+  it('accepts POST as an alias for PUT, for navigator.sendBeacon', async () => {
+    const { port } = await listen(baseDeps())
+    const before = (await (await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`)).json()) as {
+      version: string
+    }
+    const res = await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'const beacon = 1\n', version: before.version }),
+    })
+    expect(res.status).toBe(200)
+    const after = (await (await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`)).json()) as {
+      text: string
+    }
+    expect(after.text).toBe('const beacon = 1\n')
+  })
 })
 
 describe('coach sees the working file', () => {

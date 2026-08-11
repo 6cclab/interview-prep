@@ -483,6 +483,16 @@ body {
   margin-top: 14px;
 }
 
+/* The conflict banner's Overwrite/Reload — same shape as
+   .error-banner__actions, kept separate because this banner lives inline in
+   the editor pane rather than in the dock's ErrorBanner. */
+.solution-editor-pane__conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 /* The "Show me where" expansion. Numbered because it is a sequence of steps to
    follow, and set in mono to match the rest of the app's instructional text. */
 .error-banner__details {

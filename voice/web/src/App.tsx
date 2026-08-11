@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Button } from 'brutalkit/button'
 import { useVoiceSession } from './useVoiceSession'
 import { Header } from './components/Header'
 import { Dock } from './components/Dock'
@@ -524,13 +525,28 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
             {editorMode === 'browser' && (
               <div className="solution-editor-pane">
                 <SolutionEditor value={solution.text} onChange={solution.setText} readOnly={solution.status === 'loading'} />
-                {/* The conflict is never resolved for the candidate — the buffer
-                    is never discarded to fix it. This just says the file moved
-                    on disk, so a save (or Run tests) is the next step. */}
+                {/* The conflict is a decision, not a dead end: autosave is
+                    suspended the moment this fires (see useSolution.ts's
+                    `isConflicted`), so neither of these two actions is
+                    optional decoration — one of them is the only way out.
+                    "Save again to overwrite it", the old copy, described an
+                    action that could not succeed: every autosave resent the
+                    same now-stale version and 409'd forever. */}
                 {solution.status === 'conflict' && (
-                  <p className="solution-editor-pane__status" role="alert">
-                    solution.ts changed on disk since this loaded. Your typed code is kept — save again to overwrite it.
-                  </p>
+                  <div className="solution-editor-pane__status" role="alert">
+                    <p>
+                      solution.ts changed on disk since this loaded — someone else wrote to it (another tab, or your
+                      own editor). Your typed code is kept, but autosave is paused until you choose:
+                    </p>
+                    <div className="solution-editor-pane__conflict-actions">
+                      <Button variant="brand" size="sm" onClick={() => void solution.overwrite()}>
+                        Overwrite with what's on screen
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => void solution.reload()}>
+                        Discard what's on screen and reload the file
+                      </Button>
+                    </div>
+                  </div>
                 )}
                 {solution.status === 'error' && (
                   <p className="solution-editor-pane__status" role="alert">

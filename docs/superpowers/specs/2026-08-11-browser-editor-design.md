@@ -100,10 +100,34 @@ to resolve a conflict.
 
 ### Saving
 
-Autosave is debounced (~1s idle) and also fires on blur. **`Run tests` force-saves
-first and waits for the save to land.** A verdict computed against stale text is
-a verdict for code the candidate can see they did not write, and the verdict is
-the single signal the drill produces.
+Autosave is debounced (~1s idle). It does not fire on blur — nothing in the
+editor wires a blur handler, and CodeMirror's own focus events are not surfaced
+to `voice/web/src/useSolution.ts` — so instead there is a best-effort save on
+unmount and on `beforeunload` (`navigator.sendBeacon`, the same fire-and-forget
+mechanism `useVoiceSession.ts` already uses for its own `beforeunload` end-of-
+session beacon). That covers the two exits blur was meant to cover — leaving the
+route and closing the tab — at the cost of still losing an edit made and then
+immediately abandoned inside the ~1s debounce window without leaving the page at
+all, which is a real but narrow gap. **`Run tests` force-saves first and waits
+for the save to land.** A verdict computed against stale text is a verdict for
+code the candidate can see they did not write, and the verdict is the single
+signal the drill produces.
+
+### The clobber guard is a decision, not a dead end
+
+A 409 keeps the candidate's buffer and refreshes the version recorded
+client-side, then **suspends autosave** — no further save, automatic or
+force-saved by `Run tests`, goes out until the candidate resolves it. Resolving
+it is one of two explicit actions, both in the conflict banner:
+
+- **Overwrite** — save the buffer on screen using the refreshed version.
+- **Reload** — discard the buffer on screen and replace it with the file's
+  current contents.
+
+Silently retrying with the refreshed version was considered and rejected: that
+overwrites whatever the other writer just saved without the candidate ever
+choosing to, which is the same data loss the guard exists to prevent, just
+pointed the other way.
 
 ## Mode selection and where it is recorded
 

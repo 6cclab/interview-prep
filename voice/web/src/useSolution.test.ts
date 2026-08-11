@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { saveSolution, runAfterSave, createAutosave, type SolutionStatus } from './useSolution'
+import {
+  saveSolution,
+  runAfterSave,
+  createAutosave,
+  overwriteConflict,
+  reloadFromServer,
+  type SolutionStatus,
+} from './useSolution'
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -64,17 +71,21 @@ function makeState() {
     text: 'v1-text',
     version: 'v1',
     dirty: true,
+    conflicted: false,
     statuses: [] as SolutionStatus[],
   }
   return {
     state,
     accessors: {
       getText: () => state.text,
+      setText: (v: string) => { state.text = v },
       getVersion: () => state.version,
       setVersion: (v: string) => { state.version = v },
       isDirty: () => state.dirty,
       setDirty: (v: boolean) => { state.dirty = v },
       setStatus: (s: SolutionStatus) => { state.statuses.push(s) },
+      isConflicted: () => state.conflicted,
+      setConflicted: (v: boolean) => { state.conflicted = v },
     },
   }
 }
@@ -161,9 +172,84 @@ describe('createAutosave', () => {
 
     expect(outcome).toBe('stale')
     expect(state.statuses.at(-1)).toBe('conflict')
-    expect(state.text).toBe('v1-text') // the buffer is never replaced
-    expect(state.version).toBe('v1') // never advanced to the version the 409 reported
+    expect(state.text).toBe('v1-text') // the buffer is never replaced — the original guard, unweakened
+    // The version IS refreshed (Finding 1): a permanently-stale stored version is what made every
+    // later save 409 forever, blocking Run tests for the rest of the session. Recording the
+    // server's current version is what lets an explicit Overwrite ever succeed.
+    expect(state.version).toBe('v9')
     expect(state.dirty).toBe(true) // still needs saving; nothing was silently retried
+  })
+
+  // Finding 1: a conflict used to be a dead end — every later autosave resent the same
+  // now-permanently-stale version and 409'd forever, so `Run tests` never saw 'ok' again for the
+  // rest of the session. Autosave must instead go quiet once conflicted, until the user resolves
+  // it explicitly.
+  it('does not fire on its own once conflicted — no further network calls until resolved', async () => {
+    const { state, accessors } = makeState()
+    let calls = 0
+    const fetchImpl: typeof fetch = async () => {
+      calls++
+      return jsonResponse(409, { error: 'changed on disk', version: 'v9' })
+    }
+    const save = createAutosave('valid-palindrome', accessors, fetchImpl)
+
+    await save() // first attempt: hits the network, lands in conflict
+    expect(calls).toBe(1)
+
+    // Simulate more typing and another debounce tick, exactly what used to 409 forever.
+    state.text = 'v2-text'
+    state.dirty = true
+    const outcome = await save()
+
+    expect(calls).toBe(1) // suspended — no second request was ever sent
+    expect(outcome).toBe('stale')
+    expect(state.dirty).toBe(true) // the new text is still waiting, not silently dropped
+  })
+
+  it('an explicit overwrite succeeds using the version the 409 refreshed', async () => {
+    const { state, accessors } = makeState()
+    const sent: Array<{ text: string; version: string }> = []
+    let call = 0
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      call++
+      sent.push(JSON.parse(String(init?.body)))
+      if (call === 1) return jsonResponse(409, { error: 'changed on disk', version: 'v9' })
+      return jsonResponse(200, { version: 'v10' })
+    }
+    const save = createAutosave('valid-palindrome', accessors, fetchImpl)
+
+    await save() // lands in conflict, version refreshed to v9
+    expect(state.version).toBe('v9')
+
+    const outcome = await overwriteConflict('valid-palindrome', accessors, fetchImpl)
+
+    expect(outcome).toBe('ok')
+    expect(sent[1]).toEqual({ text: 'v1-text', version: 'v9' }) // sent the refreshed version, not the stale one
+    expect(state.version).toBe('v10')
+    expect(state.conflicted).toBe(false) // resolved — autosave can resume
+    expect(state.dirty).toBe(false)
+    expect(state.statuses.at(-1)).toBe('idle')
+  })
+
+  it('reload replaces the buffer with the server copy and clears the conflict', async () => {
+    const { state, accessors } = makeState()
+    state.conflicted = true
+    state.version = 'v9'
+    let seenUrl = ''
+    const fetchImpl: typeof fetch = async (url) => {
+      seenUrl = String(url)
+      return jsonResponse(200, { text: 'server-text', version: 'v9' })
+    }
+
+    const outcome = await reloadFromServer('valid-palindrome', accessors, fetchImpl)
+
+    expect(outcome).toBe('ok')
+    expect(seenUrl).toBe('/api/coding/valid-palindrome/solution')
+    expect(state.text).toBe('server-text') // local edits discarded, deliberately
+    expect(state.version).toBe('v9')
+    expect(state.conflicted).toBe(false)
+    expect(state.dirty).toBe(false)
+    expect(state.statuses.at(-1)).toBe('idle')
   })
 })
 
