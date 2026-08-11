@@ -107,6 +107,41 @@ describe('buildCoachPrompt', () => {
   })
 })
 
+// A prompt reaching the coach with a literal {{candidate}} in it is a bug the
+// candidate would hear read aloud — the same defect the drill tracks are
+// guarded against in voice/context.test.ts. buildCoachPrompt does its own
+// rendering (it is deliberately not built by buildSystemPrompt), so it needs
+// its own coverage rather than inheriting context.ts's. This seeds fixtures
+// only — a README and a solutions/ file that exist solely inside this test's
+// temp root — never the real solutions/** or patterns.md.
+describe('candidate token rendering', () => {
+  function seedRootWithToken(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'coach-candidate-'))
+    const problemDir = join(dir, 'problems', PROBLEM.pattern, PROBLEM.slug)
+    mkdirSync(problemDir, { recursive: true })
+    writeFileSync(join(problemDir, 'README.md'), 'Welcome, {{candidate}}.\n', 'utf8')
+    writeFileSync(join(problemDir, 'solution.test.ts'), "describe('x', () => {})", 'utf8')
+    writeFileSync(join(problemDir, 'meta.yaml'), 'pattern: two-pointers\n', 'utf8')
+    mkdirSync(join(dir, 'solutions', PROBLEM.pattern), { recursive: true })
+    writeFileSync(
+      join(dir, 'solutions', PROBLEM.pattern, `${PROBLEM.slug}.md`),
+      'Nice work, {{candidate}} — {{candidate}} nailed it.\n',
+      'utf8',
+    )
+    writeFileSync(join(dir, 'patterns.md'), '# Patterns\n\nno token here\n', 'utf8')
+    mkdirSync(join(dir, 'local'), { recursive: true })
+    writeFileSync(join(dir, 'local', 'config.yaml'), 'candidate_name: Ada\n', 'utf8')
+    return dir
+  }
+
+  it('replaces every {{candidate}} token, including ones from the assembled fixture files', () => {
+    const prompt = buildCoachPrompt(seedRootWithToken(), PROBLEM)
+    expect(prompt).toContain('Welcome, Ada.')
+    expect(prompt).toContain('Nice work, Ada — Ada nailed it.')
+    expect(prompt).not.toContain('{{candidate}}')
+  })
+})
+
 describe('codeCue', () => {
   it('frames the file as state, never as something he said', () => {
     const cue = codeCue('const a = 1\n')

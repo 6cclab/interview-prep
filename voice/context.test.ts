@@ -457,14 +457,34 @@ describe('what the debugging interviewer may and may not say', () => {
 
 // A prompt reaching the model with a literal {{candidate}} in it is a bug the
 // candidate would hear read aloud.
+//
+// The real prompts/*.md files do carry the token, but the fixtures this suite
+// seeds above do not — so asserting against those real files alone would pass
+// against a no-op renderCandidate too (verified: stubbing renderCandidate to
+// return its input unchanged still left every case here green until each
+// track's fixture below was made to actually contain the token). Each case
+// therefore seeds that track's own command file with a body containing
+// {{candidate}} and a local/config.yaml naming the candidate, so the
+// assertion has something of its own to catch rather than borrowing whatever
+// the shared beforeEach happens to contain.
 describe('candidate token rendering', () => {
+  const COMMAND_FILE = {
+    mock: 'prompts/mock.md',
+    design: 'prompts/design.md',
+    coding: 'prompts/drill.md',
+    debug: 'prompts/debug.md',
+  } as const
+
   it.each([
     ['mock', undefined, undefined],
     ['design', 'rate-limiter', undefined],
     ['coding', 'container-with-most-water', 'two-pointers'],
     ['debug', 'loyalty-discount', undefined],
-  ] as const)('leaves no unrendered token in the %s prompt', (track, problem, pattern) => {
+  ] as const)('renders the candidate name into the %s prompt, replacing every {{candidate}} token', (track, problem, pattern) => {
+    seed(COMMAND_FILE[track], 'Hello {{candidate}}, this is the command file, {{candidate}}.')
+    seed('local/config.yaml', 'candidate_name: Ada\n')
     const prompt = buildSystemPrompt(root, track, problem, pattern)
+    expect(prompt).toContain('Hello Ada, this is the command file, Ada.')
     expect(prompt).not.toContain('{{candidate}}')
   })
 })
