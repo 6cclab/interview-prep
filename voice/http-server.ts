@@ -4,7 +4,6 @@ import { mkdtempSync, existsSync, readdirSync, rmSync, readFileSync } from 'node
 import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import Anthropic from '@anthropic-ai/sdk'
 import {
   assertNoSpoilers,
   buildSystemPrompt,
@@ -28,10 +27,9 @@ import { runDebugTests, debugVerdictCue, type DebugVerdict } from './debug-tests
 import { buildCoachPrompt, codeCue, readWorkingFile } from './coach'
 import { appendCoached, isoDate, readCoachedProblems } from './coached'
 import { runDrillTests, verdictCue } from './drill-tests'
-import { createInterviewer, anthropicStream, type StreamFn } from './interviewer'
-import { claudeCliStream, DEFAULT_CLAUDE_MODEL } from './claude-cli'
-import { backendSummary, chooseBackend, describeBackend, transportLabel } from './backend'
-import { DEFAULT_OLLAMA_MODEL, ollamaStream, preloadOllama } from './ollama'
+import { createInterviewer, type StreamFn } from './interviewer'
+import { backendSummary, describeBackend, modelFor, streamForBackend, transportLabel } from './backend'
+import { preloadOllama } from './ollama'
 import { createSession, finishSession, type FinishResult } from './session'
 import { createSessionStore, type Drill, type RetainedAudio, type SessionStore, type StoredSession } from './session-store'
 import { whisperTranscriber, saySpeaker, type Speaker, type Transcriber } from './speech'
@@ -1487,30 +1485,6 @@ function configuredSpeaker(root: string): Speaker {
 }
 
 /**
- * The interviewer's transport for one session, chosen by that session's track.
- *
- * Per track rather than per process because the tracks tolerate a weaker model
- * very differently — see `voice/backend.ts` for the reasoning and the
- * environment variables. Called at session creation, so changing a variable
- * takes effect on the next drill without a restart.
- */
-function chooseTransport(track: Track): StreamFn {
-  const backend = chooseBackend(track)
-  if (backend === 'ollama') {
-    const model = process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL
-    console.log(`${track}: ${describeBackend('ollama', model)}`)
-    return ollamaStream()
-  }
-  const model = process.env.VOICE_CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL
-  if (backend === 'api') {
-    console.log(`${track}: ${describeBackend('api', model)}`)
-    return anthropicStream(new Anthropic(), model)
-  }
-  console.log(`${track}: ${describeBackend('cli', model)}`)
-  return claudeCliStream({ model })
-}
-
-/**
  * Prints each track's backend at boot, and warms ollama if any track uses it.
  *
  * The listing is not decoration: the backend is per track, so a hybrid is the
@@ -1526,10 +1500,8 @@ function chooseTransport(track: Track): StreamFn {
  */
 function announceBackends(): void {
   const backends = backendSummary()
-  const claudeModel = process.env.VOICE_CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL
-  const ollamaModel = process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL
   for (const [track, backend] of Object.entries(backends)) {
-    console.log(`  ${track}: ${describeBackend(backend, backend === 'ollama' ? ollamaModel : claudeModel)}`)
+    console.log(`  ${track}: ${describeBackend(backend, modelFor(backend))}`)
   }
   if (Object.values(backends).includes('ollama')) {
     void preloadOllama().then((message) => console.log(`  ${message}`))
@@ -1581,7 +1553,7 @@ function main(): void {
   const tls = readTlsMaterial(root)
   const server = createVoiceServer({
     root,
-    createTransport: chooseTransport,
+    createTransport: (track) => streamForBackend(track, (line) => console.log(`${track}: ${line}`)),
     transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
     tls,
     speaker: configuredSpeaker(root),

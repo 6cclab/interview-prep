@@ -1,15 +1,12 @@
-import Anthropic from '@anthropic-ai/sdk'
 import { createInterface } from 'node:readline/promises'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { record } from './audio'
-import { claudeCliStream, DEFAULT_CLAUDE_MODEL } from './claude-cli'
-import { chooseBackend, describeBackend } from './backend'
-import { DEFAULT_OLLAMA_MODEL, ollamaStream } from './ollama'
+import { streamForBackend } from './backend'
 import { timeCue, buildSystemPrompt, type Track } from './context'
 import { listInputDevices, listOutputDevices, readDeviceConfig } from './devices'
-import { anthropicStream, createInterviewer, type StreamFn } from './interviewer'
+import { createInterviewer } from './interviewer'
 import { runSession } from './session'
 import { saySpeaker, whisperTranscriber } from './speech'
 import { transcriptionPrompt } from './vocabulary'
@@ -36,29 +33,6 @@ function resolveDevices(root: string): { input?: string; output?: string } {
     input: process.env.MIC_DEVICE ?? configured.input,
     output: process.env.SAY_DEVICE ?? configured.output,
   }
-}
-
-/**
- * The transport for this track, and what it spends, printed so a drill never
- * silently comes out of the wrong pocket.
- *
- * Chosen per track by `voice/backend.ts` — the same selection the browser
- * server uses, so `VOICE_BACKEND_DESIGN=ollama` means the same thing whether
- * the design drill is run here or in the browser.
- */
-function chooseTransport(track: Track): StreamFn {
-  const backend = chooseBackend(track)
-  if (backend === 'ollama') {
-    console.log(describeBackend('ollama', process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL))
-    return ollamaStream()
-  }
-  const model = process.env.VOICE_CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL
-  if (backend === 'api') {
-    console.log(describeBackend('api', model))
-    return anthropicStream(new Anthropic(), model)
-  }
-  console.log(describeBackend('cli', model))
-  return claudeCliStream({ model })
 }
 
 async function printDevices(): Promise<void> {
@@ -96,7 +70,7 @@ async function main(): Promise<void> {
   const startedAt = new Date()
   const started = Date.now()
 
-  const interviewer = createInterviewer(buildSystemPrompt(root, track, problem), chooseTransport(track))
+  const interviewer = createInterviewer(buildSystemPrompt(root, track, problem), streamForBackend(track))
 
   if (!devices.input) {
     // Silently defaulting here is the trap: an unconfigured index can point at

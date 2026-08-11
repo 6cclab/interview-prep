@@ -1,5 +1,5 @@
-import type { Message } from './interviewer'
-import type { ModelDelta } from './think-gate'
+import type { Message, StreamFn } from './interviewer'
+import { createThinkGate, type ModelDelta, type ThinkGate } from './think-gate'
 import { UNTRUSTED_NOTICE } from './prompt-framing'
 
 /**
@@ -40,15 +40,69 @@ export interface OpenAIOptions {
 }
 
 /**
+ * A misconfiguration that must stop the server rather than a drill.
+ *
+ * Thrown from `normaliseBaseUrl` (a cleartext-credential base URL) and from
+ * `openaiStream` at construction (a missing key), which `streamForBackend`
+ * calls at session creation — so either is a failure to start a session with
+ * a message naming the problem, not a 45-minute drill that dies on turn one.
+ */
+export class OpenAIConfigError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'OpenAIConfigError'
+  }
+}
+
+/** Hosts exempt from the cleartext rule below — nothing leaves the machine. */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+
+function isLoopbackHost(hostAndRest: string): boolean {
+  // Strip a port and/or path, and any brackets an IPv6 literal carries, to get
+  // at the bare host for the comparison above.
+  const host = hostAndRest.replace(/^\[/, '').replace(/\]?(:\d+)?(\/.*)?$/, '')
+  return LOOPBACK_HOSTS.has(host) || LOOPBACK_HOSTS.has(`[${host}]`)
+}
+
+/**
  * A bare `host:port` is accepted as well as a URL, because `OLLAMA_HOST`
  * accepts one and someone pointing this at a local vLLM will write it the same
  * way. Trailing slashes are stripped so path joining cannot double them.
+ *
+ * The scheme resolution is a security decision, not a convenience one:
+ * `openaiStream` attaches the API key as an `Authorization: Bearer` header, so
+ * whatever scheme this function hands back is what the key travels over.
+ *
+ * - A scheme-less loopback host (`localhost`, `127.0.0.1`, `::1`) defaults to
+ *   `http://` — the local vLLM / LM Studio case, where nothing leaves the
+ *   machine and there is no real key at risk.
+ * - A scheme-less non-loopback host defaults to `https://` instead of
+ *   guessing `http://`, so a typo'd base URL cannot silently ship a key in
+ *   the clear.
+ * - An explicit `http://` to a non-loopback host is refused outright: that is
+ *   not a guess, it is a request to send a credential over cleartext, and the
+ *   only correct response is to say so before the first request goes out.
  */
 export function normaliseBaseUrl(raw: string | undefined): string {
   const value = (raw ?? '').trim()
   if (value === '') return DEFAULT_OPENAI_BASE_URL
-  const withScheme = /^https?:\/\//i.test(value) ? value : `http://${value}`
-  return withScheme.replace(/\/+$/, '')
+
+  const hasScheme = /^https?:\/\//i.test(value)
+  if (hasScheme) {
+    const isHttp = /^http:\/\//i.test(value)
+    const rest = value.replace(/^https?:\/\//i, '')
+    if (isHttp && !isLoopbackHost(rest)) {
+      throw new OpenAIConfigError(
+        `refusing to use http:// for a non-loopback base URL (${value}): the API ` +
+          `key would travel in cleartext. Use https://, or point at localhost / ` +
+          `127.0.0.1 / ::1 if this really is a local endpoint.`,
+      )
+    }
+    return value.replace(/\/+$/, '')
+  }
+
+  const scheme = isLoopbackHost(value) ? 'http://' : 'https://'
+  return `${scheme}${value}`.replace(/\/+$/, '')
 }
 
 /**
@@ -119,4 +173,129 @@ export function extractOpenaiError(parsed: unknown): string | null {
     if (typeof message === 'string' && message !== '') return message
   }
   return null
+}
+
+export function openaiStream(opts: OpenAIOptions = {}): StreamFn {
+  const baseUrl = normaliseBaseUrl(opts.baseUrl ?? process.env.OPENAI_BASE_URL)
+  const model = opts.model ?? process.env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL
+  const apiKey = opts.apiKey ?? process.env.OPENAI_API_KEY ?? ''
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const doFetch = opts.fetchImpl ?? fetch
+
+  if (apiKey.trim() === '') {
+    throw new OpenAIConfigError(
+      `OPENAI_API_KEY is not set, and the openai backend cannot run without it. ` +
+        `Set it, or choose another backend (pnpm mock:web:claude / :ollama). ` +
+        `Base URL in use: ${baseUrl}`,
+    )
+  }
+
+  return async function* (system, messages) {
+    const controller = new AbortController()
+    let timedOut = false
+    let timer: NodeJS.Timeout | undefined
+    const arm = (): void => {
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        timedOut = true
+        controller.abort()
+      }, timeoutMs)
+    }
+
+    try {
+      arm()
+      let res: Response
+      try {
+        res = await doFetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(openaiChatBody(system, messages, { model })),
+          signal: controller.signal,
+        })
+      } catch (error) {
+        if (timedOut) {
+          throw new Error(`${baseUrl} produced no output for ${timeoutMs}ms and the request was aborted.`)
+        }
+        const detail = error instanceof Error ? error.message : String(error)
+        throw new Error(`could not reach ${baseUrl}: ${detail}`)
+      }
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        const reason = extractOpenaiError(safeParse(body)) ?? body.trim()
+        throw new Error(`${baseUrl} returned HTTP ${res.status}${reason ? `: ${reason}` : ''}`)
+      }
+      if (!res.body) throw new Error(`${baseUrl} returned no response body`)
+
+      const gate = createThinkGate()
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let carry = ''
+
+      for (;;) {
+        let chunk: { done: boolean; value?: Uint8Array }
+        try {
+          chunk = await reader.read()
+        } catch (error) {
+          if (timedOut) {
+            throw new Error(`${baseUrl} stopped producing output for ${timeoutMs}ms.`)
+          }
+          throw error
+        }
+        if (chunk.done) break
+        arm()
+
+        carry += decoder.decode(chunk.value, { stream: true })
+        const lines = carry.split('\n')
+        carry = lines.pop() ?? ''
+        for (const line of lines) {
+          const text = consumeSse(line, gate)
+          if (text) yield text
+        }
+      }
+
+      if (carry.trim() !== '') {
+        const text = consumeSse(carry, gate)
+        if (text) yield text
+      }
+
+      const tail = gate.flush()
+      if (tail) yield tail
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+}
+
+function safeParse(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * One SSE line to speakable text.
+ *
+ * An unparsable payload is logged rather than swallowed, matching both other
+ * transports: the entire point of this output is to be heard, so silently
+ * dropping model text is the worst available failure.
+ */
+function consumeSse(line: string, gate: ThinkGate): string {
+  const { done, json } = parseSseLine(line)
+  if (done || json === null) return ''
+  const parsed = safeParse(json)
+  if (parsed === null) {
+    console.error(`openaiStream: dropping an unparsable SSE payload: ${json}`)
+    return ''
+  }
+  const error = extractOpenaiError(parsed)
+  if (error !== null) throw new Error(`the provider reported an error: ${error}`)
+  const delta = extractOpenaiDelta(parsed)
+  if (delta === null) return ''
+  return gate.push(delta)
 }

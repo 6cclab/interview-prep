@@ -6,6 +6,8 @@ import {
   extractOpenaiError,
   parseSseLine,
   DEFAULT_OPENAI_BASE_URL,
+  openaiStream,
+  OpenAIConfigError,
 } from './openai'
 
 describe('normaliseBaseUrl', () => {
@@ -20,9 +22,32 @@ describe('normaliseBaseUrl', () => {
   })
 
   // A bare host:port is how OLLAMA_HOST is allowed to be written, and someone
-  // pointing this at a local vLLM will write it the same way.
-  it('assumes http for a bare host:port', () => {
+  // pointing this at a local vLLM will write it the same way. Loopback is the
+  // only case where a scheme-less default is safe to assume http for — see the
+  // non-loopback cases below.
+  it('assumes http for a bare loopback host:port', () => {
     expect(normaliseBaseUrl('localhost:8000/v1')).toBe('http://localhost:8000/v1')
+    expect(normaliseBaseUrl('127.0.0.1:8000/v1')).toBe('http://127.0.0.1:8000/v1')
+    expect(normaliseBaseUrl('[::1]:8000/v1')).toBe('http://[::1]:8000/v1')
+  })
+
+  // A scheme-less non-loopback host is about to carry a bearer token, so
+  // guessing http would silently ship the key in the clear. https is the safe
+  // assumption; a real deployment wanting plain http has to say so explicitly
+  // and accept the throw below.
+  it('assumes https for a bare non-loopback host', () => {
+    expect(normaliseBaseUrl('api.myproxy.com/v1')).toBe('https://api.myproxy.com/v1')
+  })
+
+  // An explicit http:// to a non-loopback host is unambiguous: someone asked
+  // to send the API key in cleartext. Refuse rather than comply.
+  it('refuses an explicit http to a non-loopback host', () => {
+    expect(() => normaliseBaseUrl('http://api.myproxy.com/v1')).toThrow(/cleartext/i)
+  })
+
+  it('still allows explicit http to loopback', () => {
+    expect(normaliseBaseUrl('http://localhost:8000/v1')).toBe('http://localhost:8000/v1')
+    expect(normaliseBaseUrl('http://127.0.0.1:8000/v1')).toBe('http://127.0.0.1:8000/v1')
   })
 })
 
@@ -96,5 +121,94 @@ describe('extractOpenaiError', () => {
   it('returns null when there is no error', () => {
     expect(extractOpenaiError({ choices: [] })).toBeNull()
     expect(extractOpenaiError(null)).toBeNull()
+  })
+})
+
+/** An SSE response built from lines, so a test can split chunks where it likes. */
+function sseResponse(chunks: string[]): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const encoder = new TextEncoder()
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
+      controller.close()
+    },
+  })
+  return new Response(stream, { status: 200 })
+}
+
+async function collect(iterable: AsyncIterable<string>): Promise<string> {
+  let out = ''
+  for await (const piece of iterable) out += piece
+  return out
+}
+
+describe('openaiStream', () => {
+  it('refuses to start without a key rather than failing mid-drill', () => {
+    expect(() => openaiStream({ apiKey: '' })).toThrow(OpenAIConfigError)
+    expect(() => openaiStream({ apiKey: '' })).toThrow(/OPENAI_API_KEY/)
+  })
+
+  it('sends the key as a bearer token to the configured base URL', async () => {
+    let seenUrl = ''
+    let seenAuth = ''
+    const stream = openaiStream({
+      apiKey: 'k',
+      baseUrl: 'https://example.test/v1',
+      model: 'm',
+      fetchImpl: async (url, init) => {
+        seenUrl = String(url)
+        seenAuth = String((init?.headers as Record<string, string>).authorization)
+        return sseResponse(['data: {"choices":[{"delta":{"content":"hi"}}]}\n\n', 'data: [DONE]\n\n'])
+      },
+    })
+    await collect(stream('SYSTEM', []))
+    expect(seenUrl).toBe('https://example.test/v1/chat/completions')
+    expect(seenAuth).toBe('Bearer k')
+  })
+
+  it('yields content across chunk boundaries that split a line', async () => {
+    const stream = openaiStream({
+      apiKey: 'k',
+      fetchImpl: async () =>
+        sseResponse([
+          'data: {"choices":[{"delta":{"con',
+          'tent":"hello "}}]}\n\ndata: {"choices":[{"delta":{"content":"world"}}]}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+    })
+    expect(await collect(stream('SYSTEM', []))).toBe('hello world')
+  })
+
+  // Case 2 of the think gate: deliberation arrives as ordinary content and is
+  // terminated by a bare closing tag. On the coding track that text states what
+  // the model believes the answer is, so it must never reach the speaker.
+  it('withholds deliberation emitted as content', async () => {
+    const stream = openaiStream({
+      apiKey: 'k',
+      fetchImpl: async () =>
+        sseResponse([
+          'data: {"choices":[{"delta":{"content":"The answer is two pointers.</think>"}}]}\n\n',
+          'data: {"choices":[{"delta":{"content":"What is your first approach?"}}]}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+    })
+    expect(await collect(stream('SYSTEM', []))).toBe('What is your first approach?')
+  })
+
+  it('names the provider error on a non-200', async () => {
+    const stream = openaiStream({
+      apiKey: 'k',
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ error: { message: 'model not found' } }), { status: 404 }),
+    })
+    await expect(collect(stream('SYSTEM', []))).rejects.toThrow(/404.*model not found/s)
+  })
+
+  it('throws on an error delivered inside the stream', async () => {
+    const stream = openaiStream({
+      apiKey: 'k',
+      fetchImpl: async () => sseResponse(['data: {"error":{"message":"context length"}}\n\n']),
+    })
+    await expect(collect(stream('SYSTEM', []))).rejects.toThrow(/context length/)
   })
 })

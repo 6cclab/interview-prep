@@ -1,11 +1,14 @@
-import { DEFAULT_CLAUDE_MODEL } from './claude-cli'
-import { DEFAULT_OLLAMA_MODEL } from './ollama'
+import Anthropic from '@anthropic-ai/sdk'
+import { claudeCliStream, DEFAULT_CLAUDE_MODEL } from './claude-cli'
+import { DEFAULT_OLLAMA_MODEL, ollamaStream } from './ollama'
+import { DEFAULT_OPENAI_MODEL, openaiStream } from './openai'
+import { anthropicStream, type StreamFn } from './interviewer'
 import type { Track } from './context'
 
 /**
  * Which model backend a track's interviewer runs on.
  *
- * Three exist and they are not interchangeable:
+ * Four exist and they are not interchangeable:
  *
  * - `cli` — `claude -p` against the logged-in subscription. The default,
  *   because it is the only one every prompt rule in `context.ts` was written
@@ -15,6 +18,9 @@ import type { Track } from './context'
  *   worse at following the dense rules the prompts carry (exactly one
  *   question per turn, quote this hint rung verbatim, emit a fenced
  *   ```drill-log trailer). See `voice/ollama.ts` for the measurements.
+ * - `openai` — any endpoint speaking OpenAI's `/v1/chat/completions` (OpenAI
+ *   itself, Azure OpenAI, Groq, together, or a local vLLM / LM Studio server),
+ *   spending that provider's credits. See `voice/openai.ts`.
  *
  * **Selection is explicit, and per track.** The tracks are not equally
  * forgiving of a weaker model: `mock` is behavioural, so it has no spoiler to
@@ -27,9 +33,9 @@ import type { Track } from './context'
  * anywhere in the environment quietly outranked the subscription — and a
  * transport you did not choose is a transport you discover mid-drill.
  */
-export type Backend = 'cli' | 'api' | 'ollama'
+export type Backend = 'cli' | 'api' | 'ollama' | 'openai'
 
-const BACKENDS: readonly Backend[] = ['cli', 'api', 'ollama']
+const BACKENDS: readonly Backend[] = ['cli', 'api', 'ollama', 'openai']
 
 /** The default when nothing is set. See `Backend` for why it is not `ollama`. */
 export const DEFAULT_BACKEND: Backend = 'cli'
@@ -106,6 +112,8 @@ export function describeBackend(backend: Backend, model: string): string {
       return `Transport: ollama, model ${model} (local, spending nothing)`
     case 'cli':
       return `Transport: claude CLI, model ${model} (spending Claude subscription quota)`
+    case 'openai':
+      return `Transport: OpenAI-compatible endpoint, model ${model} (spending that provider's credits)`
   }
 }
 
@@ -137,9 +145,48 @@ export function backendSummary(env: NodeJS.ProcessEnv = process.env): Record<Tra
  */
 export function transportLabel(track: Track, env: NodeJS.ProcessEnv = process.env): string {
   const backend = chooseBackend(track, env)
-  const model =
-    backend === 'ollama'
-      ? (env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL)
-      : (env.VOICE_CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL)
-  return `${backend} / ${model}`
+  return `${backend} / ${modelFor(backend, env)}`
+}
+
+/** The model a backend would use, given `env`. Shared by the label and the banner. */
+export function modelFor(backend: Backend, env: NodeJS.ProcessEnv = process.env): string {
+  switch (backend) {
+    case 'ollama':
+      return env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL
+    case 'openai':
+      return env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL
+    case 'api':
+    case 'cli':
+      return env.VOICE_CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL
+  }
+}
+
+/**
+ * The transport for a track, and the line announcing it.
+ *
+ * One copy. `voice/cli.ts` and `voice/http-server.ts` each had their own, which
+ * meant every new backend had to be added twice and the two could disagree
+ * about what `VOICE_BACKEND_DESIGN=ollama` meant depending on where the drill
+ * was run. Adding a fourth backend is what made that cost real.
+ *
+ * `log` is injected rather than calling `console.log` directly because the two
+ * callers prefix differently — the server names the track, the CLI does not.
+ */
+export function streamForBackend(
+  track: Track,
+  log: (line: string) => void = console.log,
+): StreamFn {
+  const backend = chooseBackend(track)
+  const model = modelFor(backend)
+  log(describeBackend(backend, model))
+  switch (backend) {
+    case 'ollama':
+      return ollamaStream()
+    case 'openai':
+      return openaiStream()
+    case 'api':
+      return anthropicStream(new Anthropic(), model)
+    case 'cli':
+      return claudeCliStream({ model })
+  }
 }

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { backendSummary, chooseBackend, DEFAULT_BACKEND, describeBackend, transportLabel } from './backend'
+import {
+  backendSummary,
+  chooseBackend,
+  DEFAULT_BACKEND,
+  describeBackend,
+  modelFor,
+  transportLabel,
+} from './backend'
 
 describe('chooseBackend', () => {
   it('defaults every track to the claude CLI when nothing is set', () => {
@@ -135,4 +142,22 @@ describe('transportLabel', () => {
   it('reports the override model rather than the default', () => {
     expect(transportLabel('design', { VOICE_CLAUDE_MODEL: 'claude-opus-5' })).toBe('cli / claude-opus-5')
   })
+})
+
+it('accepts openai as a backend', () => {
+  expect(chooseBackend('coding', { VOICE_BACKEND: 'openai' })).toBe('openai')
+})
+
+it('still throws on a typo rather than falling back', () => {
+  expect(() => chooseBackend('coding', { VOICE_BACKEND: 'openia' })).toThrow(/not a known backend/)
+})
+
+it('names each backend its own model variable', () => {
+  expect(modelFor('openai', { OPENAI_MODEL: 'gpt-4.1-mini' })).toBe('gpt-4.1-mini')
+  expect(modelFor('ollama', { OLLAMA_MODEL: 'Qwen3.5:9b' })).toBe('Qwen3.5:9b')
+  expect(modelFor('cli', { VOICE_CLAUDE_MODEL: 'claude-opus-5' })).toBe('claude-opus-5')
+})
+
+it('says what an openai drill spends', () => {
+  expect(describeBackend('openai', 'gpt-4.1')).toMatch(/credits/)
 })
