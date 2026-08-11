@@ -94,6 +94,13 @@ export interface Drill {
   competency?: string
   /** A timed drill's budget in ms; absent when the drill is untimed. */
   budgetMs?: number
+  /**
+   * Coding track only: where the answer is written. `browser` puts a
+   * deliberately limited editor on screen; `own` means the candidate edits
+   * `solution.ts` in their own editor, which is the mode that keeps real types
+   * and is better for learning a pattern cold. Absent means `own`.
+   */
+  editor?: 'browser' | 'own'
 }
 
 /** The tracks that have a problem to put on screen. */

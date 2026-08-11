@@ -15,6 +15,8 @@ import { HomeHeader } from './components/HomeHeader'
 import { ProblemPane } from './components/ProblemPane'
 import { CodingTools } from './components/CodingTools'
 import { DebugTools } from './components/DebugTools'
+import { SolutionEditor } from './components/SolutionEditor'
+import { useSolution, runAfterSave } from './useSolution'
 import { routeDrill, routeHash, useRoute, type Route } from './route'
 import { useTheme } from './theme'
 import { derivePhase, fmt, wallClock, stuckBody, TIMED_BUDGET_MINUTES, ERROR_COPY, ANNOUNCEMENTS } from './phase'
@@ -175,6 +177,17 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   // A session exists to act on. Withheld before and after, because a live button
   // that 404s is worse than a disabled one.
   const live = phase !== 'idle' && phase !== 'ended'
+
+  // The browser editor, coding track only, and only once the drill said it is
+  // in `browser` mode — that is a property of the started session (`drill`),
+  // not of the route, because it is chosen at start (Task 4).
+  const editorMode = route.view === 'coding' ? drill?.editor : undefined
+  const solution = useSolution(problem, editorMode === 'browser')
+  const onRunTests = useCallback(() => {
+    void runAfterSave(editorMode, solution.save, async () => {
+      runTests()
+    })
+  }, [editorMode, solution.save, runTests])
 
   // The session clock ("8:34 session" in the header) is client-side display
   // only — the wire carries no session-duration field (see the handoff
@@ -505,6 +518,28 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
           )}
 
           <main className="main-column">
+            {/* Browser-editor mode only (Task 4 chooses it at start). `own` mode
+                keeps the candidate in their real editor against real types, so
+                there is nothing to render here — see `editorMode` above. */}
+            {editorMode === 'browser' && (
+              <div className="solution-editor-pane">
+                <SolutionEditor value={solution.text} onChange={solution.setText} readOnly={solution.status === 'loading'} />
+                {/* The conflict is never resolved for the candidate — the buffer
+                    is never discarded to fix it. This just says the file moved
+                    on disk, so a save (or Run tests) is the next step. */}
+                {solution.status === 'conflict' && (
+                  <p className="solution-editor-pane__status" role="alert">
+                    solution.ts changed on disk since this loaded. Your typed code is kept — save again to overwrite it.
+                  </p>
+                )}
+                {solution.status === 'error' && (
+                  <p className="solution-editor-pane__status" role="alert">
+                    Could not reach the drill server to save. Your typed code is kept locally; it will retry on the next
+                    change or Run tests.
+                  </p>
+                )}
+              </div>
+            )}
             <Transcript
               entries={entries}
               interimSentences={interimSentences}
@@ -539,7 +574,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
                 running={testsRunning}
                 hintRung={hintRung}
                 hintPending={hintPending}
-                onRun={live ? runTests : undefined}
+                onRun={live ? onRunTests : undefined}
                 onHint={live ? askForHint : undefined}
                 rationed={route.view === 'coding'}
               />
