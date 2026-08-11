@@ -21,6 +21,13 @@ import { javascript } from '@codemirror/lang-javascript';
  *
  * Exported separately from the component so the extension list — which is the
  * actual design decision — can be asserted without a DOM.
+ *
+ * `@codemirror/autocomplete` and `@codemirror/lint` are present in
+ * `node_modules` — they arrive transitively via `@codemirror/lang-javascript`
+ * — but nothing here imports or wires them, and they must stay unwired. They
+ * cannot be dropped without dropping JavaScript syntax support entirely, so
+ * their presence on the dependency tree is expected and does not mean the
+ * constraint above has been violated.
  */
 export function editorExtensions(readOnly: boolean): Extension[] {
   return [
