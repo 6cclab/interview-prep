@@ -8,7 +8,7 @@ import { timeCue, buildSystemPrompt, type Track } from './context'
 import { listInputDevices, listOutputDevices, readDeviceConfig } from './devices'
 import { createInterviewer } from './interviewer'
 import { runSession } from './session'
-import { saySpeaker, whisperTranscriber } from './speech'
+import { resolveSpeaker, whisperTranscriber } from './speech'
 import { transcriptionPrompt } from './vocabulary'
 import {
   appendStoryLog,
@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   try {
     const entries = await runSession({
       transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
-      speaker: saySpeaker({ voice: process.env.SAY_VOICE, audioDevice: devices.output }),
+      speaker: resolveSpeaker({ voice: process.env.SAY_VOICE, audioDevice: devices.output }),
       interviewer,
       startRecording: () => record(scratch, devices.input),
       nextTurn: async () => ((await rl.question('')).trim() === 'end' ? 'end' : 'speak'),

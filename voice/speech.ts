@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
@@ -176,4 +176,156 @@ export function saySpeaker(opts: SayOptions = {}): Speaker {
       current = null
     },
   }
+}
+
+export type SpeechEngine = 'say' | 'piper'
+
+const ENGINES: readonly SpeechEngine[] = ['say', 'piper']
+
+/**
+ * Which TTS engine to use.
+ *
+ * Platform is the default; `SAY_ENGINE` is the override and wins in both
+ * directions. An unrecognised value throws rather than falling back, matching
+ * `chooseBackend`: silently running a 45-minute drill on something you did not
+ * choose is the failure this repo refuses to have.
+ */
+export function resolveEngine(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: string = process.platform,
+): SpeechEngine {
+  const raw = (env.SAY_ENGINE ?? '').trim().toLowerCase()
+  if (raw === '') return platform === 'darwin' ? 'say' : 'piper'
+  if ((ENGINES as readonly string[]).includes(raw)) return raw as SpeechEngine
+  throw new Error(`SAY_ENGINE="${env.SAY_ENGINE}" is not a known engine. Use one of: ${ENGINES.join(', ')}.`)
+}
+
+/** piper's default sample rate for the medium voices. `ffplay` must be told; it cannot infer it from raw PCM. */
+const PIPER_SAMPLE_RATE = 22050
+
+/**
+ * `rate` is words-per-minute for `say` and a length multiplier for piper, where
+ * higher is *slower*. 175 wpm is roughly `say`'s default, so that maps to 1.0
+ * and the scale moves inversely from there. Clamped, because a wild wpm should
+ * cost the pace and not the drill — the same trade `resolveSpeech` makes when
+ * it drops an unusable rate rather than passing it to `say -r`.
+ */
+export function lengthScaleFor(rate: number): number {
+  const scale = 175 / rate
+  return Math.min(1.4, Math.max(0.6, Number(scale.toFixed(2))))
+}
+
+/** Build piper's argv. Pure, so it is tested without spawning anything. */
+export function piperArgs(opts: SayOptions = {}): string[] {
+  const args = ['--output_raw']
+  if (opts.voice) args.push('--model', opts.voice)
+  if (opts.rate) args.push('--length_scale', String(lengthScaleFor(opts.rate)))
+  return args
+}
+
+/** Build ffplay's argv for piper's raw output. `-` reads stdin. */
+export function ffplayArgs(): string[] {
+  return [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-nodisp',
+    '-autoexit',
+    '-f', 's16le',
+    '-ar', String(PIPER_SAMPLE_RATE),
+    '-ac', '1',
+    '-',
+  ]
+}
+
+/**
+ * piper synthesising to stdout, piped into ffplay.
+ *
+ * Two processes rather than one because piper writes audio and does not play
+ * it. ffplay is chosen as the player because ffmpeg is already a hard
+ * dependency of the browser tracks (`voice/transcode.ts`), so this adds one
+ * binary rather than two.
+ *
+ * `stop()` kills both ends. It is not optional here for the same reason
+ * `saySpeaker` implements it: TTS runs on the server, so a page that closes has
+ * no effect on a running subprocess, and without it a refresh mid-turn leaves
+ * the interviewer reading its reply to an empty room.
+ */
+export function piperSpeaker(opts: SayOptions = {}): Speaker {
+  let current: { piper: ReturnType<typeof spawn>; player: ReturnType<typeof spawn> } | null = null
+
+  return {
+    async speak(text: string): Promise<void> {
+      const piper = spawn('piper', piperArgs(opts), { stdio: ['pipe', 'pipe', 'pipe'] })
+      const player = spawn('ffplay', ffplayArgs(), { stdio: ['pipe', 'ignore', 'pipe'] })
+      current = { piper, player }
+      piper.stdout?.pipe(player.stdin!)
+      piper.stdin?.end(text)
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          let failed: Error | null = null
+          piper.once('error', (err) => { failed = new Error(`failed to spawn "piper": ${err.message}`) })
+          player.once('error', (err) => { failed = new Error(`failed to spawn "ffplay": ${err.message}`) })
+          player.once('close', (code, signal) => {
+            // A killed utterance is a cancellation, not a failure — `stop` was
+            // called on purpose, and throwing here would log a TTS error for
+            // every ordinary page refresh.
+            if (signal !== null) resolve()
+            else if (failed) reject(failed)
+            else if (code === 0) resolve()
+            else reject(new Error(`ffplay exited with code ${String(code)}`))
+          })
+        })
+      } catch (err) {
+        throw new Error(
+          `piper failed to speak text (voice: ${opts.voice ?? 'default'}, length: ${text.length})`,
+          { cause: err },
+        )
+      } finally {
+        current = null
+      }
+    },
+
+    stop(): void {
+      current?.piper.kill()
+      current?.player.kill()
+      current = null
+    },
+  }
+}
+
+/** The speaker for this machine. The one function every front end should call. */
+export function resolveSpeaker(
+  opts: SayOptions = {},
+  env: NodeJS.ProcessEnv = process.env,
+  platform: string = process.platform,
+): Speaker {
+  return resolveEngine(env, platform) === 'say' ? saySpeaker(opts) : piperSpeaker(opts)
+}
+
+/**
+ * Confirm the chosen engine can actually run, at startup.
+ *
+ * Without this, a missing binary surfaces when the interviewer first speaks —
+ * minutes into a drill, after a model turn has already been spent. Returns a
+ * banner line on success and throws on failure, so `main()` can print one and
+ * refuse to start on the other.
+ */
+export function checkSpeechEngine(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: string = process.platform,
+): string {
+  const engine = resolveEngine(env, platform)
+  const binaries = engine === 'say' ? ['say'] : ['piper', 'ffplay']
+  for (const binary of binaries) {
+    try {
+      execFileSync('command', ['-v', binary], { env, shell: true, stdio: 'ignore' })
+    } catch {
+      throw new Error(
+        `TTS engine "${engine}" needs "${binary}", which is not on PATH. ` +
+          `Install it, or set SAY_ENGINE to one you have (say | piper).`,
+      )
+    }
+  }
+  return `Speech: ${engine} (${binaries.join(' + ')})`
 }

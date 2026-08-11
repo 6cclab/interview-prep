@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import { isWhisperLogLine, parseWhisperOutput, sayArgs, whisperArgs } from './speech'
+import {
+  checkSpeechEngine,
+  ffplayArgs,
+  isWhisperLogLine,
+  parseWhisperOutput,
+  piperArgs,
+  resolveEngine,
+  sayArgs,
+  whisperArgs,
+} from './speech'
 import { transcriptionPrompt } from './vocabulary'
 
 describe('parseWhisperOutput', () => {
@@ -177,5 +186,69 @@ describe('whisperArgs', () => {
     const args = whisperArgs('m.bin', '/tmp/a.wav', prompt)
     expect(args.filter((arg) => arg === '--prompt')).toHaveLength(1)
     expect(args.at(-1)).toBe(prompt)
+  })
+})
+
+describe('resolveEngine', () => {
+  it('defaults to say on macOS and piper elsewhere', () => {
+    expect(resolveEngine({}, 'darwin')).toBe('say')
+    expect(resolveEngine({}, 'linux')).toBe('piper')
+    expect(resolveEngine({}, 'win32')).toBe('piper')
+  })
+
+  // Explicit choice beats platform, the same stance backend.ts takes: nothing
+  // here sniffs and switches silently.
+  it('lets SAY_ENGINE override the platform in both directions', () => {
+    expect(resolveEngine({ SAY_ENGINE: 'piper' }, 'darwin')).toBe('piper')
+    expect(resolveEngine({ SAY_ENGINE: 'say' }, 'linux')).toBe('say')
+  })
+
+  it('throws on an unknown engine rather than falling back', () => {
+    expect(() => resolveEngine({ SAY_ENGINE: 'festival' }, 'linux')).toThrow(/SAY_ENGINE/)
+  })
+
+  it('treats an empty value as unset, so a stale export can be cleared', () => {
+    expect(resolveEngine({ SAY_ENGINE: '  ' }, 'darwin')).toBe('say')
+  })
+})
+
+describe('piperArgs', () => {
+  it('writes raw audio to stdout so it can be piped without a temp file', () => {
+    expect(piperArgs({})).toContain('--output_raw')
+  })
+
+  it('passes a model path through as the voice', () => {
+    expect(piperArgs({ voice: '/models/en_GB-alba-medium.onnx' })).toEqual(
+      expect.arrayContaining(['--model', '/models/en_GB-alba-medium.onnx']),
+    )
+  })
+
+  // `rate` means words-per-minute to `say` and length-scale to piper, where
+  // higher is slower. A drill configured at 160 wpm must not become a
+  // 160x-length-scale utterance.
+  it('converts a say rate into a piper length scale', () => {
+    const args = piperArgs({ rate: 180 })
+    const scale = Number(args[args.indexOf('--length_scale') + 1])
+    expect(scale).toBeGreaterThan(0.5)
+    expect(scale).toBeLessThan(1.5)
+  })
+
+  it('omits length scale entirely when no rate is configured', () => {
+    expect(piperArgs({})).not.toContain('--length_scale')
+  })
+})
+
+describe('ffplayArgs', () => {
+  it('plays 22.05kHz mono PCM from stdin with no window', () => {
+    const args = ffplayArgs()
+    expect(args).toEqual(expect.arrayContaining(['-nodisp', '-autoexit', '-']))
+    expect(args).toEqual(expect.arrayContaining(['-f', 's16le']))
+  })
+})
+
+describe('checkSpeechEngine', () => {
+  it('names the missing binary and the variable that would avoid it', () => {
+    expect(() => checkSpeechEngine({ SAY_ENGINE: 'piper', PATH: '/nonexistent' }, 'linux'))
+      .toThrow(/piper.*SAY_ENGINE/s)
   })
 })

@@ -32,7 +32,14 @@ import { backendSummary, describeBackend, modelFor, streamForBackend, transportL
 import { preloadOllama } from './ollama'
 import { createSession, finishSession, type FinishResult } from './session'
 import { createSessionStore, type Drill, type RetainedAudio, type SessionStore, type StoredSession } from './session-store'
-import { whisperTranscriber, saySpeaker, type Speaker, type Transcriber } from './speech'
+import {
+  checkSpeechEngine,
+  resolveSpeaker,
+  whisperTranscriber,
+  type SayOptions,
+  type Speaker,
+  type Transcriber,
+} from './speech'
 import { openDisabled, openInBrowser, openPlan } from './open-browser'
 import { readDrillLog, summarise } from './drill-log'
 import { transcriptionPrompt } from './vocabulary'
@@ -1474,12 +1481,36 @@ const WHISPER_MODEL = process.env.WHISPER_MODEL ?? 'models/ggml-large-v3-turbo.b
  * `POST /api/devices/config`) takes effect on the very next sentence, no
  * restart required. The read is a few bytes off disk — cheap enough to do
  * per sentence.
+ *
+ * `makeSpeaker` defaults to `resolveSpeaker` (platform/`SAY_ENGINE`-driven)
+ * and is injectable so `voice/configured-speaker.test.ts` can assert the
+ * re-read-per-sentence behaviour and `stop()` without spawning a real engine.
+ *
+ * `stop()` tracks the speaker for the utterance currently in flight and
+ * forwards to it. Once this was a bare closure over `speak` with nothing to
+ * stop, so `deps.speaker?.stop?.()` in the SSE close handler silently did
+ * nothing and a page refresh mid-turn left the interviewer talking to an
+ * empty room.
  */
-function configuredSpeaker(root: string): Speaker {
+export function configuredSpeaker(
+  root: string,
+  makeSpeaker: (opts: SayOptions) => Speaker = resolveSpeaker,
+): Speaker {
+  let current: Speaker | null = null
   return {
     async speak(text: string): Promise<void> {
       const { output } = readDeviceConfig(root)
-      await saySpeaker({ audioDevice: output }).speak(text)
+      const speaker = makeSpeaker({ audioDevice: output })
+      current = speaker
+      try {
+        await speaker.speak(text)
+      } finally {
+        if (current === speaker) current = null
+      }
+    },
+    stop(): void {
+      current?.stop?.()
+      current = null
     },
   }
 }
@@ -1550,6 +1581,15 @@ function main(): void {
     )
     process.exit(1)
   }
+  // Fail here, not on the interviewer's first sentence — several minutes into
+  // a drill, after a model turn has already been paid for.
+  let speechBanner: string
+  try {
+    speechBanner = checkSpeechEngine()
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err))
+    process.exit(1)
+  }
   const tls = readTlsMaterial(root)
   const server = createVoiceServer({
     root,
@@ -1568,6 +1608,7 @@ function main(): void {
     // IPv4. The certificate covers both names.
     const url = `${scheme}://127.0.0.1:${port}/`
     console.log(`Voice mock drill: ${url}`)
+    console.log(`  ${speechBanner}`)
     announceBackends()
     if (!tls) {
       console.log(
