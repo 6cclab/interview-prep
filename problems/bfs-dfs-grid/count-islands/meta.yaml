@@ -1,0 +1,30 @@
+pattern: bfs-dfs-grid
+title: Number of Islands
+difficulty: medium
+budget: scale test — a 400x400 grid holding 80,000 single-cell islands must finish well under 5s (measured: ~8ms correct, ~11s with per-island visited allocation), which rejects any solution that allocates or clears a whole-grid visited structure once per island
+complexity:
+  time: O(m*n) — every cell is looked at a constant number of times across the whole scan, not once per island
+  space: O(m*n) worst case for the visited marks plus the frontier, which on a grid that is entirely land can hold a constant fraction of the cells
+hints:
+  nudge: You are counting groups, not cells. What has to be true about a land cell for it to begin a group that has not already been counted?
+  approach: >-
+    Walk every cell once. When you find land that has not been seen yet, that is
+    exactly one new island — increment, then exhaustively visit everything
+    reachable from it and mark all of it seen, so no other cell in that landmass
+    can start a second count. The seen-marks are one structure for the entire
+    scan, created once before the walk. Creating or clearing them per island is
+    what the scale test is built to catch.
+companies:
+  - name: crowdstrike
+    confidence: medium
+    source: >-
+      LeetCode Discuss, "Crowdstrike Interview Experience" posted 2025-11-14
+      (London, senior loop, read first-hand in-browser 2026-08-10). The coding
+      round was this problem, quoted verbatim, as the round's only question.
+      Single report — it establishes that the problem was asked once, not that
+      it is the house question.
+    date: "2025-11-14"
+  - name: amazon
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 200); no company-specific report
+    date: "general"

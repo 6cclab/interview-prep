@@ -1316,6 +1316,26 @@ ol.md__list {
   color: var(--muted-foreground);
 }
 
+/* Clarify-first's escape hatch. Deliberately quiet — a secondary control, not a
+   call to action. It should read as available rather than inviting: the drill is
+   better if it goes unused, and worse if taking it feels like cheating. */
+.problem-pane__reveal {
+  margin-top: 16px;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.problem-pane__reveal:hover {
+  color: var(--foreground);
+  border-color: var(--muted-foreground);
+}
+
 /* The drill chooser (Home). Its own view, so it owns the whole page rather than
    sharing the dock's measure. */
 .home {
@@ -1409,11 +1429,28 @@ ol.md__list {
   text-wrap: pretty;
 }
 
+/* `width: 100%` on every row, not just the ones that overflowed.
+   `.home__card` is `align-items: start`, so a row shrink-wraps its contents —
+   and once a row is wider than the card, a `max-width: 100%` on the control
+   inside it is measured against that too-wide row and caps nothing. The
+   behavioural card hit this first (prose titles) and the debugging card hit it
+   next (bug-report headlines); fixing it per-card just waits for the third. */
 .home__row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
+  width: 100%;
+}
+
+/* The picker trigger. Brutalkit's Select renders its list in a portal, so the
+   trigger is not sized by its widest option the way a native select is — this
+   only has to let it share the row and shrink when the row wraps. `min-width: 0`
+   is what actually permits shrinking below the flex base size. */
+.home__select {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .home__label {
@@ -1422,37 +1459,6 @@ ol.md__list {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted-foreground);
-}
-
-/* Native selects on macOS ignore border and background until the appearance is
-   reset — same reason as DeviceSettings. */
-.home__row select {
-  appearance: none;
-  -webkit-appearance: none;
-  min-width: 220px;
-  /* Chrome sizes a select to its widest option, and the behavioural picker's
-     options are prose titles with an optional " — no story yet" suffix. Without
-     this the control grew past the card's own border. */
-  max-width: 100%;
-  text-overflow: ellipsis;
-  padding: 9px 34px 9px 12px;
-  border: 2px solid var(--border);
-  border-radius: 0;
-  background-color: var(--background);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23888' stroke-width='1.75'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 11px;
-  box-shadow: var(--shadow-brutal, 4px 4px 0 0 var(--shadow-color, currentColor));
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.home__row select:active {
-  transform: translate(2px, 2px);
-  box-shadow: 2px 2px 0 0 var(--shadow-color, currentColor);
 }
 
 .home__offline {
@@ -1545,16 +1551,6 @@ ol.md__list {
 /* A row whose select must not exceed its card. `.home__row` is shrink-to-fit,
    so a wide select widens the row rather than being clipped by it — this pins
    the row to the card and lets the select shrink inside it. */
-.home__row--fill {
-  width: 100%;
-}
-
-.home__row--fill select {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-}
-
 /* Reads as an annotation on the help column, not a second result. */
 .history__paired {
   color: var(--muted-foreground);

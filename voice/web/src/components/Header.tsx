@@ -1,27 +1,27 @@
-import { Button } from 'brutalkit/button'
-import { fmt } from '../phase'
+import { Button } from 'brutalkit/button';
+import { fmt } from '../phase';
 
 interface Props {
-  title: string
+  title: string;
   /** Present only when leaving is safe — see `App.tsx`. Absent mid-session. */
-  onGoHome?: () => void
-  sessionSeconds: number
+  onGoHome?: () => void;
+  sessionSeconds: number;
   /** Shown in place of the session clock on a timed drill — see `App.tsx`. */
-  remainingSeconds: number | null
+  remainingSeconds: number | null;
   /**
    * A timed drill's budget in minutes, before it has started. Without this the
    * header showed "0:00 session" on a screen whose whole point is that it is
    * timed — naming the wrong quantity, with the wrong label.
    */
-  budgetMinutes: number | null
+  budgetMinutes: number | null;
   /** The live drill's label, e.g. "System design · rate-limiter". */
-  kicker: string
-  dark: boolean
-  onToggleTheme(): void
-  micCheckOpen: boolean
-  onToggleMicCheck(): void
-  deviceSettingsOpen: boolean
-  onToggleDeviceSettings(): void
+  kicker: string;
+  dark: boolean;
+  onToggleTheme(): void;
+  micCheckOpen: boolean;
+  onToggleMicCheck(): void;
+  deviceSettingsOpen: boolean;
+  onToggleDeviceSettings(): void;
 }
 
 // The handoff's "States" button (header, right) is the prototype's own
@@ -42,12 +42,17 @@ export function Header({
   micCheckOpen,
   onToggleMicCheck,
   deviceSettingsOpen,
-  onToggleDeviceSettings,
+  onToggleDeviceSettings
 }: Props) {
   return (
     <header className="app-header">
       <div className="app-header__title">
-        <span className="app-header__name">{title}</span>
+        <a href="/">
+          <span>
+            <Button className="mr-4">{'<- Go back'}</Button>
+          </span>
+          <span className="app-header__name">{title}</span>
+        </a>
         <span className="app-header__kicker">{kicker}</span>
       </div>
       <div className="app-header__actions">
@@ -68,7 +73,9 @@ export function Header({
           // clock. "0:00 session" here named the wrong thing entirely.
           <span className="app-header__clock">{budgetMinutes} min drill</span>
         ) : remainingSeconds === null ? (
-          <span className="app-header__clock">{fmt(sessionSeconds)} session</span>
+          <span className="app-header__clock">
+            {fmt(sessionSeconds)} session
+          </span>
         ) : (
           <span
             className="app-header__clock app-header__clock--remaining"
@@ -77,16 +84,31 @@ export function Header({
             {fmt(remainingSeconds)} left
           </span>
         )}
-        <Button variant="ghost" size="sm" onClick={onToggleTheme} aria-label="Toggle light and dark theme">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onToggleTheme}
+          aria-label="Toggle light and dark theme"
+        >
           {dark ? 'Light' : 'Dark'}
         </Button>
-        <Button variant="outline" size="sm" onClick={onToggleDeviceSettings} aria-expanded={deviceSettingsOpen}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onToggleDeviceSettings}
+          aria-expanded={deviceSettingsOpen}
+        >
           Devices
         </Button>
-        <Button variant="outline" size="sm" onClick={onToggleMicCheck} aria-expanded={micCheckOpen}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onToggleMicCheck}
+          aria-expanded={micCheckOpen}
+        >
           Mic check
         </Button>
       </div>
     </header>
-  )
+  );
 }

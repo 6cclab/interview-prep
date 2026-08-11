@@ -1,0 +1,36 @@
+pattern: eviction-cache
+title: A Cache with a Capacity
+difficulty: medium
+budget: scale test — 600,000 operations against an 8,000-entry cache must finish well under 5s, which rejects any implementation that scans its contents to pick a victim (measured: ~43ms for a map plus a doubly-linked list, ~974ms for one built on Map insertion order, ~15s for a scan)
+complexity:
+  time: O(1) amortised for both get and put — no operation may depend on how many entries are held
+  space: O(capacity)
+hints:
+  nudge: A map gives you the value in O(1) but tells you nothing about which key is stalest. What second structure answers *that* question in O(1), and what does it cost to move an entry to the front of it?
+  approach: >-
+    Keep two things side by side. A map from key to entry answers "do I hold
+    this, and what is the value" in constant time. An ordered structure holds
+    the same entries stalest-first and has to support three operations in
+    constant time: move a known entry to the fresh end, read the stale end, and
+    remove from the stale end. A doubly-linked list does all three, provided the
+    map stores the *node* rather than the value — that is what lets you splice
+    without walking. An array or a plain list does not, because finding the
+    entry to move is already O(n). In JavaScript there is a second route: a Map
+    iterates in insertion order, so deleting a key and re-setting it moves it to
+    the fresh end, and the first key from `keys()` is the stalest. Both are
+    correct; be able to say why each one is O(1).
+companies:
+  - name: crowdstrike
+    confidence: low
+    source: >-
+      Blind thread "Crowdstrike coding interview", 2025-08-27 — a respondent
+      reported being asked to design a FIFO cache (insert, lookup, eviction) at
+      pseudocode level. **That report is manager-track, not senior IC**, so it
+      does not establish this as a senior coding-round question. It is here
+      because cache design is a common medium and this is the only report of one
+      at this company, not because the round is expected to be this.
+    date: "2025-08-27"
+  - name: amazon
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 146); no company-specific report
+    date: "general"

@@ -1,0 +1,14 @@
+pattern: linked-list
+title: Merge Two Sorted Lists
+difficulty: warmup
+budget: none — warm-up tier, correctness only. See ".claude/CLAUDE.md" > "The warm-up tier".
+# The prompt cannot be written without the words "linked list" — the structure is
+# the subject of the question, not the thing to recognise. Same exemption, and the
+# same reason, as reverse-list: see ".claude/CLAUDE.md" > "Declaring a pattern that
+# is also the question".
+pattern-in-prompt: accepted
+companies:
+  - name: unknown
+    confidence: low
+    source: a standard warm-up interview problem; no company-specific report
+    date: "general"

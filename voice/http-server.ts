@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import {
   assertNoSpoilers,
   buildSystemPrompt,
+  CLARIFY_FIRST_BRIEF,
   closingCue,
   hintCue,
   timeCue,
@@ -34,13 +35,20 @@ import { backendSummary, chooseBackend, describeBackend, transportLabel } from '
 import { DEFAULT_OLLAMA_MODEL, ollamaStream, preloadOllama } from './ollama'
 import { createSession, finishSession, type FinishResult } from './session'
 import { createSessionStore, type Drill, type RetainedAudio, type SessionStore, type StoredSession } from './session-store'
-import { whisperTranscriber, saySpeaker, type Speaker, type Transcriber } from './speech'
+import { whisperTranscriber, saySpeaker, type SayOptions, type Speaker, type Transcriber } from './speech'
 import { openDisabled, openInBrowser, openPlan } from './open-browser'
 import { readDrillLog, summarise } from './drill-log'
 import { transcriptionPrompt } from './vocabulary'
 import { transcodeToWav } from './transcode'
 import { readStaticFile, resolveStaticFile } from './static'
-import { listOutputDevices, readDeviceConfig, writeDeviceConfig, type Device, type DeviceConfig } from './devices'
+import {
+  listOutputDevices,
+  readDeviceConfig,
+  resolveSpeech,
+  writeDeviceConfig,
+  type Device,
+  type DeviceConfig,
+} from './devices'
 
 export interface VoiceServerDeps {
   root: string
@@ -66,6 +74,21 @@ export interface VoiceServerDeps {
    * small fixture directory instead of depending on a real `vite build`.
    */
   distDir?: string
+  /**
+   * Run coding drills clarify-first: the problem route withholds the written
+   * statement until it is asked for a second time, and the interviewer opens
+   * with a deliberately underspecified spoken framing. See `CLARIFY_FIRST` in
+   * `voice/context.ts` for what it is for and the evidence behind it.
+   *
+   * A dep rather than a read of `process.env` down in the route, so tests set it
+   * by construction and never by mutating the environment. `main()` reads
+   * `VOICE_VAGUE` and passes it through.
+   *
+   * Coding only. The design track's whole premise is an open-ended prompt that
+   * stays on screen for forty-five minutes, and the debugging track's bug report
+   * is already written the way a real one would be.
+   */
+  vague?: boolean
   /**
    * PEM cert and key. When present the server speaks HTTPS instead of HTTP —
    * required by Arc, which unlike Chrome does not treat plain-HTTP localhost
@@ -780,6 +803,22 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
           return
         }
         relPath = `${problemDir(found)}/README.md`
+
+        // Clarify-first: the statement is withheld ON THE WIRE, and reaching it
+        // is a second, explicit request. Hiding it in the client instead would
+        // be the mistake `?patterns=1` exists to avoid — the pane would hold the
+        // answer to "what is actually being asked" in memory while claiming not
+        // to, one devtools tab away, and the drill would quietly stop meaning
+        // anything. `reveal=1` is not a secret and is not meant to be: the point
+        // is that taking it is a deliberate act, the same shape as asking for a
+        // hint, not that it is hard to do.
+        //
+        // Coaching is excluded: a coach is explaining a pattern after the fact,
+        // and withholding the problem from that conversation is nonsense.
+        if (deps.vague && track === 'coding' && url.searchParams.get('reveal') !== '1') {
+          sendJson(res, 200, { problem, prompt: CLARIFY_FIRST_BRIEF, vague: true })
+          return
+        }
       } else {
         relPath = `system-design/${problem}/README.md`
       }
@@ -858,7 +897,19 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
             if (!found) throw new Error(`Unknown competency "${drill.competency}": no such behavioral competency.`)
             focus = found.title
           }
-          system = buildSystemPrompt(deps.root, drill.track, drill.problem, pattern, focus)
+          // The same flag the problem route reads, so the interviewer's
+          // instructions and what the client can fetch cannot disagree. A prompt
+          // told to withhold a statement the pane is already showing would be a
+          // rule with no teeth, and the reverse — a withheld statement nobody
+          // describes out loud — would just be a broken drill.
+          system = buildSystemPrompt(
+            deps.root,
+            drill.track,
+            drill.problem,
+            pattern,
+            focus,
+            deps.vague === true && drill.track === 'coding',
+          )
         }
       } catch (error) {
         // An unknown problem slug reaches here as a missing-file throw from
@@ -1470,6 +1521,18 @@ const WHISPER_BINARY = process.env.WHISPER_BINARY ?? 'whisper-cli'
 const WHISPER_MODEL = process.env.WHISPER_MODEL ?? 'models/ggml-large-v3-turbo.bin'
 
 /**
+ * Clarify-first coding drills — `VOICE_VAGUE=1 pnpm mock:web`, or the
+ * `mock:web:vague` script.
+ *
+ * Off by default, and it should stay a choice rather than becoming the house
+ * style. A precise prompt is the right default for building recall of a pattern;
+ * this mode practises the opening instead, which is a different exercise and a
+ * worse one to run every time. Set only `1` rather than any non-empty value, so
+ * `VOICE_VAGUE=0` means what it looks like it means.
+ */
+const VOICE_VAGUE = process.env.VOICE_VAGUE === '1'
+
+/**
  * The production `Speaker` for `deps.speaker`: re-reads `local/voice.json`
  * on every sentence rather than baking `audioDevice` in once at startup, so
  * picking a different speaker in the web client (which persists via
@@ -1477,11 +1540,35 @@ const WHISPER_MODEL = process.env.WHISPER_MODEL ?? 'models/ggml-large-v3-turbo.b
  * restart required. The read is a few bytes off disk — cheap enough to do
  * per sentence.
  */
-function configuredSpeaker(root: string): Speaker {
+export function configuredSpeaker(root: string, makeSpeaker: (opts: SayOptions) => Speaker = saySpeaker): Speaker {
+  // The utterance in flight, so `stop` has something to reach.
+  //
+  // **This is the whole reason this object cannot be a bare closure over
+  // `speak`.** It was one, and the consequence was that `stop` did not exist on
+  // the production speaker at all — so `deps.speaker?.stop?.()` in the SSE close
+  // handler silently did nothing, and refreshing the page left the interviewer
+  // reading its reply to an empty room. That is the exact bug `Speaker.stop`
+  // was added to fix, and only the terminal path (which uses `saySpeaker`
+  // directly) ever actually had it.
+  let current: Speaker | null = null
+
   return {
     async speak(text: string): Promise<void> {
-      const { output } = readDeviceConfig(root)
-      await saySpeaker({ audioDevice: output }).speak(text)
+      const config = readDeviceConfig(root)
+      // Env beats the file, and the file beats the system default — resolved by
+      // the same function `cli.ts` uses, so one variable means one thing
+      // whichever front end is running.
+      const speaker = makeSpeaker({ audioDevice: config.output, ...resolveSpeech(config) })
+      current = speaker
+      try {
+        await speaker.speak(text)
+      } finally {
+        if (current === speaker) current = null
+      }
+    },
+    stop(): void {
+      current?.stop?.()
+      current = null
     },
   }
 }
@@ -1585,6 +1672,7 @@ function main(): void {
     transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
     tls,
     speaker: configuredSpeaker(root),
+    vague: VOICE_VAGUE,
   })
   // Still `127.0.0.1` only — TLS changes the scheme, never the reach. A live
   // microphone and a private story bank have no business on the network.

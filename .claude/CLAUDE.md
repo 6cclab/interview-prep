@@ -53,6 +53,36 @@ ask; help after one is complete and unrationed. What must never happen is the
 second leaking into the first, which is why `/coach` burns the session rather
 than trying to be careful.
 
+### Keeping your attempts
+
+`pnpm reset <problem>` archives `solution.ts` to
+`local/attempts/<slug>-<YYYY-MM-DD-HHMM>.ts` before restoring the stub, so
+re-drilling a problem no longer destroys the record of how you solved it last
+time. Reading an old attempt beside a new one is the only way to see whether the
+recall actually improved or you just got there again by the same slow route.
+
+Three rules, each with a reason:
+
+- **The filename carries the slug and never the pattern**, and the directory is
+  flat rather than mirroring `problems/<pattern>/`. Same rule as coaching
+  transcripts, same reason: the pattern is the answer, and this directory is meant
+  to be browsed between drills, so a path naming it would spoil every re-drill at
+  a glance.
+- **An attempt identical to the stub is not archived.** That is not history, it is
+  an empty file with a date on it.
+- **A failed archive never stops the reset.** The reset is what was asked for, and
+  refusing it because a copy could not be filed is the wrong trade.
+
+Archiving and resetting are two exported functions rather than one with a flag,
+and the write lives in the CLI. `resetProblem` is called by tests with a temp
+root; had it archived by default, those tests would have written into the real
+gitignored `local/attempts/`, which holds the only copy of anything there.
+
+The stamp is **local** time, unlike `voice/transcript.ts`'s UTC one — this
+directory is read by hand, so `voice/coached.ts`'s rule governs: a session at 9pm
+files under the day it felt like. The UTC version stamped an attempt saved at
+19:42 as `2342`, disagreeing with its own `coached.md` row.
+
 ## Layout
 
 - `problems/<pattern>/<problem>/` — `README.md` (prompt, **never names the
@@ -78,7 +108,8 @@ pnpm drill [problem|pattern]  # a full coding drill with NO model involved:
                         # rather than serving the next one up.
 pnpm test <problem>     # run one drill
 pnpm test               # everything, as a regression check
-pnpm reset <problem>    # restore stub.ts over solution.ts
+pnpm reset <problem>    # keep the attempt in local/attempts/, then restore stub.ts over
+                        # solution.ts. See "Keeping your attempts".
 pnpm domains            # domains the exercise set covers; `--for <company>` to tailor
 pnpm exercises          # audits every authored exercise against its track's contract:
                         # files present, meta.yaml fields, a README that does not name
@@ -102,6 +133,17 @@ pnpm mock:web           # React browser client (127.0.0.1) — builds, serves, o
                         # its own screen at its own URL (#/mock, #/design/<p>,
                         # #/coding/<p>, #/debug/<ex>, #/coach/<p>), so a reload
                         # comes back to the same one instead of the chooser.
+pnpm mock:web:vague     # ditto, but coding drills run clarify-first: the problem
+                        # statement is withheld (on the wire, not in the client) and
+                        # the interviewer opens with a deliberately underspecified
+                        # spoken framing, answering only what he explicitly asks.
+                        # A "Reveal the written statement" button gets it back at
+                        # any point. Off by default and meant to stay a choice: a
+                        # precise prompt is the right default for building recall of
+                        # a pattern, and this practises the opening instead, which is
+                        # a different exercise. VOICE_VAGUE=1 does the same thing for
+                        # any of the mock:web variants. See CLARIFY_FIRST in
+                        # voice/context.ts for the evidence behind it.
 pnpm mock:web:claude    # ditto, every track on the Claude subscription
 pnpm mock:web:ollama    # ditto, every track on the local ollama model
 pnpm mock:web:hybrid    # ditto, behavioural local and the rest on Claude
@@ -111,6 +153,9 @@ pnpm dev:web            # Vite dev server with HMR for voice/web (proxies /api)
 pnpm dev:web:api        # the node:http API/session server alone, for use alongside dev:web
 pnpm design:voice <p>   # spoken live design drill
 pnpm voice:devices      # list microphones and speakers for local/voice.json
+pnpm voice:voices       # list the English `say` voices by tier, marking the configured one;
+                        # `pnpm voice:voices "Ava (Premium)"` auditions one on a line the
+                        # interviewer would actually say. See "How human the interviewer sounds".
 pnpm typecheck          # covers voice/ and voice/web/ separately (different tsconfig)
 ```
 
@@ -357,6 +402,39 @@ This is **not** an LLM cleanup pass, deliberately. `speech.ts` keeps filler and
 false starts because `/mock` grades them, and a cleaner that smoothed a wrong
 answer would have the interviewer reply to a better answer than he gave.
 
+### How human the interviewer sounds
+
+TTS is macOS `say`, on the server rather than in the browser — which is what makes
+`Speaker.stop()` necessary at all, since a page that closes has no effect on a
+running subprocess.
+
+**The voice is the dominant term, and it is not a code setting.** macOS ships only
+the pre-neural legacy voices; Samantha dates from 2009 and no configuration makes
+her sound like a person. The Enhanced and Premium builds are a separate download —
+System Settings > Accessibility > Spoken Content > System Voice > Manage Voices —
+and until one is installed, `pnpm voice:voices` says so outright rather than
+printing a list that looks like a working set of choices.
+
+`local/voice.json` carries `voice` and `rate` alongside the devices, resolved by
+`resolveSpeech` as **env (`SAY_VOICE`, `SAY_RATE`), then the file, then the
+voice's own default**. One function rather than a `??` chain in each front end, so
+`SAY_VOICE` cannot come to mean one thing in a terminal drill and another in a
+browser one. A rate that is not a usable number is dropped rather than passed to
+`say -r`, which would fail the whole utterance: a bad rate costs the rate, not the
+drill.
+
+Set the rate a little low. An interviewer talking at screen-reader pace reads as a
+machine however good the voice is, and the pauses are where you get to think.
+
+**`configuredSpeaker` re-reads the file per sentence** so a change takes effect on
+the next sentence rather than the next restart — and it holds the utterance in
+flight, because it has to implement `stop()`. It once did not: it was a bare
+closure over `speak`, so `deps.speaker?.stop?.()` in the SSE close handler
+silently did nothing and refreshing the page left the interviewer reading its
+reply to an empty room. Only the terminal path, which uses `saySpeaker` directly,
+ever had a working one. The fix that bug was reported for was real; it just never
+reached the front end that had the bug.
+
 ### Which model the interviewer runs on
 
 Three backends, chosen **per track** and never by sniffing the environment.
@@ -401,6 +479,23 @@ silently running a 45-minute drill on the expensive path is the failure this
 arrangement exists to prevent. The old behaviour (any `ANTHROPIC_API_KEY` in the
 environment quietly outranking the subscription) was exactly that failure.
 
+**`OLLAMA_HOST` cannot yet point at the homelab gateway, because this client
+sends no credentials.** `ollama-gateway` (`~/projects/ollama-gateway`, built
+2026-08-11) fronts LXC 113 (the P40) and the in-cluster CPU deployment behind one
+address, routing each request to whichever box holds the requested model — which
+is what `OLLAMA_HOST` would otherwise have to be re-pointed by hand to do. But
+the gateway requires a bearer token on every route except `/healthz`, and both
+`fetch` call sites here (`preloadOllama` and `ollamaStream` in `voice/ollama.ts`)
+send only `content-type`. Pointing `OLLAMA_HOST` at it today returns **401 on
+every drill turn**, and `preloadOllama` reports rather than throws, so the first
+sign would be the drill itself failing.
+
+The fix, when it is wanted: read an `OLLAMA_API_KEY` and set
+`Authorization: Bearer` at both call sites when it is present. Absent must keep
+meaning unauthenticated, so pointing `OLLAMA_HOST` straight at a box goes on
+working unchanged — the gateway is an addition, not a migration, and a drill
+should not start depending on a service that can be down.
+
 **The Claude default is Sonnet, not Opus, and the reason is cost.** `Interviewer`
 owns the history and re-sends the whole transcript every turn, so a drill's spend
 grows quadratically in turns; on a $20 subscription that ends the practice before
@@ -423,12 +518,55 @@ deliberation states what the model thinks the answer is. `createThinkGate` in
 costs the streaming: roughly six seconds of silence before a reply starts. The
 client's `thinking` phase displays it, so it is a wait rather than a mystery.
 
-**The local model was picked by drilling it, not by size.** Same prompt, same
-transcript, two turns each: the 30B took 76.8s to reply and skipped straight to
-grading the answer instead of asking a question; `Qwen3.5:9b` took 13.4s then
-4.8s and asked one question per turn as instructed. Three times smaller and
-better at the only thing being asked of it, so it is the default. Note the
-capital Q — ollama tags are case-sensitive and `qwen3.5:9b` is a 404.
+**The local model is picked by drilling it, not by size, and 2026-08-10 retested
+that from scratch. `Qwen3.5:9b` survived.** Single-turn throughput on the P40 box
+(LXC 113) says the opposite and is the trap: **gpt-oss:20b 44.8 gen tok/s / 404
+prompt**, `qwen3:30b-a3b` 52.2 / 277, `Qwen3.5:9b` 30.2 / 315, `qwen3:14b`
+22.3 / 269, `granite4.1:30b` 12.0 / 118. On that table the 9B looks third-best.
+
+**The multi-turn test reverses it.** Four-turn behavioural mocks through the real
+`context.ts` rules — three gpt-oss runs, two Qwen:
+
+| | `Qwen3.5:9b` | `gpt-oss:20b` |
+|---|---|---|
+| Tokens per 4-turn mock | **121-126** | 437-596 |
+| Wall clock per turn | **~1.0s** | ~2.8s |
+| Leaked deliberation into `content` | never | **1 turn in 12** |
+| HTTP 500 mid-session | never | once, unexplained |
+
+**The tok/s win is a mirage: 1.5x faster per token, 4x the tokens, so ~2.6x
+slower per turn** — and the turn is what he waits through. Reasoning tokens bill
+to the same budget as the answer.
+
+**Nor is the channel separation reliable**, which was the only other reason to
+switch. gpt-oss is clean most of the time, then emits *"The user said hardest
+part was getting SRE aligned... Need to ask one question. I'll ask:"* as ordinary
+content. `createThinkGate` stays load-bearing; its ~6s is not recovered.
+
+**On question quality the 9B is better, not merely cheaper.** It engages with
+what was said — *"what was the specific mechanism you used to detect and
+automatically roll back when an error rate spiked during the canary window?"* —
+where gpt-oss reaches for generic *"what were the biggest challenges you faced
+during that migration?"* more often than not.
+
+`qwen3:30b-a3b` fails differently: `think: false` dumps 1,858 characters of
+"Okay, the user wants me to..." into `content` (`/no_think` does not help), and
+`think: true` burns all 400 tokens deliberating and returns an **empty**
+`content`. That is a mechanism for the old 76.8s "delivered a critique instead".
+
+**Standing lesson: throughput is the wrong metric.** Tokens-per-turn times
+seconds-per-token is the one he experiences, and a reasoning model loses on it
+while winning the benchmark. Note the capital Q — ollama tags are case-sensitive
+and `qwen3.5:9b` is a 404.
+
+**Climbing the dense Qwen ladder buys nothing on this hardware.** `qwen3:14b` is
+*slower* than the 9B (22.3 vs 30.2 tok/s) for no gain on the task. Generation is
+memory-bandwidth-bound, so on a fixed card more dense parameters is strictly
+slower.
+
+**Open prompt bug, not a model problem:** both models compound two questions with
+"and", which the voice-mode rules explicitly forbid, and a naive `?`-counter does
+not catch it.
 
 Two more measured facts drive that file's defaults: **cold model load was ~168s**
 (hence `preloadOllama` at startup and `keep_alive: '30m'`), and ollama's default

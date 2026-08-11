@@ -1,0 +1,9 @@
+pattern: fast-slow-pointers
+title: Middle of a List
+difficulty: warmup
+budget: none — warm-up tier, correctness only. See ".claude/CLAUDE.md" > "The warm-up tier".
+companies:
+  - name: unknown
+    confidence: low
+    source: a standard warm-up interview problem; no company-specific report
+    date: "general"
