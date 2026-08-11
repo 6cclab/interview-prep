@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Button } from 'brutalkit/button';
 import {
   Select,
@@ -177,6 +177,12 @@ interface TrackCardProps {
   offline: boolean;
   buttonLabel: string;
   onStart(problem: string): void;
+  /**
+   * Extra controls rendered below the problem row, before the failure note.
+   * Only the coding card uses this — the editing-mode picker — so it is
+   * optional rather than adding a track-specific prop to every other card.
+   */
+  extra?: ReactNode;
 }
 
 /** A track that is chosen along with a problem — design and coding both are. */
@@ -186,7 +192,8 @@ function ProblemTrackCard({
   list,
   offline,
   buttonLabel,
-  onStart
+  onStart,
+  extra
 }: TrackCardProps) {
   const [selected, setSelected] = useState('');
   // The list arrives asynchronously, so the default cannot be an initial value.
@@ -253,6 +260,7 @@ function ProblemTrackCard({
           {list.loading ? 'Loading…' : buttonLabel}
         </Button>
       </div>
+      {extra}
       {/* Only for a server that answered badly. The offline case is covered by
           the banner above, and claiming the behavioural drill still works would
           be untrue there. */}
@@ -362,6 +370,10 @@ export function Home({ onChoose }: Props) {
   const mock = useProblems('mock');
   const coach = useProblems('coach');
   const debug = useProblems('debug');
+  // Where the coding drill's answer gets written — see AGENTS.md, "Two editing
+  // modes". Defaults to the browser editor: it is the mode that most resembles
+  // an actual interview screen, so it is what a first-time visitor sees.
+  const [editor, setEditor] = useState<'browser' | 'own'>('browser');
 
   // Any list failing to reach the server means the server is not there.
   const offline =
@@ -413,15 +425,41 @@ export function Home({ onChoose }: Props) {
 
         <ProblemTrackCard
           title="Coding"
-          // Says where the code goes, because that is the one thing about this
-          // track a browser tab does not make obvious. There is no editor here
-          // on purpose: a real drill is written in a real editor against real
-          // types, and the suite is the objective standard either way.
-          blurb="Forty-five minutes, spoken, timed. You write the code in your own editor — open the problem's solution.ts, talk through it as you go, and press Run tests when you want the suite run. Hints are rationed; ask for one and you get exactly one rung."
+          blurb="Forty-five minutes, spoken, timed. Talk through it as you go, and press Run tests when you want the suite run. Hints are rationed; ask for one and you get exactly one rung."
           list={coding}
           offline={offline}
           buttonLabel="Coding drill"
-          onStart={(problem) => onChoose({ view: 'coding', problem })}
+          onStart={(problem) => onChoose({ view: 'coding', problem, editor })}
+          extra={
+            /*
+              Both options are named with their trade-off rather than just their
+              location, because the choice is not a preference — the modes test
+              different things. See AGENTS.md, "Two editing modes".
+            */
+            <fieldset className="home__editor-choice">
+              <legend>Where are you writing this?</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="editor"
+                  value="browser"
+                  checked={editor === 'browser'}
+                  onChange={() => setEditor('browser')}
+                />
+                Browser editor — an interview screen: highlighting and line numbers, no type checking
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="editor"
+                  value="own"
+                  checked={editor === 'own'}
+                  onChange={() => setEditor('own')}
+                />
+                My own editor — edit solution.ts yourself, with real types
+              </label>
+            </fieldset>
+          }
         />
 
         <ProblemTrackCard

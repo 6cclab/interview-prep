@@ -3,7 +3,7 @@ import type { Server } from 'node:http'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createVoiceServer, startVoiceServer } from './http-server'
+import { createVoiceServer, parseDrill, startVoiceServer } from './http-server'
 import { readSSE } from './test-helpers/sse'
 import { useCliBackend } from './test-helpers/backend-env'
 
@@ -392,5 +392,21 @@ describe('server-side TTS (deps.speaker)', () => {
     const entry = await readSSE(stream)
     expect(entry.event).toBe('entry')
     expect((entry.data as { text: string }).text).toBe('Tell me about a time you disagreed with a decision.')
+  })
+})
+
+describe('parseDrill — the editing mode', () => {
+  it('accepts an editor mode on a coding drill', () => {
+    expect(parseDrill({ track: 'coding', problem: 'valid-palindrome', editor: 'browser' }))
+      .toMatchObject({ editor: 'browser' })
+  })
+
+  it("defaults to the candidate's own editor when unspecified", () => {
+    expect(parseDrill({ track: 'coding', problem: 'valid-palindrome' }).editor).toBeUndefined()
+  })
+
+  it('rejects an unknown editor mode rather than coercing it', () => {
+    expect(() => parseDrill({ track: 'coding', problem: 'valid-palindrome', editor: 'vim' }))
+      .toThrow(/editor/i)
   })
 })

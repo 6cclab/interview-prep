@@ -176,6 +176,11 @@ export interface FinishOptions {
   }
   /** Which backend and model conducted it — see `formatSession`'s `transport`. */
   transport?: string
+  /**
+   * Coding track only — where the answer was written. See `formatSession`'s
+   * `editor`.
+   */
+  editor?: string
 }
 
 export interface FinishResult {
@@ -195,7 +200,7 @@ export function finishSession(session: Session, interviewer: Interviewer, opts: 
   const relPath = writeSession(
     opts.root,
     sessionPath(opts.track, opts.startedAt, opts.problem),
-    formatSession(session.entries(), opts.startedAt, opts.transport),
+    formatSession(session.entries(), opts.startedAt, opts.transport, opts.editor),
   )
 
   let storyLogWritten = false

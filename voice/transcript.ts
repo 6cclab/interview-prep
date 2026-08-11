@@ -137,10 +137,19 @@ function isoStamp(at: Date): string {
  *   a drill on 2026-08-10 read wrong — the interviewer conducted it in the third
  *   person — and nothing in the file said what had produced it, so the diagnosis
  *   rested on commit timestamps rather than on the artifact.
+ * @param editor Where a coding drill's answer was written — `browser` or `own`.
+ *   Optional for the same reason `transport` is: a design or behavioural drill
+ *   has no editing mode, and a header line claiming one would be a wrong line
+ *   rather than a missing one.
  */
-export function formatSession(entries: Entry[], startedAt: Date, transport?: string): string {
+export function formatSession(entries: Entry[], startedAt: Date, transport?: string, editor?: string): string {
   const lines = [`# Voice session — ${startedAt.toISOString()}`, '']
   if (transport) lines.push(`Interviewer: ${transport}`, '')
+  // Recorded beside the transport for the same reason: a transcript read days
+  // later has to say what produced it. The drill-log table is deliberately NOT
+  // where this goes — its columns are parsed by `/status` and the `#/history`
+  // screen, so adding one is a schema change with two readers to update.
+  if (editor) lines.push(`Editor: ${editor}`, '')
   for (const entry of entries) {
     const who = entry.speaker === 'interviewer' ? 'Interviewer' : 'Andre'
     lines.push(`**${who}** [${clock(entry.at)}]`, '', entry.text, '')

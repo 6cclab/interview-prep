@@ -215,6 +215,18 @@ export function parseDrill(body: Record<string, unknown> | null): Drill {
     }
     budgetMs = Math.round(raw) * 60_000
   }
+
+  // Coding track only: where the answer is written. Absent (or an empty/null
+  // value) means the candidate's own editor, the long-standing default — this
+  // does not coerce an unrecognised value, the same style as `competency`
+  // above, since this is the one place client input reaches a filesystem path.
+  const editor = body?.editor
+  if (editor !== undefined && editor !== null && editor !== '') {
+    if (track !== 'coding' || (editor !== 'browser' && editor !== 'own')) {
+      throw new Error(`Invalid editor mode: ${String(editor)}`)
+    }
+    return { track, problem, budgetMs, editor }
+  }
   return { track, problem, budgetMs }
 }
 
@@ -442,6 +454,10 @@ function finishOptions(deps: VoiceServerDeps, stored: StoredSession, elapsedMs: 
     track: stored.drill.track,
     problem: stored.drill.problem,
     startedAt: stored.startedAt,
+    // Coding track only — a design or behavioural drill has no editing mode,
+    // and `formatSession` treats an absent value as "omit the line" rather
+    // than guessing.
+    editor: stored.drill.track === 'coding' ? stored.drill.editor : undefined,
     // Both drilling tracks write a row, into the same table, because `/status`
     // and the history screen read exactly one log. `debug.md` says to set
     // `Pattern` to `debugging`, which is why that column is a plain string here
