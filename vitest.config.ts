@@ -15,6 +15,7 @@ export default defineConfig({
       'scripts/**/*.test.ts',
       'test-utils/**/*.test.ts',
       'voice/**/*.test.ts',
+      'voice/**/*.test.tsx',
     ],
     testTimeout: 10_000,
   },
