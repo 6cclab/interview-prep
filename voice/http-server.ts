@@ -22,6 +22,7 @@ import {
   type Track,
 } from './context'
 import { findCodingProblem, listCodingProblems, problemDir } from './problems'
+import { readSolution, writeSolution, versionOf } from './solution-file'
 import { findCompetency, listCompetencies } from './competencies'
 import { findExercise, listExercises } from './exercises'
 import { runDebugTests, debugVerdictCue, type DebugVerdict } from './debug-tests'
@@ -705,6 +706,62 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // while the old one is still writing.
       const ended = endAndPersist(deps, store, entryClocks, closing, id) !== null
       sendJson(res, ended ? 200 : 409, ended ? { ended } : { ended, error: 'that session is already ending' })
+      return
+    }
+
+    // The coding track's working file. Slug-only in and out: a problem's path
+    // is `problems/<pattern>/<slug>` and the pattern is the answer, so it never
+    // crosses this boundary. See `stripPatternPaths` for the same rule applied
+    // to anything derived from test output.
+    const solutionRoute = /^\/api\/coding\/([^/]+)\/solution$/.exec(url.pathname)
+    if (solutionRoute && (req.method === 'GET' || req.method === 'PUT')) {
+      const slug = solutionRoute[1]!
+      if (!PROBLEM_SLUG.test(slug)) {
+        sendJson(res, 400, { error: 'Invalid problem name.' })
+        return
+      }
+
+      if (req.method === 'GET') {
+        const file = readSolution(deps.root, slug)
+        if (file === null) {
+          sendJson(res, 404, { error: 'Unknown problem.' })
+          return
+        }
+        sendJson(res, 200, file)
+        return
+      }
+
+      let body: Record<string, unknown> | null
+      try {
+        body = await readJsonBody(req)
+      } catch (error) {
+        sendJson(res, 400, { error: errorMessage(error) })
+        return
+      }
+      const text = body?.text
+      const version = body?.version
+      if (typeof text !== 'string' || typeof version !== 'string') {
+        sendJson(res, 400, { error: 'A save needs `text` and `version`.' })
+        return
+      }
+
+      const outcome = writeSolution(deps.root, slug, text, version)
+      if (outcome === 'missing') {
+        sendJson(res, 404, { error: 'Unknown problem.' })
+        return
+      }
+      if (outcome === 'stale') {
+        // 409, the same shape `POST /end` uses for its non-re-entrancy latch.
+        // The client keeps the typed buffer; it must never resolve this by
+        // discarding what the candidate wrote.
+        const current = readSolution(deps.root, slug)!
+        sendJson(res, 409, {
+          error: 'solution.ts changed on disk since you opened it.',
+          version: current.version,
+        })
+        return
+      }
+      sendJson(res, 200, { version: versionOf(text) })
       return
     }
 

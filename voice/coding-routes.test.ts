@@ -1338,6 +1338,72 @@ describe('coach track', () => {
  * interview. Asserted through the transport, because the prompt is the only
  * place it can be observed.
  */
+/**
+ * The coding track's working file, over HTTP.
+ *
+ * Same discipline as every other coding route: a bare slug in, and nothing
+ * that names `problems/<pattern>/` in a response body — this file lives at
+ * exactly that path, so a GET or PUT is the most direct way this discipline
+ * could leak.
+ */
+describe('the solution routes', () => {
+  it('never puts the resolved pattern path in a GET body', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`)
+    expect(res.status).toBe(200)
+    const body = await res.text()
+    expect(body).not.toContain('problems/')
+    expect(body).not.toContain(PATTERN)
+  })
+
+  it('rejects a slug that is not a plain slug', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/coding/..%2F..%2Fsolutions/solution`)
+    expect([400, 404]).toContain(res.status)
+  })
+
+  it('409s a save carrying a stale version, without changing the file', async () => {
+    const { port } = await listen(baseDeps())
+    const before = (await (await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`)).json()) as {
+      text: string
+      version: string
+    }
+    const res = await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'const x = 1\n', version: 'deadbeefdeadbeef' }),
+    })
+    expect(res.status).toBe(409)
+    const after = (await (await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`)).json()) as {
+      text: string
+    }
+    expect(after.text).toBe(before.text)
+  })
+
+  it('writes when the version matches, and returns the new version', async () => {
+    const { port } = await listen(baseDeps())
+    const before = (await (await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`)).json()) as {
+      version: string
+    }
+    const res = await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'const x = 1\n', version: before.version }),
+    })
+    expect(res.status).toBe(200)
+    const after = (await (await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`)).json()) as {
+      text: string
+    }
+    expect(after.text).toBe('const x = 1\n')
+  })
+
+  it('404s a slug that names no coding problem', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/coding/no-such-drill/solution`)
+    expect(res.status).toBe(404)
+  })
+})
+
 describe('coach sees the working file', () => {
   /** Opening the SSE stream is what drives the interviewer's first turn. */
   async function driveFirstTurn(port: number): Promise<void> {
