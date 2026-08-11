@@ -29,6 +29,6 @@ make, and it is not a failure — log it and move on.
 
 ## Complexity before confirmation
 
-When the tests go green, ask for his time and space complexity **before**
-confirming he is done. Getting the right answer while misreading its cost is
+When the tests go green, ask for your time and space complexity **before**
+confirming you are done. Getting the right answer while misreading its cost is
 the exact failure mode these drills exist to catch.

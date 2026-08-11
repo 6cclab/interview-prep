@@ -9,6 +9,51 @@ brute-force question, rationed hints, cost-vs-correctness verdict, logged
 attempt — with no key, no network and no model. A model adds the conversational
 tracks; it is not the price of entry. See [Without a model](#without-a-model).
 
+## What you need
+
+| | |
+|---|---|
+| Node + pnpm | `pnpm@10.28.0` (the `packageManager` field pins it) |
+| ffmpeg | required by every spoken track — transcoding and playback |
+| whisper.cpp | `whisper-cli` plus a ggml model; `WHISPER_BINARY` and `WHISPER_MODEL` override the paths |
+| A TTS engine | macOS `say`, or `piper` on any platform. `SAY_ENGINE` chooses; the default follows your OS |
+| A model backend | one of: the `claude` CLI logged in, an Anthropic API key, an OpenAI-compatible endpoint, or ollama |
+
+**Platform support is not uniform, and it is worth knowing which half you are in:**
+
+- **The browser tracks** (`pnpm mock:web`) run anywhere. Audio is captured by the
+  browser and transcoded server-side by ffmpeg with no platform-specific flags.
+- **The terminal tracks** (`pnpm mock:voice`, `pnpm design:voice`) are macOS-only.
+  They capture audio through ffmpeg's `avfoundation`, which does not exist
+  elsewhere. There is no fallback and they will fail immediately on Linux.
+
+Use Chrome for the browser tracks. Firefox works; Safari and Arc do not without
+HTTPS — see the browser table in `AGENTS.md`.
+
+### Choosing a backend
+
+There is no default. Run one of:
+
+```bash
+pnpm mock:web:claude   # the claude CLI, spending subscription quota
+pnpm mock:web:openai   # any OpenAI-compatible endpoint (OPENAI_API_KEY, OPENAI_BASE_URL)
+pnpm mock:web:ollama   # a local model, spending nothing
+pnpm mock:web:hybrid   # behavioural local, the rest on Claude
+```
+
+`pnpm mock:web` with nothing set fails and prints this list. That is deliberate:
+a transport you did not choose is one you discover mid-drill.
+
+**piper is unverified on this machine — no audio has been produced by it.** The
+flags the code builds (`--output_raw`, `--model`, `--length_scale`) match what a
+real `piper --help` accepts, and a real voice model's config declares
+`"sample_rate": 22050`, matching what the code passes to `ffplay`. But
+`piper-tts` on Python 3.14 has a broken espeak data path — it looks for
+`site-packages/piper//phontab` while the data ships in
+`piper/espeak-ng-data/`, and `ESPEAK_DATA_PATH` is ignored — so an end-to-end
+run was never achieved on this machine. If you are on Linux, you are its first
+real test; report back what you find.
+
 ## Setup
 
 ```bash
@@ -84,15 +129,20 @@ opinion you cannot argue with would teach the wrong thing.
 
 The core is plain TypeScript on Node — no platform assumptions, no network.
 
-**The spoken tracks are macOS-only today.** `voice/speech.ts` shells out to `say`
-for text-to-speech, `voice/audio.ts` records through ffmpeg's `avfoundation`, and
-`voice/devices.ts` enumerates devices through both. Porting them means one audio
-backend abstraction (record, speak, list devices) with an ALSA/PulseAudio and
-`espeak`/`piper` implementation behind it. Nothing else in the repo cares.
+**The browser tracks (`pnpm mock:web`) run anywhere.** Text-to-speech goes
+through `voice/speech.ts`'s `SAY_ENGINE` switch — macOS `say`, or `piper`
+elsewhere — and `voice/audio.ts` transcodes browser-captured audio with ffmpeg,
+which carries no platform-specific flags on that path.
 
-Model backends, when you do want one, are per track and explicit — a Claude
-subscription, the Anthropic API, or a local ollama model. See
-`AGENTS.md` under "Which model the interviewer runs on".
+**The terminal tracks (`pnpm mock:voice`, `pnpm design:voice`) are macOS-only
+today.** They record through ffmpeg's `avfoundation`, which does not exist
+elsewhere, and `voice/devices.ts` enumerates devices through it. There is no
+fallback and they will fail immediately on Linux.
+
+Model backends, when you do want one, are per track and explicit — the `claude`
+CLI, the Anthropic API, an OpenAI-compatible endpoint, or a local ollama model.
+There is no default. See `AGENTS.md` under "Which model the interviewer runs
+on".
 
 ## How this differs from grinding leetcode
 

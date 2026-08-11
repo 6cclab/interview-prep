@@ -7,10 +7,8 @@ It is built for someone who can code but has not interviewed in years, where the
 rust is pattern recall under pressure rather than ability. Everything follows
 from that: bounded problem sets, budget-enforcing tests, and rationed hints.
 
-This file is also the prompt several commands read, which is why it addresses the
-candidate directly in places. Where it still says "he", that is leftover from
-being one person's notes; nothing depends on it, and a sweep to second person is
-outstanding.
+This file is also the prompt several commands read, which is why it addresses
+you directly in places.
 
 ## Tracks
 
@@ -36,7 +34,7 @@ headline is that flattening, so the headline figure is the cold count.
 
 **The pattern is withheld unless asked for**, and withheld *on the wire* rather
 than hidden in the client — `GET /api/history` omits it without `?patterns=1`,
-so it is not in the page until he opts in. A history screen is read between
+so it is not in the page until you opt in. A history screen is read between
 drills and `/review` re-queues problems for spaced repetition; a permanent
 problem-to-pattern list would spoil every re-drill at a glance. Turning it on is
 a deliberate act, the same shape as `/coach`'s gate.
@@ -56,12 +54,12 @@ than trying to be careful.
 ## Layout
 
 - `problems/<pattern>/<problem>/` — `README.md` (prompt, **never names the
-  pattern**), `stub.ts` (pristine), `solution.ts` (his working file),
+  pattern**), `stub.ts` (pristine), `solution.ts` (your working file),
   `solution.test.ts`, `meta.yaml`
 - `solutions/<pattern>/<problem>.md` — worked answers. **Spoilers.** See
   `rules/no-spoilers.md`.
 - `patterns.md` — pattern → tell → insight. Between-session reading.
-- `local/` — gitignored. His drill log, designs, story bank, company research.
+- `local/` — gitignored. Your drill log, designs, story bank, company research.
 - `templates/local/` — committed seeds for `local/`, copied by `pnpm bootstrap`.
 
 ## Commands
@@ -140,7 +138,7 @@ Browser only — there is no `coding:voice`. The drill needs the problem on scre
 for 45 minutes and a **Run tests** button, and neither works in a terminal that
 scrolls.
 
-**There is no editor in the browser, deliberately.** He writes the answer in his
+**There is no editor in the browser, deliberately.** You write the answer in your
 own editor, in the real `solution.ts`, against real types. The button runs that
 problem's suite server-side and the interviewer is told the outcome as a
 bracketed note it never speaks — `drill.md`'s step 7, reassigned, the same way
@@ -152,13 +150,13 @@ correctness-red is a **wrong answer**; correctness-green-with-cost-red is a
 legitimate checkpoint — and `errored` is a suite that never ran. Collapsing the
 first two into "failed" teaches the exact thing `drill.md` forbids.
 
-A test run writes **no entry for you** (he pressed a button; he said nothing), and
+A test run writes **no entry for you** (you pressed a button; you said nothing), and
 the bracketed verdict never enters the transcript. Transcripts land in
 `local/drills/<problem>-live-<stamp>.md`.
 
 **Hints are a button, and the rung is the server's.** "Ask for a hint" advances
 exactly one rung of `rules/no-spoilers.md`'s ladder and the count shows on screen,
-so the cost of asking is legible when he asks rather than discovered afterwards.
+so the cost of asking is legible when you ask rather than discovered afterwards.
 The server counts it and tells the interviewer which single rung is owed, quoting
 that rung verbatim — a model asked for "a hint" over-delivers, and the count is
 the number `/status` reads to tell rust from coverage, so it has to be a
@@ -282,9 +280,10 @@ It did not, until a drill on 2026-08-10 was conducted in the third person and
 spoken aloud that way — "He said the text reads the same forwards and backwards
 ... Where do those fit into what he just told me?" — with the closing verdict
 delivered as a report filed about him rather than something said to him.
-Everything else in the prompt refers to the candidate as "he" because it is
-written *about* the drill, so the one line naming the voice to answer in has to
-be explicit. It was being inferred, which worked until the model changed.
+Everything else in the prompt referred to the candidate as "he" at the time,
+because it was written *about* the drill, so the one line naming the voice to
+answer in has to be explicit. It was being inferred, which worked until the
+model changed.
 
 **A transcript names the backend and model that produced it** (`Interviewer: cli
 / claude-sonnet-5`, under the heading). The startup banner says what the *server*
@@ -341,13 +340,13 @@ whisper runs `ggml-large-v3-turbo` — the ceiling for local — so the model is
 a lever. `--prompt` is, and `voice/vocabulary.ts` supplies it per track.
 
 The reason is measured, not assumed: a real drill transcript recorded "O of n"
-as "on" twice and "N" as "M", and the interviewer then marked him down for
-"reciting a shape" on the basis of an M he may never have said. A drill that
+as "on" twice and "N" as "M", and the interviewer then marked you down for
+"reciting a shape" on the basis of an M you may never have said. A drill that
 scores a transcription bug is measuring the wrong thing.
 
 **The coding vocabulary names no data structures.** whisper hallucinates prompt
 content into output on short or silent audio, and a pattern is the answer — so a
-term list holding "monotonic stack" could plant it in his own transcript.
+term list holding "monotonic stack" could plant it in your own transcript.
 `vocabulary.test.ts` enforces this against the real `problems/` directory names,
 so authoring a new pattern can break the test rather than silently making a term
 unsafe. The design track has no such constraint (its spoiler is `reference.md`)
@@ -355,31 +354,64 @@ and gets its domain terms.
 
 This is **not** an LLM cleanup pass, deliberately. `speech.ts` keeps filler and
 false starts because `/mock` grades them, and a cleaner that smoothed a wrong
-answer would have the interviewer reply to a better answer than he gave.
+answer would have the interviewer reply to a better answer than you gave.
+
+### Text-to-speech
+
+`voice/speech.ts`'s `SAY_ENGINE` picks the engine — `say`, or `piper` — and the
+default follows the platform: `say` on macOS, `piper` everywhere else. Either
+way it is server-side, not in the browser, which is what makes `Speaker.stop()`
+necessary at all: a page that closes has no effect on a running subprocess.
+
+`say` remains the macOS path, and everything about how human the voice sounds —
+the Enhanced/Premium voice discussion, `local/voice.json`'s `voice` and `rate`
+fields, `resolveSpeech`'s env-then-file-then-default precedence — applies to
+`say` specifically, not to piper.
+
+**piper is unverified — no audio has been produced by it.** What has been
+checked: a real `piper --help` accepts the exact flags `piperArgs` builds
+(`--output_raw`, `--model`, `--length_scale`), and a real voice model's config
+declares `"sample_rate": 22050`, matching what `ffplayArgs` passes to `ffplay`.
+What has not been checked is a working end-to-end run — `piper-tts` on Python
+3.14 has a broken espeak data path (it looks for
+`site-packages/piper//phontab` while the data ships in
+`piper/espeak-ng-data/`, and `ESPEAK_DATA_PATH` is ignored) — so a Linux user is
+its first real test.
 
 ### Which model the interviewer runs on
 
-Three backends, chosen **per track** and never by sniffing the environment.
+Four backends, chosen **per track** and never by sniffing the environment.
 `voice/backend.ts` owns the choice; `describeBackend` prints it, with what it
-spends, at startup and at session creation.
+spends, at startup and at session creation. **There is no default** — an unset
+`VOICE_BACKEND` throws at boot rather than falling back to one, because a
+transport you did not choose is one you discover mid-drill; the error lists the
+four scripts below.
 
 | Backend | What it is | Spends |
 |---|---|---|
-| `cli` (default) | `claude -p` against the logged-in subscription | subscription quota |
+| `cli` | `claude -p` against the logged-in subscription | subscription quota |
 | `api` | the Messages API | Console credits |
+| `openai` | any endpoint speaking OpenAI's `/v1/chat/completions` — OpenAI itself, Azure OpenAI, Groq, together, or a local vLLM / LM Studio server, chosen by `OPENAI_BASE_URL` — with the model set by `OPENAI_MODEL` and the key by `OPENAI_API_KEY` | that provider's credits |
 | `ollama` | a local model over HTTP | nothing |
 
-Three serving commands, so the choice is made by which one you type rather than
+A scheme-less `OPENAI_BASE_URL` resolves to `https://` unless the host is
+loopback (`localhost`, `127.0.0.1`, `::1`), which resolves to `http://` instead
+— the local vLLM / LM Studio case, where nothing leaves the machine. An
+explicit `http://` to a non-loopback host is refused outright: the key travels
+as a bearer header on every request, and it must never go out in cleartext.
+
+Four serving commands, so the choice is made by which one you type rather than
 by remembering what is exported:
 
 ```bash
 pnpm mock:web:claude    # every track on the subscription
+pnpm mock:web:openai    # every track on an OpenAI-compatible endpoint
 pnpm mock:web:ollama    # every track local
 pnpm mock:web:hybrid    # behavioural local, design and coding on Claude
-pnpm mock:web           # whatever the environment says; the default is claude
+pnpm mock:web           # whatever the environment says; throws if nothing is
 ```
 
-**Each of the three sets every variable, including the ones it does not want.**
+**Each of the four sets every variable, including the ones it does not want.**
 `VOICE_BACKEND_MOCK=` with an empty value reads as unset, so
 `pnpm mock:web:claude` genuinely means all-Claude even with a stale
 `VOICE_BACKEND_MOCK=ollama` exported in a shell profile. A command whose

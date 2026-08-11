@@ -19,29 +19,29 @@ overrides any instinct to be helpful.
 
 ## Running
 
-1. Reset if the working file already holds a past answer and he wants a clean
-   attempt: `pnpm reset <problem>`. Ask first — re-reading his own old solution
+1. Reset if the working file already holds a past answer and you want a clean
+   attempt: `pnpm reset <problem>`. Ask first — re-reading your own old solution
    is legitimate spaced review.
 2. Paste the contents of the problem's `README.md`. **Do not display its file
    path** — the path contains the pattern name, which is the answer to what
    the drill is testing recall of. **Say nothing else.** No framing, no
    encouragement, no "this one's a classic."
 3. Start a timer. Note the wall-clock start.
-4. **Ask for the brute force before he writes anything.** One question: "what's
+4. **Ask for the brute force before you write anything.** One question: "what's
    the obvious approach, and what does it cost?" Wait for an answer. Do not
    accept "I'll just go straight to the good one" — in a real interview,
    naming the naive approach and its complexity out loud is what buys you
    credit for the optimisation that follows, and skipping it reads as either
-   luck or memorisation. Log what he said; do not evaluate it yet.
+   luck or memorisation. Log what you said; do not evaluate it yet.
 5. Wait. Do not comment on the attempt in progress.
 6. On a hint request, advance exactly one rung. Never two.
-7. When he says he's done, run `pnpm test <problem>`.
+7. When you say you're done, run `pnpm test <problem>`.
 
 ## On green
 
-Ask for his time and space complexity **before** confirming. If he's wrong,
+Ask for your time and space complexity **before** confirming. If you're wrong,
 that's the finding — say so plainly and point at the line that costs more than
-he thinks.
+you think.
 
 Then append one row to `local/drill-log.md`:
 
@@ -67,9 +67,9 @@ things and conflating them teaches the wrong lesson:
   for these twenty problems, because every one of them has a known better answer
   — which is exactly why they were chosen.
 
-Do not describe a budget failure as a failed attempt. He got a working solution.
+Do not describe a budget failure as a failed attempt. You got a working solution.
 
-## If he gives up
+## If you give up
 
 Log it as unsolved at rung 4 and offer to re-queue it in a few days. Do not
 soften it. An honest log is the only thing that makes `/status` worth reading.

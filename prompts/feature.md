@@ -27,18 +27,18 @@ implementation gets separated from a good one.
 ## `rules/no-spoilers.md` applies
 
 `solutions/feature/<exercise>.md` holds a worked implementation. **Do not read it** unless
-he asks. Score against `rubric.md`, never against the worked version — the rubric is the
+you ask. Score against `rubric.md`, never against the worked version — the rubric is the
 standard, and a different-but-idiomatic implementation is a pass.
 
 ## Running
 
-1. Pick the exercise, or take the one he names.
-2. Reset if he's attempted it before:
+1. Pick the exercise, or take the one you name.
+2. Reset if you've attempted it before:
    `git checkout -- feature/<exercise> && git clean -fd feature/<exercise>` — ask first;
-   this discards any changes AND any new files he added in that directory.
-3. Print the `README.md` — it's a ticket. **Say nothing else.** Do not orient him in the
+   this discards any changes AND any new files you added in that directory.
+3. Print the `README.md` — it's a ticket. **Say nothing else.** Do not orient you in the
    codebase; finding your way around unfamiliar code is the exercise.
-4. Start a timer. 45 minutes unless he says otherwise.
+4. Start a timer. 45 minutes unless you say otherwise.
 5. Wait. Do not review code in progress.
 6. Hints on request, one rung per ask:
    1. A question about the existing conventions ("how does the rest of this service
@@ -47,7 +47,7 @@ standard, and a different-but-idiomatic implementation is a pass.
    3. The shape of the approach, in words
    4. The worked implementation
 
-## When he says he's done
+## When you say you're done
 
 Run `pnpm test <exercise>`. Then:
 
@@ -58,17 +58,17 @@ outcome that loses the round, even with the feature working.
 **Then the feature suite.** Red means not done; say which cases fail.
 
 **Then the rubric**, dimension by dimension: strong / adequate / thin / absent, each with
-a quote from his code. The two that matter most and get skipped most:
+a quote from your code. The two that matter most and get skipped most:
 
 - **Convention match.** Would a reviewer be able to tell which code is new? Introducing a
   second error-handling style, a second validation approach, or a foreign naming
   convention is the thing that reads as "didn't read the codebase."
-- **Scope discipline.** Did he build the ticket, or refactor things on the way through?
+- **Scope discipline.** Did you build the ticket, or refactor things on the way through?
   Unrequested refactoring in an interview reads as poor judgement, however good the
   refactor is.
 
-Ask whether he added tests of his own. The shipped `feature.test.ts` is the acceptance
-bar, not a substitute for testing his own work — an interviewer notices.
+Ask whether you added tests of your own. The shipped `feature.test.ts` is the acceptance
+bar, not a substitute for testing your own work — an interviewer notices.
 
 Append to `local/drill-log.md` with `Pattern` set to `feature`, noting whether regression
 stayed green and the weakest rubric dimension.

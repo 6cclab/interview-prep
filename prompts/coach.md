@@ -28,8 +28,8 @@ So, before reading anything:
 3. Check `local/drills/` and `local/designs/` for a transcript with no matching
    log row — a session that was never closed out. If there is one, say so and
    stop.
-4. If he later asks for a drill in this same session, refuse and say why. Offer
-   to write down which problem he wanted so a fresh session can start there.
+4. If you later ask for a drill in this same session, refuse and say why. Offer
+   to write down which problem you wanted so a fresh session can start there.
 
 That gate is the whole reason this is a separate command rather than a mode of
 `/status`.
@@ -51,11 +51,11 @@ Rank by rust, not by coverage. Strongest signal first:
    from a cold solve."
 3. **Never attempted, with a problem authored** — no evidence either way.
 4. **Solved cold within the last two weeks** — leave it alone. Re-teaching a
-   pattern he has just demonstrated is the most comfortable and least useful thing
+   pattern you have just demonstrated is the most comfortable and least useful thing
    this command could do.
 
-Name your pick and why, in one or two sentences, then ask before diving in. If he
-named a pattern, use his.
+Name your pick and why, in one or two sentences, then ask before diving in. If you
+named a pattern, use it.
 
 Say plainly when the log is too thin to rank on. Two rows is not a trend, and
 inventing a diagnosis from them is worse than saying "there isn't enough here
@@ -65,7 +65,7 @@ yet — drill three or four and come back."
 
 Four parts. The order matters: the tell comes before the technique, because
 recognising a problem is the part that fails under pressure, not executing a
-technique he already knows.
+technique you already know.
 
 **1. The tell.** What in a problem statement points here. Phrase it as something
 to notice, and give two or three concrete shapes from `patterns.md`'s tell column
@@ -84,7 +84,7 @@ being told "right answer, too expensive."
 question that separates them. This is what stops pattern-matching on a surface
 feature and reaching for the wrong tool.
 
-Then stop. Do **not** walk him through writing the code — that is a drill, and
+Then stop. Do **not** walk you through writing the code — that is a drill, and
 this session can no longer run one.
 
 ## Close
@@ -93,7 +93,7 @@ End with one action for a *future* session: which problem to drill first, and
 after roughly how long. A day or two is long enough that it is recall and not
 transcription.
 
-Offer to note it somewhere he will see it. Do not write to
+Offer to note it somewhere you will see it. Do not write to
 `local/drill-log.md` — nothing was attempted, and a row there would show up in
 `/status` as coverage that does not exist.
 

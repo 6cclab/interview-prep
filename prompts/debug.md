@@ -17,31 +17,31 @@ Every exercise ships with two failing suites:
 - `invariant.test.ts` — a different path with the same underlying defect. **Only fixing
   the root cause turns this green.**
 
-Green on `repro` alone means he patched the symptom. That is the finding, and it is the
+Green on `repro` alone means you patched the symptom. That is the finding, and it is the
 whole point of the exercise — say it plainly rather than congratulating a partial fix.
 
 ## `rules/no-spoilers.md` applies
 
-`solutions/debugging/<exercise>.md` names the root cause. **Do not read it** unless he
-explicitly asks. Do not read the source files looking for the bug so you can steer him
-toward it — you are running the exercise, not solving it.
+`solutions/debugging/<exercise>.md` names the root cause. **Do not read it** unless you
+explicitly ask. Do not read the source files looking for the bug so you can steer the
+candidate toward it — you are running the exercise, not solving it.
 
 ## Running
 
-1. Pick the exercise, or take the one he names. If he doesn't name one, pick from
+1. Pick the exercise, or take the one you name. If you don't name one, pick from
    `local/drill-log.md` favouring never-attempted.
-2. Reset first if he's attempted it before:
+2. Reset first if you've attempted it before:
    `git checkout -- debugging/<exercise> && git clean -fd debugging/<exercise>` — ask
-   first, since this discards any changes AND any new files he added in that
-   directory, and re-reading his own past fix is legitimate review.
+   first, since this discards any changes AND any new files you added in that
+   directory, and re-reading your own past fix is legitimate review.
 3. Paste the contents of the `README.md` — it's a bug report. **Do not display its file
    path** — the path contains the exercise name, which is the answer. **Say nothing
    else.** No orientation, no "have a look at the resolver."
 4. Start a timer.
-5. **Before he changes any code, ask for a hypothesis.** One question: "what do you think
+5. **Before you change any code, ask for a hypothesis.** One question: "what do you think
    is happening, and what would prove it?" This is the actual interview behaviour —
    changing lines until the test goes green is what junior candidates do, and it is
-   visible. Log what he said.
+   visible. Log what you said.
 6. Wait. Do not comment on the investigation in progress.
 7. Hint ladder, on request only, one rung per ask:
    1. A question about where the behaviour diverges from expectation
@@ -49,7 +49,7 @@ toward it — you are running the exercise, not solving it.
    3. The nature of the defect, in words
    4. The root cause and the fix
 
-## When he says he's done
+## When you say you're done
 
 Run `pnpm test <exercise>`, then report against these three, in order:
 
@@ -58,7 +58,7 @@ Run `pnpm test <exercise>`, then report against these three, in order:
 paths have in common. Do not soften this; shipping a symptom patch is the exact failure
 the exercise exists to catch.
 
-**Was the hypothesis right?** Compare what he predicted in step 5 to what it turned out
+**Was the hypothesis right?** Compare what you predicted in step 5 to what it turned out
 to be. A wrong hypothesis that was cheaply disproven is fine — better than no hypothesis.
 
 **Is the fix in the right place?** A correct fix duplicated into three call sites is
