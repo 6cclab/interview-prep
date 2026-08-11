@@ -195,11 +195,27 @@ Browser only — there is no `coding:voice`. The drill needs the problem on scre
 for 45 minutes and a **Run tests** button, and neither works in a terminal that
 scrolls.
 
-**There is no editor in the browser, deliberately.** You write the answer in your
-own editor, in the real `solution.ts`, against real types. The button runs that
-problem's suite server-side and the interviewer is told the outcome as a
-bracketed note it never speaks — `drill.md`'s step 7, reassigned, the same way
-the design track's time check is.
+**The drill asks which editor you want before it starts, and the choice is
+recorded, not just taken.** `browser` writes to `solution.ts` over HTTP and
+edits it in a CodeMirror pane on screen — syntax highlighting, line numbers,
+bracket matching, undo, and deliberately no TypeScript language service, no
+autocomplete, no inline diagnostics, no go-to-definition. The absence is the
+feature, not an unfinished job: a real coding screen (CoderPad, HackerRank,
+CodeSignal) gives you a plain document, so drilling with a full IDE rehearses
+an advantage you will not have on the day. `own` is the original mode and
+still the better one for learning a pattern cold: you write the answer in your
+own editor, in the real `solution.ts`, against real types, with everything
+your normal setup gives you. Neither mode changes what happens next — the
+button runs that problem's suite server-side and the interviewer is told the
+outcome as a bracketed note it never speaks — `drill.md`'s step 7, reassigned,
+the same way the design track's time check is.
+
+The mode is named in the transcript header (`Editor: browser` or
+`Editor: own`), because a transcript read later has to say what produced it,
+the same reasoning as the backend-and-model line below. It is deliberately
+**not** a `local/drill-log.md` column: that table's columns are parsed by both
+`/status` and `#/history`, and a schema change with two readers is a bigger
+commitment than recording which editor you happened to use that day.
 
 The verdict distinguishes three reds and the distinction is the whole point:
 correctness-red is a **wrong answer**; correctness-green-with-cost-red is a

@@ -90,6 +90,12 @@ check, not a health check.
 With Claude Code open here, `/drill` does the same thing conversationally and
 `/status` says where you stand.
 
+The spoken coding drill (`pnpm mock:web`) asks which editor to use before it
+starts. The browser one is deliberately limited — highlighting and line
+numbers, no autocomplete or diagnostics, closer to a real interview screen
+than an IDE — while your own editor stays the better choice for learning a
+pattern cold. See `AGENTS.md`'s "spoken coding track" for why.
+
 ## Without a model
 
 Everything below runs on Node and pnpm alone:
