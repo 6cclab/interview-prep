@@ -36,7 +36,6 @@ import {
   checkSpeechEngine,
   resolveSpeaker,
   whisperTranscriber,
-  type SayOptions,
   type Speaker,
   type Transcriber,
 } from './speech'
@@ -1482,35 +1481,12 @@ const WHISPER_MODEL = process.env.WHISPER_MODEL ?? 'models/ggml-large-v3-turbo.b
  * restart required. The read is a few bytes off disk — cheap enough to do
  * per sentence.
  *
- * `makeSpeaker` defaults to `resolveSpeaker` (platform/`SAY_ENGINE`-driven)
- * and is injectable so `voice/configured-speaker.test.ts` can assert the
- * re-read-per-sentence behaviour and `stop()` without spawning a real engine.
- *
- * `stop()` tracks the speaker for the utterance currently in flight and
- * forwards to it. Once this was a bare closure over `speak` with nothing to
- * stop, so `deps.speaker?.stop?.()` in the SSE close handler silently did
- * nothing and a page refresh mid-turn left the interviewer talking to an
- * empty room.
  */
-export function configuredSpeaker(
-  root: string,
-  makeSpeaker: (opts: SayOptions) => Speaker = resolveSpeaker,
-): Speaker {
-  let current: Speaker | null = null
+function configuredSpeaker(root: string): Speaker {
   return {
     async speak(text: string): Promise<void> {
       const { output } = readDeviceConfig(root)
-      const speaker = makeSpeaker({ audioDevice: output })
-      current = speaker
-      try {
-        await speaker.speak(text)
-      } finally {
-        if (current === speaker) current = null
-      }
-    },
-    stop(): void {
-      current?.stop?.()
-      current = null
+      await resolveSpeaker({ audioDevice: output }).speak(text)
     },
   }
 }
