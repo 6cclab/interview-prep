@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
+import { isoDate } from './coached'
 import type { Track } from './context'
 
 export interface Entry {
@@ -250,8 +251,16 @@ export function appendDrillLog(root: string, row: DrillLogRow): void {
   // Pipes would split the row into extra columns. Escaped rather than stripped,
   // so the note still reads as written.
   const note = row.note.replace(/\|/g, '\\|').replace(/\n+/g, ' ').trim()
+  // `isoDate` (local), not `toISOString().slice(0, 10)` (UTC). It was the latter,
+  // and west of UTC that files an evening drill under *tomorrow*: measured at
+  // 20:34 EDT the row came out dated the 11th, while the row appended forty
+  // minutes earlier said the 10th — two drills from one sitting, a day apart.
+  // This is the file `/status` and `#/history` read, so the date is not
+  // cosmetic: it drives which patterns look rusty and how long ago a problem was
+  // last seen. Same rule `voice/coached.ts` states for its own rows — a session
+  // at 9pm files under the day it felt like.
   lines.push(
-    `| ${row.startedAt.toISOString().slice(0, 10)} | ${row.problem} | ${row.pattern} | ${
+    `| ${isoDate(row.startedAt)} | ${row.problem} | ${row.pattern} | ${
       row.solved ? 'yes' : 'no'
     } | ${row.hints} | ${clock(row.elapsedMs)} | ${note} |`,
   )

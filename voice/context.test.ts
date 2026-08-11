@@ -265,6 +265,57 @@ describe('buildSystemPrompt on the coding track', () => {
     expect(prompt).not.toContain('story-log')
   })
 
+  describe('clarify-first mode', () => {
+    const build = (vague: boolean): string =>
+      buildSystemPrompt(root, 'coding', 'container-with-most-water', 'two-pointers', undefined, vague).replace(
+        /\s+/g,
+        ' ',
+      )
+
+    it('is off unless asked for, so an ordinary drill is unchanged', () => {
+      const prompt = build(false)
+      expect(prompt).not.toContain('clarify-first')
+      // The default opening survives: ask him to restate the problem he can see.
+      expect(prompt).toMatch(/in his own words/i)
+    })
+
+    it('replaces the opening instead of stacking a second one on top of it', () => {
+      // Both openings present at once would be the actual failure mode: the model
+      // is told to withhold the problem and, four lines earlier, to ask him to
+      // restate the one on screen. It would pick one, and not reliably the same
+      // one twice.
+      const prompt = build(true)
+      expect(prompt).toContain('<clarify-first>')
+      expect(prompt).not.toMatch(/in his own words/i)
+    })
+
+    it('withholds the specifics and says which four things must be said first', () => {
+      const prompt = build(true)
+      expect(prompt).toMatch(/do not state the input type/i)
+      expect(prompt).toMatch(/the shape of the input/i)
+      expect(prompt).toMatch(/at least one edge case/i)
+      expect(prompt).toMatch(/the complexity he is aiming for/i)
+    })
+
+    it('keeps clarifying questions free, and separate from the hint ladder', () => {
+      // The whole mode collapses if asking costs a rung: he would stop asking,
+      // which is the exact behaviour it exists to build.
+      const prompt = build(true)
+      expect(prompt).toMatch(/a clarifying question is NOT a hint/i)
+      expect(prompt).toMatch(/hint ladder is still the hint ladder/i)
+    })
+
+    it('does not reach any other track', () => {
+      // Design's premise is an open prompt that stays on screen for the whole
+      // drill, and debug's report is already written the way a real one is. A
+      // caller passing the flag anyway gets nothing rather than a broken drill.
+      const design = buildSystemPrompt(root, 'design', 'rate-limiter', undefined, undefined, true)
+      const debug = buildSystemPrompt(root, 'debug', 'loyalty-discount', undefined, undefined, true)
+      expect(design).not.toContain('<clarify-first>')
+      expect(debug).not.toContain('<clarify-first>')
+    })
+  })
+
   it('refuses a coding drill with no resolved pattern', () => {
     expect(() => allowedPaths('coding', 'container-with-most-water')).toThrow(/resolved pattern/i)
   })

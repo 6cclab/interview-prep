@@ -5,10 +5,10 @@ import { join } from 'node:path'
 import { record } from './audio'
 import { streamForBackend } from './backend'
 import { timeCue, buildSystemPrompt, type Track } from './context'
-import { listInputDevices, listOutputDevices, readDeviceConfig } from './devices'
+import { listInputDevices, listOutputDevices, listVoices, readDeviceConfig, resolveSpeech } from './devices'
 import { createInterviewer } from './interviewer'
 import { runSession } from './session'
-import { resolveSpeaker, whisperTranscriber } from './speech'
+import { resolveSpeaker, saySpeaker, whisperTranscriber } from './speech'
 import { transcriptionPrompt } from './vocabulary'
 import {
   appendStoryLog,
@@ -45,8 +45,71 @@ async function printDevices(): Promise<void> {
   console.log('  { "input": ":3", "output": "75" }')
 }
 
+/**
+ * A line to audition a voice on. Deliberately something the interviewer would
+ * actually say: a voice judged on "Hello, my name is Ava" sounds fine and then
+ * turns out to mangle every technical clause in a real drill.
+ */
+const AUDITION =
+  'Right — before you write anything, talk me through the brute force. ' +
+  'What is the cost of that, in time and in space?'
+
+/**
+ * List the English voices by tier, and speak a sample in one if asked.
+ *
+ * The tiers are the whole point. macOS ships only legacy voices by default, and
+ * no amount of configuration makes those sound human — so when none are
+ * installed this says so and names the exact place to fix it, rather than
+ * printing a list that looks like a working set of choices.
+ */
+async function printVoices(requested?: string): Promise<void> {
+  const root = process.cwd()
+  const speech = resolveSpeech(readDeviceConfig(root))
+  const english = (await listVoices()).filter((v) => v.locale.startsWith('en'))
+
+  if (requested) {
+    const match = english.find((v) => v.name.toLowerCase() === requested.toLowerCase())
+    if (!match) {
+      console.error(`No English voice named "${requested}". Run \`pnpm voice:voices\` for the list.`)
+      process.exit(1)
+    }
+    console.log(`${match.name} (${match.tier}), saying:\n  "${AUDITION}"\n`)
+    // The configured rate, so what you hear is what a drill will sound like —
+    // auditioning at a different pace than the drill runs at defeats the point.
+    const { output } = resolveDevices(root)
+    await saySpeaker({ voice: match.name, rate: speech.rate, audioDevice: output }).speak(AUDITION)
+    return
+  }
+
+  for (const tier of ['premium', 'enhanced', 'legacy'] as const) {
+    const inTier = english.filter((v) => v.tier === tier)
+    if (inTier.length === 0) continue
+    console.log(`${tier} (${inTier.length}):`)
+    for (const v of inTier) {
+      console.log(`  ${v.name === speech.voice ? '*' : ' '} ${v.name}  ${v.locale}`)
+    }
+    console.log()
+  }
+
+  if (!english.some((v) => v.tier !== 'legacy')) {
+    console.log('No Enhanced or Premium voice is installed, and that is the whole ballgame —')
+    console.log('every voice above is a pre-neural system voice that will sound robotic however')
+    console.log('it is configured. Download one (a few hundred MB, needs your password):')
+    console.log('  System Settings > Accessibility > Spoken Content > System Voice > Manage Voices')
+    console.log('Ava, Evan, Zoe, Joelle and Serena all have Premium builds. Then:')
+    console.log('  pnpm voice:voices "Ava (Premium)"     # audition it')
+    console.log('  # and put the winner in local/voice.json:')
+    console.log('  { "voice": "Ava (Premium)", "rate": 170 }')
+    return
+  }
+
+  console.log('Audition one, then write the winner to local/voice.json:')
+  console.log('  pnpm voice:voices "Ava (Premium)"')
+  console.log('  { "voice": "Ava (Premium)", "rate": 170 }')
+}
+
 async function main(): Promise<void> {
-  const track = process.argv[2] as Track | 'devices' | undefined
+  const track = process.argv[2] as Track | 'devices' | 'voices' | undefined
   const problem = process.argv[3]
 
   if (track === 'devices') {
@@ -54,8 +117,15 @@ async function main(): Promise<void> {
     return
   }
 
+  if (track === 'voices') {
+    await printVoices(problem)
+    return
+  }
+
   if (track !== 'mock' && track !== 'design') {
-    console.error('Usage: pnpm mock:voice | pnpm design:voice <problem> | pnpm voice:devices')
+    console.error(
+      'Usage: pnpm mock:voice | pnpm design:voice <problem> | pnpm voice:devices | pnpm voice:voices [voice]',
+    )
     process.exit(1)
   }
   if (track === 'design' && !problem) {
@@ -85,7 +155,7 @@ async function main(): Promise<void> {
   try {
     const entries = await runSession({
       transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
-      speaker: resolveSpeaker({ voice: process.env.SAY_VOICE, audioDevice: devices.output }),
+      speaker: resolveSpeaker({ audioDevice: devices.output, ...resolveSpeech(readDeviceConfig(root)) }),
       interviewer,
       startRecording: () => record(scratch, devices.input),
       nextTurn: async () => ((await rl.question('')).trim() === 'end' ? 'end' : 'speak'),

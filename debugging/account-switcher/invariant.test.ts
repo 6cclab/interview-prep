@@ -22,8 +22,9 @@ describe('profile panel after an account switch made from the global nav', () =>
     // The user views the profile panel before switching accounts.
     await renderProfilePanel(session, cache, dataClient, 'res-9')
 
-    // The account switch happens through the global nav switcher this time,
-    // not the dashboard's own control.
+    // This screen's switch does not go through the dashboard's own control —
+    // the session is changed directly, which is how every screen other than
+    // the dashboard does it.
     session.switchAccount('acct-beta')
 
     const panel = await renderProfilePanel(session, cache, dataClient, 'res-9')

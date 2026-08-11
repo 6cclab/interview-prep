@@ -16,7 +16,11 @@ describe('the mock:web:* scripts', () => {
   const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
     scripts: Record<string, string>
   }
-  const provider = Object.entries(pkg.scripts).filter(([name]) => /^mock:web:/.test(name))
+  // Excludes `mock:web:vague`: that script only sets `VOICE_VAGUE` and forwards
+  // to plain `mock:web`, so it inherits whatever backend the environment (or a
+  // chained provider script) already set rather than choosing one itself. It is
+  // a modifier, not a provider, so it is deliberately not in this list.
+  const provider = Object.entries(pkg.scripts).filter(([name]) => /^mock:web:(claude|openai|ollama|hybrid)$/.test(name))
 
   it('exist for every provider', () => {
     expect(provider.map(([name]) => name).sort()).toEqual([

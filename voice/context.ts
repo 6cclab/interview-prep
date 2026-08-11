@@ -128,10 +128,116 @@ export function competencyCoverage(root: string): { all: string[]; covered: stri
 }
 
 /**
+ * What the problem route serves in place of the README in clarify-first mode.
+ *
+ * Markdown, because the pane renders markdown. It says the specifics are free to
+ * ask for and names the four things worth pinning down — the mode is meant to
+ * teach an opening, not to be a guessing game, and a candidate who does not know
+ * questions are free will ration them.
+ */
+export const CLARIFY_FIRST_BRIEF = `# The problem is spoken, not written
+
+Your interviewer will describe this one out loud, the way a colleague would
+describe it at a desk. It will be underspecified on purpose.
+
+The specifics are yours to ask for — what the input actually is, how big it
+gets, what to return at the edges, what complexity is expected. None of it is a
+trick, and **clarifying questions are free**: they are not hint rungs and they
+cost you nothing.
+
+Worth having out loud before you write code:
+
+- the shape of the input, concretely
+- the constraint that decides the approach — the size, the range, the thing that
+  makes the obvious answer too slow
+- at least one edge case
+- the complexity you are aiming for, said before you write it
+
+Once you have those, the written statement is one button away.
+`
+
+/**
+ * Clarify-first mode, for the coding track only.
+ *
+ * The evidence this answers is narrow and worth stating, because the mode costs
+ * something and should be switched off if the evidence stops holding. A Blind
+ * report on CrowdStrike's coding round, 2025-08-27: "not a pure DSA type
+ * question — the prompt is somewhat vague but tries to simulate a real-world
+ * problem." A prompt like that is not harder to solve; it is harder to *start*,
+ * and the first five minutes are the graded part.
+ *
+ * That is the one thing solo drilling cannot rehearse. `problems/**\/README.md`
+ * is a precise specification on purpose — it has to be, because a test suite is
+ * the objective standard and an ambiguous prompt would make the suite
+ * arbitrary. So the ambiguity has to live in the interviewer instead, which is
+ * also where it lives in a real interview.
+ *
+ * The withholding is on the wire, not in the prompt alone: with this on, the
+ * problem route serves a standing brief rather than the README, and the written
+ * statement is a deliberate second request. An instruction telling the model not
+ * to reveal something the client has already rendered would be a rule with no
+ * teeth — see the same reasoning on `?patterns=1` in the history route.
+ */
+const CLARIFY_FIRST = [
+  '<clarify-first>',
+  'This drill runs in clarify-first mode. The written statement is NOT on his',
+  'screen — he has a standing brief saying you will describe the problem and that',
+  'the specifics are his to ask for. So nothing below is theatre: what you',
+  'withhold, he genuinely does not have.',
+  '',
+  'Open by describing the problem the way a colleague would describe it at a desk,',
+  'not the way a problem setter would write it down. One or two sentences, in',
+  'domain terms, specifics left out: roughly what the data is, roughly what should',
+  'come back. Do NOT state the input type, the exact return value, the',
+  'constraints, the edge cases or a complexity target, and do not offer a worked',
+  'example unless he asks for one.',
+  '',
+  'Everything you left out is his to extract. Answer exactly what he asks, in one',
+  'sentence, and volunteer nothing adjacent. Asked what the input looks like, say',
+  'what the input looks like — not what the input looks like AND what to return',
+  'for an empty one. The withholding is the exercise: a real interviewer working',
+  'from a terse prompt answers the question asked and waits for the next one.',
+  '',
+  'Never make a question cost him anything. There is no budget on them and none is',
+  'too basic. A clarifying question is NOT a hint, does not touch the hint ladder,',
+  'and must never be answered with a rung. If he asks nothing and starts coding, do',
+  'not lecture him — ask what he is assuming about the specific thing he has just',
+  'assumed, and let the gap teach it.',
+  '',
+  'Four things must be said out loud before he writes code, and noticing is your',
+  'job rather than his:',
+  '',
+  'one, the shape of the input, concretely.',
+  'two, the constraint that decides the approach — the size, the range, the fact',
+  'that makes the obvious answer too slow.',
+  'three, at least one edge case.',
+  'four, the complexity he is aiming for, stated before he writes it rather than',
+  'after.',
+  '',
+  'If he starts coding with one of the four missing, stop him ONCE, name only which',
+  'of the four is missing, and let him ask for it. Once per drill, not every time —',
+  'past that, let him proceed and put it in the closing verdict instead.',
+  '',
+  'When he has all four, tell him plainly that the written statement is now',
+  'available on screen if he wants it, and then say nothing further about it. He may',
+  'take it or leave it; both are fine and neither is worth a remark.',
+  '',
+  'Two things this mode does not change. The hint ladder is still the hint ladder,',
+  'and you still give only the rung you are told to. And the closing verdict still',
+  'names one thing that actually went wrong — so if the drill was lost in the first',
+  'five minutes rather than in the code, say that, because it is the thing this',
+  'mode exists to surface.',
+  '</clarify-first>',
+]
+
+/**
  * @param focus For the behavioural track only: one competency title to drill,
  *   when the candidate picked one instead of leaving the choice open. Passed as
  *   the authored title rather than a slug — `voice/competencies.ts` owns that
  *   mapping, and the prompt should name the competency the way the file does.
+ * @param vague For the coding track only: run the drill clarify-first. See
+ *   `CLARIFY_FIRST`. Ignored on every other track, because no other track has a
+ *   written statement to withhold in the first place.
  */
 export function buildSystemPrompt(
   root: string,
@@ -139,6 +245,7 @@ export function buildSystemPrompt(
   problem?: string,
   pattern?: string,
   focus?: string,
+  vague = false,
 ): string {
   const paths = allowedPaths(track, problem, pattern)
   assertNoSpoilers(paths)
@@ -281,9 +388,17 @@ export function buildSystemPrompt(
       'You have no clock, no terminal and no files. What drill.md asks you to do',
       'yourself is done for you instead:',
       '',
-      'Step 2, pasting the README: he can already see the problem on screen. Do',
-      'not read it out. Open by asking him to tell you what the problem is asking',
-      'for, in his own words.',
+      vague
+        ? [
+            'Step 2, pasting the README: do not read it out, and do not summarise',
+            'it. This drill runs in clarify-first mode — see the block below, which',
+            'governs how you open and what you may say.',
+          ].join('\n')
+        : [
+            'Step 2, pasting the README: he can already see the problem on screen. Do',
+            'not read it out. Open by asking him to tell you what the problem is asking',
+            'for, in his own words.',
+          ].join('\n'),
       '',
       'Step 3, starting a timer: the clock runs on screen, and each turn you are',
       'given is preceded by a time check. Treat that as instruction to you, not',
@@ -315,6 +430,8 @@ export function buildSystemPrompt(
       'out loud than in writing. Do not fill a pause, do not ask how it is going,',
       'and do not comment on an attempt in progress.',
     )
+
+    if (vague) voiceMode.push('', ...CLARIFY_FIRST)
   }
 
   if (track === 'debug') {

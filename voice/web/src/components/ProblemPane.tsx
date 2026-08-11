@@ -29,17 +29,24 @@ export function ProblemPane({ problem, track }: Props) {
   const [prompt, setPrompt] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   const [open, setOpen] = useState(true)
+  // Set from the response, never from a prop: whether the statement is being
+  // withheld is the server's call, and the pane finds out the same way it finds
+  // out anything else. See the `vague` branch of the problem route.
+  const [withheld, setWithheld] = useState(false)
 
   useEffect(() => {
     let live = true
     setPrompt(null)
     setFailed(false)
+    setWithheld(false)
     void (async () => {
       try {
         const res = await fetch(`/api/problems/${encodeURIComponent(problem)}?track=${track}`)
         if (!res.ok) throw new Error(String(res.status))
-        const body = (await res.json()) as { prompt: string }
-        if (live) setPrompt(body.prompt)
+        const body = (await res.json()) as { prompt: string; vague?: boolean }
+        if (!live) return
+        setPrompt(body.prompt)
+        setWithheld(body.vague === true)
       } catch {
         // The interviewer still has the prompt and speaks it, so a failure here
         // costs the on-screen copy, not the drill. Say which it is.
@@ -50,6 +57,27 @@ export function ProblemPane({ problem, track }: Props) {
       live = false
     }
   }, [problem, track])
+
+  /**
+   * Fetch the real statement, on request.
+   *
+   * A second round trip rather than something quietly held in state, because
+   * the first response genuinely did not contain it. There is no confirmation
+   * step: this is meant to be available, not defended. What it costs is that
+   * taking it is a visible, deliberate act — the same bargain the hint button
+   * makes.
+   */
+  async function reveal(): Promise<void> {
+    try {
+      const res = await fetch(`/api/problems/${encodeURIComponent(problem)}?track=${track}&reveal=1`)
+      if (!res.ok) throw new Error(String(res.status))
+      const body = (await res.json()) as { prompt: string }
+      setPrompt(body.prompt)
+      setWithheld(false)
+    } catch {
+      setFailed(true)
+    }
+  }
 
   return (
     <section className="problem-pane" aria-label="Problem statement">
@@ -82,6 +110,15 @@ export function ProblemPane({ problem, track }: Props) {
             // what someone stares at for forty-five minutes.
             <>
               <Markdown source={prompt} />
+              {/* Clarify-first: what is on screen is the standing brief, not the
+                  problem. The button is plain and unguarded on purpose — the mode
+                  is teaching an opening, not withholding for its own sake, and a
+                  confirm dialog would turn a legitimate move into a transgression. */}
+              {withheld && (
+                <button type="button" className="problem-pane__reveal" onClick={() => void reveal()}>
+                  Reveal the written statement
+                </button>
+              )}
               {/* The shape of the harness, which is not the answer to anything and
                   cost a real drill ten minutes: a debugging exercise has no running
                   application in it. Nothing in `src/` calls the render functions —

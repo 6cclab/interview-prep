@@ -18,7 +18,7 @@ problem name.
 | monotonic-stack | Next greater/smaller element, spans, histograms | Keep the stack sorted; popping resolves an earlier element's answer | `daily-temperatures` |
 | heap-top-k | Top/bottom k, streaming median, merging sorted inputs | A size-k heap beats a full sort when k is small | `kth-largest-stream` |
 | binary-tree-recursion | Depth, path sums, validation, LCA | Define what the call returns for a subtree, then trust recursion | `tree-diameter` |
-| bfs-dfs-grid | Islands, regions, shortest path in a maze | BFS for fewest steps, DFS for reachability; mark visited on enqueue | `shortest-path-grid` |
+| bfs-dfs-grid | Islands, regions, shortest path in a maze | BFS for fewest steps, DFS for reachability; mark visited on enqueue, and share one visited structure across the whole scan rather than per region | `shortest-path-grid`, `count-islands` |
 | graph-shortest-path | Weighted edges and a minimum cost | Dijkstra when weights are non-negative; plain BFS when they're uniform | `network-delay` |
 | topological-sort | Prerequisites, build order, dependency cycles | Kahn's algorithm; leftover nodes prove a cycle | `course-order` |
 | union-find | Connectivity, accounts merging, redundant edges | Union by rank plus path compression, near-constant per operation | `redundant-connection` |
@@ -26,3 +26,4 @@ problem name.
 | backtracking | Permutations, combinations, N-queens, sudoku | Choose, recurse, un-choose; prune as early as the constraint allows | `n-queens-count` |
 | dp-1d | "How many ways", min cost to reach the end, overlapping subproblems | Define the state, then the recurrence, then collapse the table to a row | `coin-change` |
 | string-stack-parsing | Nesting, brackets, decode/evaluate an expression | A stack is the only structure that matches nesting naturally | `decode-string` |
+| eviction-cache | A store with a capacity that must discard something, and every operation has to be O(1) | A map cannot answer "which is stalest"; keep an ordered structure beside it and have the map hold the node, so moving an entry never walks | `lru-cache` |

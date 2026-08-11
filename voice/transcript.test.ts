@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  appendDrillLog,
   appendStoryLog,
   formatSession,
   sessionPath,
@@ -282,5 +283,43 @@ describe('formatSession records what conducted the session', () => {
   // would be worse than no line at all.
   it('omits the line rather than guessing when it is not given', () => {
     expect(formatSession(entries, new Date('2026-08-10T18:54:30.000Z'))).not.toContain('Interviewer:')
+  })
+})
+
+describe('appendDrillLog — the date is local, not UTC', () => {
+  /**
+   * Regression test for a real defect. `appendDrillLog` dated rows with
+   * `toISOString().slice(0, 10)`, so anywhere west of UTC an evening drill filed
+   * under *tomorrow*. Measured on 2026-08-10 at 20:34 EDT: this row came out
+   * dated 2026-08-11, while one appended forty minutes earlier said 2026-08-10 —
+   * two drills from one sitting, split across two days in the file `/status` and
+   * `#/history` read.
+   *
+   * The date is constructed from local components and the assertion compares
+   * against local components, so this holds in any timezone the suite runs in.
+   * A UTC literal would pass only where the offset happens to be zero — which is
+   * exactly how the bug survived.
+   */
+  it('files a late-evening drill under the local day', () => {
+    const root = mkdtempSync(join(tmpdir(), 'drill-log-tz-'))
+    try {
+      // 21:30 local — past UTC midnight for every timezone from UTC-3 westward.
+      const startedAt = new Date(2026, 7, 10, 21, 30, 0)
+      appendDrillLog(root, {
+        startedAt,
+        problem: 'reverse-string',
+        pattern: 'in-place-array',
+        solved: true,
+        hints: 0,
+        elapsedMs: 60_000,
+        note: 'n/a',
+      })
+      const body = readFileSync(join(root, 'local/drill-log.md'), 'utf8')
+      expect(body).toContain('| 2026-08-10 | reverse-string |')
+      // The specific wrong answer, named so a regression is unmistakable.
+      expect(body).not.toContain('| 2026-08-11 |')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

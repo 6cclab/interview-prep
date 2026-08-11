@@ -13,9 +13,9 @@ unlock" prompt, full data. Billing confirms no Premium Analytics purchase
 exists on this account, ever.
 
 We pulled a handful of other customer ids while investigating and couldn't
-reproduce it on any of the other free-plan accounts we tried. Northwind's
-account was migrated to a new customer id late last year during a billing
-system change; support suspects that's related but hasn't confirmed how.
+reproduce it on any of the other free-plan accounts we tried. Northwind is a
+newer account and support suspects something about how it was set up matters
+here, but nobody has established what.
 
 ## Steps to reproduce
 

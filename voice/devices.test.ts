@@ -2,7 +2,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { parseInputDevices, parseOutputDevices, readDeviceConfig, writeDeviceConfig } from './devices'
+import {
+  parseInputDevices,
+  parseOutputDevices,
+  parseVoices,
+  readDeviceConfig,
+  resolveSpeech,
+  writeDeviceConfig,
+} from './devices'
 
 const FFMPEG_STDERR = [
   '[AVFoundation indev @ 0x72d068000] AVFoundation video devices:',
@@ -122,5 +129,101 @@ describe('writeDeviceConfig', () => {
   it('returns the merged config it wrote', () => {
     writeDeviceConfig(root, { input: ':3' })
     expect(writeDeviceConfig(root, { output: '75' })).toEqual({ input: ':3', output: '75' })
+  })
+})
+
+// Real `say -v '?'` output. The awkward names are the point: two of them contain
+// spaces and nested brackets, so any attempt to tokenise the name side splits
+// them wrongly — which is why `parseVoices` anchors on the locale instead.
+const VOICES_STDOUT = [
+  'Albert              en_US    # Hello! My name is Albert.',
+  'Ava (Premium)       en_US    # Hello! My name is Ava.',
+  'Daniel (Enhanced)   en_GB    # Hello! My name is Daniel.',
+  'Eddy (English (UK)) en_GB    # Hello! My name is Eddy.',
+  'Grandma (English (US)) en_US    # Hello! My name is Grandma.',
+  'Anna                de_DE    # Hallo! Ich heiße Anna.',
+  '',
+].join('\n')
+
+describe('parseVoices', () => {
+  it('reads the name, locale and tier of every voice', () => {
+    expect(parseVoices(VOICES_STDOUT)).toEqual([
+      { name: 'Albert', locale: 'en_US', tier: 'legacy' },
+      { name: 'Ava (Premium)', locale: 'en_US', tier: 'premium' },
+      { name: 'Daniel (Enhanced)', locale: 'en_GB', tier: 'enhanced' },
+      { name: 'Eddy (English (UK))', locale: 'en_GB', tier: 'legacy' },
+      { name: 'Grandma (English (US))', locale: 'en_US', tier: 'legacy' },
+      { name: 'Anna', locale: 'de_DE', tier: 'legacy' },
+    ])
+  })
+
+  it('keeps a name containing spaces and nested brackets whole', () => {
+    const eddy = parseVoices(VOICES_STDOUT).find((v) => v.name.startsWith('Eddy'))
+    // Not 'Eddy', and not 'Eddy (English' — the whole thing, because that string
+    // is what `say -v` has to be given back.
+    expect(eddy?.name).toBe('Eddy (English (UK))')
+  })
+
+  it('ignores blank lines and anything without a locale', () => {
+    expect(parseVoices('\n\nnot a voice line\n')).toEqual([])
+  })
+})
+
+describe('readDeviceConfig — voice and rate', () => {
+  // The same helper as the block above; `root` is per-test, so it cannot be hoisted
+  // to module scope without capturing a stale temp directory.
+  function writeConfig(body: string) {
+    mkdirSync(join(root, 'local'), { recursive: true })
+    writeFileSync(join(root, 'local/voice.json'), body)
+  }
+
+  it('reads a voice name and a rate', () => {
+    writeConfig('{ "voice": "Ava (Premium)", "rate": 170 }')
+    expect(readDeviceConfig(root)).toEqual({ voice: 'Ava (Premium)', rate: 170 })
+  })
+
+  it('drops a rate that is not a usable number rather than poisoning the utterance', () => {
+    // `say -r` on any of these fails the whole sentence, so the rate is dropped
+    // and the voice's default is used — a bad rate costs the rate, not the drill.
+    for (const bad of ['"fast"', '0', '-40', 'null', 'true']) {
+      writeConfig(`{ "voice": "Ava (Premium)", "rate": ${bad} }`)
+      expect(readDeviceConfig(root)).toEqual({ voice: 'Ava (Premium)' })
+    }
+  })
+
+  it('drops a blank voice name, which would select nothing', () => {
+    writeConfig('{ "voice": "   ", "output": "75" }')
+    expect(readDeviceConfig(root)).toEqual({ output: '75' })
+  })
+
+  it('does not lose voice or rate when another field is written', () => {
+    writeConfig('{ "voice": "Ava (Premium)", "rate": 170 }')
+    writeDeviceConfig(root, { output: '75' })
+    expect(readDeviceConfig(root)).toEqual({ voice: 'Ava (Premium)', rate: 170, output: '75' })
+  })
+})
+
+describe('resolveSpeech', () => {
+  it('uses the config when the environment says nothing', () => {
+    expect(resolveSpeech({ voice: 'Ava (Premium)', rate: 170 }, {})).toEqual({
+      voice: 'Ava (Premium)',
+      rate: 170,
+    })
+  })
+
+  it('lets the environment override the file', () => {
+    expect(resolveSpeech({ voice: 'Ava (Premium)', rate: 170 }, { SAY_VOICE: 'Evan (Premium)', SAY_RATE: '150' })).toEqual(
+      { voice: 'Evan (Premium)', rate: 150 },
+    )
+  })
+
+  it('falls back to the file when SAY_RATE is unusable, rather than to no rate', () => {
+    expect(resolveSpeech({ rate: 170 }, { SAY_RATE: 'quickly' })).toEqual({ rate: 170 })
+  })
+
+  it('returns nothing at all when neither source has anything', () => {
+    // An empty object matters: `saySpeaker` omits the flag entirely for an absent
+    // voice or rate, which is how the system default gets used.
+    expect(resolveSpeech({}, {})).toEqual({})
   })
 })

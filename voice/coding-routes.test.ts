@@ -201,6 +201,53 @@ describe('GET /api/problems/:problem?track=coding', () => {
     expect(body).not.toContain('problems/')
   })
 
+  describe('clarify-first mode', () => {
+    const README = '# Container\n\nGiven heights, find the best pair.\n'
+
+    it('withholds the statement on the wire, not in the client', async () => {
+      // The load-bearing assertion of the whole mode. If the README rides along
+      // in the response and the pane merely declines to render it, the drill is
+      // theatre: the answer to "what is actually being asked" sits in memory one
+      // devtools tab away. Same reasoning as `?patterns=1` on the history route.
+      const { port } = await listen(baseDeps({ vague: true }))
+      const res = await fetch(`http://127.0.0.1:${port}/api/problems/${SLUG}?track=coding`)
+      const body = await res.text()
+      expect(res.status).toBe(200)
+      expect(body).not.toContain('best pair')
+      expect(JSON.parse(body)).toMatchObject({ problem: SLUG, vague: true })
+    })
+
+    it('serves the real statement when it is explicitly asked for', async () => {
+      const { port } = await listen(baseDeps({ vague: true }))
+      const res = await fetch(`http://127.0.0.1:${port}/api/problems/${SLUG}?track=coding&reveal=1`)
+      expect(await res.json()).toEqual({ problem: SLUG, prompt: README })
+    })
+
+    it('still never discloses the path, revealed or not', async () => {
+      const { port } = await listen(baseDeps({ vague: true }))
+      for (const query of ['track=coding', 'track=coding&reveal=1']) {
+        const body = await (await fetch(`http://127.0.0.1:${port}/api/problems/${SLUG}?${query}`)).text()
+        expect(body).not.toContain(PATTERN)
+        expect(body).not.toContain('problems/')
+      }
+    })
+
+    it('leaves coaching alone', async () => {
+      // A coach explains a pattern after the drill is over. Withholding the
+      // problem from that conversation would make it unrunnable, so the mode
+      // deliberately does not reach it.
+      const { port } = await listen(baseDeps({ vague: true }))
+      const res = await fetch(`http://127.0.0.1:${port}/api/problems/${SLUG}?track=coach`)
+      expect(await res.json()).toEqual({ problem: SLUG, prompt: README })
+    })
+
+    it('changes nothing when it is off', async () => {
+      const { port } = await listen(baseDeps())
+      const res = await fetch(`http://127.0.0.1:${port}/api/problems/${SLUG}?track=coding`)
+      expect(await res.json()).toEqual({ problem: SLUG, prompt: README })
+    })
+  })
+
   it('404s for a slug that names no coding problem', async () => {
     const { port } = await listen(baseDeps())
     const res = await fetch(`http://127.0.0.1:${port}/api/problems/no-such-drill?track=coding`)

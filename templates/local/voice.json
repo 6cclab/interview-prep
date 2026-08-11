@@ -1,0 +1,16 @@
+{
+  "_comment": [
+    "How a spoken drill sounds. Every field is optional; delete this _comment freely.",
+    "",
+    "input    the microphone for `pnpm mock:voice` — an ffmpeg avfoundation index, e.g. ':3'.",
+    "output   the speaker, shared by the terminal and browser paths — a `say -a '?'` id, e.g. '75'.",
+    "webInput the browser's microphone — a MediaDeviceInfo.deviceId, a different id space from `input`.",
+    "voice    a `say` voice by name, e.g. 'Ava (Premium)'. Unset means the macOS system voice.",
+    "rate     words per minute for `say -r`. Unset means the voice's own default (~175-200).",
+    "",
+    "Run `pnpm voice:devices` for the device ids and `pnpm voice:voices` for the voices.",
+    "The voice tier is what decides whether this sounds like a person: macOS ships only",
+    "pre-neural legacy voices, so download an Enhanced or Premium one first —",
+    "System Settings > Accessibility > Spoken Content > System Voice > Manage Voices."
+  ]
+}

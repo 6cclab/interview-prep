@@ -1,0 +1,10 @@
+title: Multi-Engine File Scanning Service
+# Neutral capability tags, deliberately not company names: this file is
+# committed, and the spec requires the repo be publishable un-redacted with all
+# company research private in local/. A company is matched to exercises by
+# joining its own research to these domains at read time — see scripts/domains.ts.
+domains:
+  - multi-tenancy
+  - messaging-fanout
+  - data-modelling
+  - idempotency
