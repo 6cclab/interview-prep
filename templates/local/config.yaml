@@ -5,3 +5,8 @@
 # communication-style.md. When unset or wrong, those steps are skipped with a
 # note — nothing errors.
 job_search_path: ~/job-search
+
+# What the interviewer should call you. Substituted into every prompt when it is
+# assembled — the committed prompt files stay neutral, so your name never shows
+# up as a diff. Left unset, drills say "the candidate".
+candidate_name:

@@ -152,7 +152,7 @@ correctness-red is a **wrong answer**; correctness-green-with-cost-red is a
 legitimate checkpoint — and `errored` is a suite that never ran. Collapsing the
 first two into "failed" teaches the exact thing `drill.md` forbids.
 
-A test run writes **no Andre entry** (he pressed a button; he said nothing), and
+A test run writes **no entry for you** (he pressed a button; he said nothing), and
 the bracketed verdict never enters the transcript. Transcripts land in
 `local/drills/<problem>-live-<stamp>.md`.
 

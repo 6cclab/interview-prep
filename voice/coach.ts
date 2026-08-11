@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ProblemLocation } from './problems'
+import { readCandidateName, renderCandidate } from './candidate'
 
 /**
  * The coaching track: pair programming out loud, with the answers on the table.
@@ -118,7 +119,7 @@ export function buildCoachPrompt(root: string, problem: ProblemLocation): string
     return `<file path="${path}">\n${readFileSync(full, 'utf8')}\n</file>`
   })
 
-  return [
+  const prompt = [
     ...sections,
     '<role>',
     'You are pairing with an engineer on this problem. You are not interviewing him',
@@ -162,4 +163,6 @@ export function buildCoachPrompt(root: string, problem: ProblemLocation): string
     'things to say, say the first and let him answer.',
     '</voice-mode>',
   ].join('\n')
+
+  return renderCandidate(prompt, readCandidateName(root))
 }

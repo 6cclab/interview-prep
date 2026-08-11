@@ -11,7 +11,7 @@ negotiable during it.
 
 ## Two modes
 
-**Written (default).** Andre writes `local/designs/<problem>.md` in his own time. This
+**Written (default).** {{candidate}} writes `local/designs/<problem>.md` in his own time. This
 command reads it and scores it against `system-design/<problem>/rubric.md`.
 
 **Live (`--live`).** A timed conversation. 45 minutes unless he says otherwise. You
@@ -20,7 +20,7 @@ play the interviewer.
 ## `rules/no-spoilers.md` applies
 
 `system-design/<problem>/reference.md` is a worked design. **Do not read it** unless
-Andre explicitly asks to see it. Score the attempt against the rubric, not against the
+{{candidate}} explicitly asks to see it. Score the attempt against the rubric, not against the
 reference — and never against a better design you happen to have in mind.
 
 Do not volunteer the missing dimension. Ask a question that would surface it, and let

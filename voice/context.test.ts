@@ -454,3 +454,17 @@ describe('what the debugging interviewer may and may not say', () => {
     expect(text).toMatch(/Refusing that/)
   })
 })
+
+// A prompt reaching the model with a literal {{candidate}} in it is a bug the
+// candidate would hear read aloud.
+describe('candidate token rendering', () => {
+  it.each([
+    ['mock', undefined, undefined],
+    ['design', 'rate-limiter', undefined],
+    ['coding', 'container-with-most-water', 'two-pointers'],
+    ['debug', 'loyalty-discount', undefined],
+  ] as const)('leaves no unrendered token in the %s prompt', (track, problem, pattern) => {
+    const prompt = buildSystemPrompt(root, track, problem, pattern)
+    expect(prompt).not.toContain('{{candidate}}')
+  })
+})

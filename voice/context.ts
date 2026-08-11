@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, normalize, sep } from 'node:path'
+import { readCandidateName, renderCandidate } from './candidate'
 
 /**
  * `coach` is not a drill. It is included here because a session, a transcript and
@@ -397,7 +398,7 @@ export function buildSystemPrompt(
   voiceMode.push('</voice-mode>')
   sections.push(voiceMode.join('\n'))
 
-  return sections.join('\n\n')
+  return renderCandidate(sections.join('\n\n'), readCandidateName(root))
 }
 
 /**

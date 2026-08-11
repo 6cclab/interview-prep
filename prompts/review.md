@@ -8,7 +8,7 @@ description: Work through a drill you have already finished — the answer, why 
 The debrief. This is the one command that is allowed to show you the answer,
 because it only ever runs **after** a drill is over.
 
-`rules/no-spoilers.md` says never to read `solutions/**` "unless Andre
+`rules/no-spoilers.md` says never to read `solutions/**` "unless {{candidate}}
 explicitly asks to see the answer." Invoking this *is* that request. Everything
 else in that file still holds — most of all: nothing here may run during an
 attempt.

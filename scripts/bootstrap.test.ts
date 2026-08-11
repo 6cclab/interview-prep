@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { seedLocal } from './bootstrap'
+import { seedLocal, setCandidateName } from './bootstrap'
 
 let base: string
 let templates: string
@@ -47,5 +47,24 @@ describe('seedLocal', () => {
   it('is idempotent', () => {
     seedLocal(templates, dest)
     expect(seedLocal(templates, dest)).toEqual([])
+  })
+})
+
+describe('setCandidateName', () => {
+  it('sets the name in a freshly seeded config', () => {
+    const freshDest = mkdtempSync(join(tmpdir(), 'bootstrap-'))
+    seedLocal('templates/local', freshDest)
+    expect(setCandidateName(freshDest, 'Dana')).toBe(true)
+    expect(readFileSync(join(freshDest, 'config.yaml'), 'utf8')).toContain('candidate_name: Dana')
+  })
+
+  it('replaces an existing name rather than appending a second key', () => {
+    const freshDest = mkdtempSync(join(tmpdir(), 'bootstrap-'))
+    seedLocal('templates/local', freshDest)
+    setCandidateName(freshDest, 'Dana')
+    setCandidateName(freshDest, 'Sam')
+    const body = readFileSync(join(freshDest, 'config.yaml'), 'utf8')
+    expect(body).toContain('candidate_name: Sam')
+    expect(body.match(/^candidate_name:/gm)).toHaveLength(1)
   })
 })
