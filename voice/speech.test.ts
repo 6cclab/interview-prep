@@ -127,19 +127,19 @@ describe('isWhisperLogLine', () => {
 
 describe('sayArgs', () => {
   it('passes just the text when no options are given', () => {
-    expect(sayArgs('hello there')).toEqual(['hello there'])
+    expect(sayArgs('hello there')).toEqual(['--', 'hello there'])
   })
 
   it('adds -v for a voice', () => {
-    expect(sayArgs('hello there', { voice: 'Alex' })).toEqual(['-v', 'Alex', 'hello there'])
+    expect(sayArgs('hello there', { voice: 'Alex' })).toEqual(['-v', 'Alex', '--', 'hello there'])
   })
 
   it('adds -r for a rate', () => {
-    expect(sayArgs('hello there', { rate: 200 })).toEqual(['-r', '200', 'hello there'])
+    expect(sayArgs('hello there', { rate: 200 })).toEqual(['-r', '200', '--', 'hello there'])
   })
 
   it('adds -a for an audio device, routing the interviewer to a chosen output', () => {
-    expect(sayArgs('hello there', { audioDevice: '75' })).toEqual(['-a', '75', 'hello there'])
+    expect(sayArgs('hello there', { audioDevice: '75' })).toEqual(['-a', '75', '--', 'hello there'])
   })
 
   it('combines voice, rate, and audio device, text always last', () => {
@@ -147,6 +147,7 @@ describe('sayArgs', () => {
       '-v', 'Alex',
       '-r', '200',
       '-a', '75',
+      '--',
       'hello there',
     ])
   })
@@ -266,5 +267,24 @@ describe('checkSpeechEngine', () => {
   it('names the missing binary and the variable that would avoid it', () => {
     expect(() => checkSpeechEngine({ SAY_ENGINE: 'piper', PATH: '/nonexistent' }, 'linux'))
       .toThrow(/piper.*SAY_ENGINE/s)
+  })
+})
+
+describe('sayArgs and text that looks like a flag', () => {
+  // Measured 2026-08-12: a live drill lost two consecutive interviewer replies
+  // because `say` exited 1 on a sentence starting with a hyphen — the model had
+  // emitted markdown bullets, which its prompt forbids but which it produced
+  // anyway. A dropped sentence is silent: the candidate simply never hears it.
+  it('puts the text after `--` so a leading hyphen cannot be read as an option', () => {
+    expect(sayArgs('- first, walk me through your approach')).toEqual([
+      '--',
+      '- first, walk me through your approach',
+    ])
+  })
+
+  it('keeps `--` last, after every option', () => {
+    const args = sayArgs('-x', { voice: 'Ava', rate: 180, audioDevice: '75' })
+    expect(args[args.length - 2]).toBe('--')
+    expect(args[args.length - 1]).toBe('-x')
   })
 })

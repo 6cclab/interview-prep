@@ -132,7 +132,16 @@ export function sayArgs(text: string, opts: SayOptions = {}): string[] {
   if (opts.voice) args.push('-v', opts.voice)
   if (opts.rate) args.push('-r', String(opts.rate))
   if (opts.audioDevice) args.push('-a', opts.audioDevice)
-  args.push(text)
+  // `--` terminates option parsing, so a sentence beginning with a hyphen is
+  // spoken rather than parsed as a flag. Without it `say` exits 1 and the
+  // sentence is silently dropped: measured on 2026-08-12, a live drill lost two
+  // consecutive replies because the interviewer emitted markdown bullets, which
+  // its prompt forbids but a model still produces. The prompt is the first line
+  // of defence and this is the second — model output reaching an argv array is
+  // untrusted input whatever the prompt says.
+  //
+  // `piperSpeaker` needs no equivalent: it writes the text to piper's stdin.
+  args.push('--', text)
   return args
 }
 
