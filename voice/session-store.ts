@@ -75,8 +75,35 @@ export interface SessionStore {
   /** The id of the one active session, if any — mirrors `hasActive`'s "at most one" invariant. */
   activeId(): string | undefined
   touch(id: string, now: number): void
-  /** Sessions whose lastActivity is more than idleMs behind now. Does not remove them. */
+  /**
+   * Sessions that are **orphaned** — idle past `idleMs` *and* with no browser
+   * still attached. Does not remove them.
+   *
+   * The second half of that is load-bearing, and its absence ended a live drill
+   * on 2026-08-12 at the worst possible moment. Only four routes call `touch`
+   * (`/turn`, `/turn/retry`, `/hint`, `/tests`), so the one activity a coding
+   * drill actually consists of — sitting quietly and writing code — is invisible
+   * to this store. Five minutes of that is not an abandoned session, it is the
+   * exercise; the drill's own clock allows forty-five of them. A session whose
+   * SSE connection is still open has a browser on the other end by definition,
+   * and `teardownDisconnectedClient` already ends the ones that genuinely go
+   * away, so liveness is the honest test of "orphaned" and elapsed silence is not.
+   */
   reapIdle(now: number, idleMs: number): StoredSession[]
+}
+
+/**
+ * Whether a browser is still attached to this session.
+ *
+ * `writableEnded` covers the reconnect path, where `/stream` deliberately ends
+ * the previous response before installing the new one; `destroyed` covers a
+ * socket torn down under us. Either way the object is still referenced by the
+ * stored session until something replaces it, so presence alone is not enough
+ * to conclude anyone is listening.
+ */
+function hasLiveClient(stored: StoredSession): boolean {
+  const client = stored.sseClient
+  return client !== undefined && !client.writableEnded && !client.destroyed
 }
 
 export function createSessionStore(
@@ -111,7 +138,9 @@ export function createSessionStore(
       if (stored) stored.lastActivity = now
     },
     reapIdle(now, idleMs) {
-      return [...sessions.values()].filter((s) => now - s.lastActivity > idleMs)
+      return [...sessions.values()].filter(
+        (s) => now - s.lastActivity > idleMs && !hasLiveClient(s),
+      )
     },
   }
 }

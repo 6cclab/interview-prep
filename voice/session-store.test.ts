@@ -84,4 +84,56 @@ describe('createSessionStore', () => {
     expect(store.reapIdle(1000 + 4_000, 5_000)).toEqual([])
     expect(store.reapIdle(1000 + 6_000, 5_000).map((s) => s.id)).toEqual(['abc'])
   })
+
+  /**
+   * The regression that ended a live `lru-cache` drill on 2026-08-12, five
+   * minutes after the interviewer said "go ahead and write it".
+   *
+   * Only `/turn`, `/turn/retry`, `/hint` and `/tests` call `touch`, so writing
+   * code — the entire point of the exercise, and something the drill's own
+   * 45-minute clock budgets for — registers as no activity at all. Silence is
+   * therefore not evidence of abandonment. An open SSE response is evidence of
+   * the opposite, and that is what the reaper now requires.
+   */
+  describe('reapIdle() and a browser that is still attached', () => {
+    function storeWithIdleSession() {
+      const store = createSessionStore(() => 'abc', () => 1000)
+      const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
+      return { store, stored, wellPastIdle: 1000 + 60_000 }
+    }
+
+    it('spares a long-silent session whose SSE connection is still open', () => {
+      const { store, stored, wellPastIdle } = storeWithIdleSession()
+      stored.sseClient = { writableEnded: false, destroyed: false } as never
+      expect(store.reapIdle(wellPastIdle, 5_000)).toEqual([])
+    })
+
+    it('still reaps a session that never had a client', () => {
+      const { store, wellPastIdle } = storeWithIdleSession()
+      expect(store.reapIdle(wellPastIdle, 5_000).map((s) => s.id)).toEqual(['abc'])
+    })
+
+    // The reconnect path in `/stream` ends the previous response and leaves the
+    // object in place until the new one replaces it, so a stale `sseClient` must
+    // not read as a live browser.
+    it('still reaps a session whose client response has ended', () => {
+      const { store, stored, wellPastIdle } = storeWithIdleSession()
+      stored.sseClient = { writableEnded: true, destroyed: false } as never
+      expect(store.reapIdle(wellPastIdle, 5_000).map((s) => s.id)).toEqual(['abc'])
+    })
+
+    it('still reaps a session whose client socket was destroyed', () => {
+      const { store, stored, wellPastIdle } = storeWithIdleSession()
+      stored.sseClient = { writableEnded: false, destroyed: true } as never
+      expect(store.reapIdle(wellPastIdle, 5_000).map((s) => s.id)).toEqual(['abc'])
+    })
+
+    // Liveness spares an *idle* session; it does not make one immortal, and it
+    // must not change behaviour for a session that is not idle in the first place.
+    it('does not reap a live-client session that is also inside the threshold', () => {
+      const { store, stored } = storeWithIdleSession()
+      stored.sseClient = { writableEnded: false, destroyed: false } as never
+      expect(store.reapIdle(1000 + 1_000, 5_000)).toEqual([])
+    })
+  })
 })
