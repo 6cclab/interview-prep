@@ -165,6 +165,44 @@ describe('parseMarkdown', () => {
  * never saw is caught here rather than by a prompt quietly missing a line
  * mid-drill.
  */
+/**
+ * The source side of the round-trip check: the README with markdown's own
+ * markers removed, so what is left is exactly what the parser should have kept.
+ *
+ * **Markers are only markers outside a fence.** Stripping them everywhere is
+ * what this used to do, and it made the check fail correct input: a ```ts block
+ * containing a JSDoc comment has a literal `**` in it, which the parser is
+ * required to preserve — `parseMarkdown` keeps fenced text verbatim, and the
+ * "keeps a code block literal" case above pins that. The global strip deleted it
+ * from the source side only, so the two sides disagreed about a file where
+ * nothing was wrong. JSDoc is idiomatic TypeScript and appears in every stub in
+ * this repo, so this was waiting for the first README that showed one.
+ *
+ * The same reasoning covers the rest of them: `#` opens a comment in several
+ * languages, `-` starts a flag, and a digit followed by a period is a decimal.
+ * Inside a fence none of those are markdown.
+ *
+ * Fence lines themselves still lose their backticks and keep their language,
+ * because that is how the parser reports them — `lang` first, then `text`.
+ */
+function strippedOfMarkers(body: string): string {
+  return body
+    .split('```')
+    .map((segment, index) =>
+      // Odd segments are fenced: the split alternates outside, inside, outside.
+      index % 2 === 1
+        ? segment
+        : segment
+            .replace(/\*\*/g, '')
+            .replace(/`/g, '')
+            .replace(/^#{1,2} /gm, '')
+            .replace(/^[-*] /gm, '')
+            .replace(/^\d+\. /gm, ''),
+    )
+    .join('')
+    .replace(/\s+/g, '')
+}
+
 describe('every problem statement the server serves', () => {
   const readmes: { name: string; body: string }[] = []
   for (const problem of readdirSync(join(REPO, 'system-design'), { withFileTypes: true })) {
@@ -202,15 +240,7 @@ describe('every problem statement the server serves', () => {
       })
       .join(' ')
       .replace(/\s+/g, '')
-    const source = body
-      .replace(/```/g, '')
-      .replace(/\*\*/g, '')
-      .replace(/`/g, '')
-      .replace(/^#{1,2} /gm, '')
-      .replace(/^[-*] /gm, '')
-      .replace(/^\d+\. /gm, '')
-      .replace(/\s+/g, '')
-    expect(rendered).toBe(source)
+    expect(rendered).toBe(strippedOfMarkers(body))
   })
 
   it.each(readmes.map((r) => [r.name, r.body] as const))('%s leaves no raw markers on screen', (_name, body) => {
