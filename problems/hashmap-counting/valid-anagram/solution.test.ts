@@ -30,8 +30,24 @@ describe('isAnagram — correctness', () => {
     expect(isAnagram('abc', 'abcd')).toBe(false)
   })
 
+  // Every other rejection above also mismatches on the *last* letter examined, so
+  // an answer that overwrites its verdict each iteration instead of returning
+  // early still passes them. Here 'a' and 'b' mismatch and 'c' matches, so only
+  // a solution that keeps the earlier disagreement gets this right.
+  it('rejects a mismatch that agrees on the last letter', () => {
+    expect(isAnagram('abbc', 'aabc')).toBe(false)
+  })
+
   it('accepts two empty strings', () => {
     expect(isAnagram('', '')).toBe(true)
+  })
+
+  // The constraints allow a length of zero, so one empty string is a legal input
+  // and is never an anagram of a non-empty one. A falsy guard on either argument
+  // returns true here.
+  it('rejects one empty string against a non-empty one', () => {
+    expect(isAnagram('', 'abc')).toBe(false)
+    expect(isAnagram('abc', '')).toBe(false)
   })
 
   it('accepts a string against itself', () => {
