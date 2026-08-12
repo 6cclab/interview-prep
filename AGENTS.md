@@ -105,7 +105,19 @@ pnpm drill [problem|pattern]  # a full coding drill with NO model involved:
                         # and `hints.approach`, and an unauthored rung says so
                         # rather than serving the next one up.
 pnpm test <problem>     # run one drill
-pnpm test               # everything, as a regression check
+pnpm test               # everything, as a regression check. **Not a health signal.**
+                        # It reports hundreds of failures and that is correct: the
+                        # unsolved drill stubs throw `not implemented` by design, and
+                        # the debugging exercises' suites are red because the planted
+                        # bugs reproduce. Red here means "drills unsolved", which is
+                        # the normal state of the repo.
+pnpm test:harness       # the tools, without the drills: voice/, scripts/, test-utils/.
+                        # **This is the gate.** It should be green and silent, and any
+                        # failure or `Errors` line in it is a real defect. Kept separate
+                        # because one command that mixes "drills unsolved" (expected)
+                        # with "harness broken" (not) tells you nothing, so nobody reads
+                        # it — which is how 13 unhandled exceptions sat in the output
+                        # while every test passed.
 pnpm reset <problem>    # keep the attempt in local/attempts/, then restore stub.ts over
                         # solution.ts. See "Keeping your attempts".
 pnpm domains            # domains the exercise set covers; `--for <company>` to tailor

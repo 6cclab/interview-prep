@@ -459,6 +459,46 @@ function finishOptions(deps: VoiceServerDeps, stored: StoredSession, elapsedMs: 
 }
 
 /**
+ * Stop the speaker and end the session for a client that has gone away, and
+ * never throw doing it.
+ *
+ * This runs inside an `IncomingMessage` `'close'` handler, where there is no
+ * caller to hand an error to: a throw becomes an unhandled exception and takes
+ * the whole drill server down — at a disconnect, which is the moment you are
+ * least likely to be watching.
+ *
+ * Everything it calls can throw *by design*. `endAndPersist` reaches
+ * `transportLabel` -> `chooseBackend`, which throws when no backend has been
+ * chosen, and `codingPattern`, which throws on a slug it cannot resolve.
+ * `speaker.stop()` kills a subprocess whose audio device may have vanished.
+ * Those throws are correct where they are — they stop a drill starting on a
+ * transport nobody picked — but here the page is already gone and there is
+ * nothing to act on. A drill that ended badly beats a server that is not
+ * running.
+ *
+ * Two `try` blocks rather than one: a speaker that fails to stop must not cost
+ * the transcript, which is the only artifact a finished drill leaves behind.
+ */
+export function teardownDisconnectedClient(
+  deps: VoiceServerDeps,
+  store: SessionStore,
+  entryClocks: Map<string, () => number>,
+  closing: Set<string>,
+  id: string,
+): void {
+  try {
+    deps.speaker?.stop?.()
+  } catch (error) {
+    console.error(`teardown: could not stop the speaker: ${errorMessage(error)}`)
+  }
+  try {
+    endAndPersist(deps, store, entryClocks, closing, id)
+  } catch (error) {
+    console.error(`teardown: could not end session ${id}: ${errorMessage(error)}`)
+  }
+}
+
+/**
  * Ends a session and writes everything it produced.
  *
  * `closing` is the latch, and it is not optional bookkeeping. `store.get(id)`
@@ -1034,8 +1074,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // And cut the sentence already in the speaker's mouth. Nothing else can:
         // `say` is a server-side subprocess, so the page closing does not touch
         // it, and a sentence takes seconds to read out.
-        deps.speaker?.stop?.()
-        endAndPersist(deps, store, entryClocks, closing, id)
+        teardownDisconnectedClient(deps, store, entryClocks, closing, id)
       })
 
       const alreadyBegun = stored.session.entries().length > 0
