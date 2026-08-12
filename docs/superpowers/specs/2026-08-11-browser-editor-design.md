@@ -180,3 +180,40 @@ of fact and belongs beside it.
   the editor/test-runner filesystem coupling that blocked it, which is a real
   consequence of this work, but the remaining blockers — the `127.0.0.1` bind
   and TLS for `getUserMedia` over a LAN — are untouched and unaddressed here.
+
+## Deferred: a deployed, multi-person mode
+
+Raised 2026-08-12 and tabled as out of scope. Recorded because the reasoning
+took a while to reach and would otherwise have to be re-derived.
+
+The write-through model above is single-user, and deliberately so — but so is
+the rest of the server, for four reasons that predate this work: `hasActive()`
+allows one session at a time globally, `local/drill-log.md` is one shared file,
+`local/attempts/` is one shared directory, and `local/` holds a personal story
+bank. Sharing was always meant to be "clone the repo and run your own", not
+"open a URL".
+
+The idea worth keeping, if that changes: **keep local instances exactly as they
+are, and make a deployed instance a different mode** — the editor's code is
+ephemeral (a per-session scratch workspace, never the checkout's files) and the
+instance keeps only a record of what was solved, per person.
+
+Four hazards found while thinking it through, all of which a naive
+implementation would hit:
+
+- **Seed a workspace from `stub.ts`, never `solution.ts`.** On a deployed box
+  `solution.ts` holds whatever was last written there — someone's worked answer.
+  Seeding from it hands the next person the solution. A one-word difference and
+  the worst available bug.
+- **`local/` cannot go on a shared box as-is.** `voice/context.ts:125` loads
+  `local/stories.md` into the behavioural interviewer's prompt, so a colleague's
+  mock would be fed someone else's personal stories.
+- **The pairing track is a door anyone could open.** `coachPaths` deliberately
+  serves `solutions/**` and `patterns.md`. That is correct for a choice *you*
+  make about your own drilling; on a shared instance it is an answer key with a
+  URL.
+- **`hasActive()`'s one-session limit has to lift** and become per-user.
+
+Identity, which tracks to serve, and what the record holds were the three open
+questions. Authentik already runs in the homelab, so forwarded-header identity
+would keep auth code out of this repo entirely.
