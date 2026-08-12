@@ -136,6 +136,11 @@ export interface OllamaOptions {
   numCtx?: number
   keepAlive?: string
   timeoutMs?: number
+  /**
+   * Defaults to `OLLAMA_API_KEY`. Absent means unauthenticated, which is what
+   * talking straight to an ollama box requires — see `ollamaHeaders`.
+   */
+  apiKey?: string
   /** Injectable so tests never touch the network. */
   fetchImpl?: typeof fetch
 }
@@ -150,6 +155,31 @@ export class OllamaTimeoutError extends Error {
     )
     this.name = 'OllamaTimeoutError'
   }
+}
+
+/**
+ * Request headers for both call sites in this module.
+ *
+ * ollama itself takes no credentials, and pointing `OLLAMA_HOST` straight at a
+ * box must keep working — so **absent means unauthenticated**, and that is the
+ * default rather than an error. The bearer token exists for `ollama-gateway`
+ * (`~/projects/ollama-gateway`), which fronts several boxes behind one address
+ * and rejects every route but `/healthz` without one. The gateway is an
+ * addition, not a migration: a drill should not start depending on a service
+ * that can be down.
+ *
+ * A blank value reads as unset, matching how `chooseBackend` treats its own
+ * variables, so `OLLAMA_API_KEY= ` clears an inherited export rather than
+ * sending `Bearer `.
+ *
+ * One definition used by both `preloadOllama` and `ollamaStream`: they were the
+ * two sites that had to change together, and two copies of an auth header drift.
+ */
+export function ollamaHeaders(apiKey: string | undefined): Record<string, string> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  const key = (apiKey ?? '').trim()
+  if (key !== '') headers.authorization = `Bearer ${key}`
+  return headers
 }
 
 /**
@@ -236,12 +266,13 @@ export async function preloadOllama(opts: OllamaOptions = {}): Promise<string> {
   const host = normaliseHost(opts.host ?? process.env.OLLAMA_HOST)
   const model = opts.model ?? process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL
   const doFetch = opts.fetchImpl ?? fetch
+  const apiKey = opts.apiKey ?? process.env.OLLAMA_API_KEY
   try {
     // An empty `messages` array asks ollama to load the model and return
     // immediately without generating anything.
     const res = await doFetch(`${host}/api/chat`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: ollamaHeaders(apiKey),
       body: JSON.stringify({ model, messages: [], keep_alive: opts.keepAlive ?? DEFAULT_KEEP_ALIVE }),
     })
     if (!res.ok) {
@@ -260,6 +291,7 @@ export function ollamaStream(opts: OllamaOptions = {}): StreamFn {
   const numCtx = opts.numCtx ?? Number(process.env.OLLAMA_NUM_CTX ?? DEFAULT_NUM_CTX)
   const keepAlive = opts.keepAlive ?? DEFAULT_KEEP_ALIVE
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const apiKey = opts.apiKey ?? process.env.OLLAMA_API_KEY
   const doFetch = opts.fetchImpl ?? fetch
 
   return async function* (system, messages) {
@@ -282,7 +314,7 @@ export function ollamaStream(opts: OllamaOptions = {}): StreamFn {
       try {
         res = await doFetch(`${host}/api/chat`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: ollamaHeaders(apiKey),
           body: JSON.stringify(ollamaChatBody(system, messages, { model, numCtx, keepAlive })),
           signal: controller.signal,
         })

@@ -500,6 +500,7 @@ VOICE_BACKEND_MOCK=ollama       # one track; beats the global. Also
 VOICE_CLAUDE_MODEL=claude-opus-5 # override the Claude model for a drill worth it
 OLLAMA_MODEL=gpt-oss:20b        # override the local model (tags are case-sensitive)
 OLLAMA_HOST=10.0.0.5:11434 # a bare host:port is accepted, as ollama's CLI does
+OLLAMA_API_KEY=...              # only for the gateway; absent means unauthenticated
 ```
 
 An unrecognised value **throws at startup** rather than falling back — a typo
@@ -507,22 +508,40 @@ silently running a 45-minute drill on the expensive path is the failure this
 arrangement exists to prevent. The old behaviour (any `ANTHROPIC_API_KEY` in the
 environment quietly outranking the subscription) was exactly that failure.
 
-**`OLLAMA_HOST` cannot yet point at the homelab gateway, because this client
-sends no credentials.** `ollama-gateway` (`~/projects/ollama-gateway`, built
-2026-08-11) fronts LXC 113 (the P40) and the in-cluster CPU deployment behind one
-address, routing each request to whichever box holds the requested model — which
-is what `OLLAMA_HOST` would otherwise have to be re-pointed by hand to do. But
-the gateway requires a bearer token on every route except `/healthz`, and both
-`fetch` call sites here (`preloadOllama` and `ollamaStream` in `voice/ollama.ts`)
-send only `content-type`. Pointing `OLLAMA_HOST` at it today returns **401 on
-every drill turn**, and `preloadOllama` reports rather than throws, so the first
-sign would be the drill itself failing.
+**`OLLAMA_HOST` can point at the homelab gateway, and needs a key to.**
+`ollama-gateway` (`~/projects/ollama-gateway`, built 2026-08-11) fronts LXC 113
+(the P40), the in-cluster CPU deployment and `desktop-3080ti` behind one address,
+routing each request to whichever box holds the requested model — which is what
+`OLLAMA_HOST` would otherwise have to be re-pointed by hand to do. It requires a
+bearer token on every route except `/healthz`.
 
-The fix, when it is wanted: read an `OLLAMA_API_KEY` and set
-`Authorization: Bearer` at both call sites when it is present. Absent must keep
-meaning unauthenticated, so pointing `OLLAMA_HOST` straight at a box goes on
-working unchanged — the gateway is an addition, not a migration, and a drill
-should not start depending on a service that can be down.
+Set `OLLAMA_API_KEY` and both call sites here (`preloadOllama` and `ollamaStream`)
+send `Authorization: Bearer`. **Absent keeps meaning unauthenticated**, so
+pointing `OLLAMA_HOST` straight at a box goes on working unchanged — the gateway
+is an addition, not a migration, and a drill should not start depending on a
+service that can be down. `ollamaHeaders` is the single definition both sites
+use, because two copies of an auth header drift. A blank value reads as unset,
+matching `chooseBackend`'s variables.
+
+Wired and unit-tested; **no drill has yet run against the gateway.** The tests
+that matter most are the two asserting no `authorization` header is sent when no
+key is set — that is the arrangement that works today, and the one a careless
+change would break silently.
+
+The `openai` backend reaches the same gateway by a different door, since
+`ollama-gateway` forwards OpenAI-shaped `/v1/*` as well as native `/api/*`:
+`VOICE_BACKEND=openai`, `OPENAI_BASE_URL=https://<gateway>/v1`,
+`OPENAI_API_KEY=<the same token>`. Note the scheme: `normaliseBaseUrl` refuses
+an explicit `http://` to a non-loopback host rather than putting a bearer token
+on the wire in clear, so a gateway served over plain HTTP fails at startup by
+design.
+
+**On which box: the 3080 Ti is the one a voice drill wants** — 129 tok/s on
+`qwen3:8b` against 37 on the LXC. That does not contradict the standing lesson
+below that throughput is the wrong metric. That lesson is about choosing a
+*model* on fixed hardware, where a reasoning model wins on tok/s and loses on
+tokens-per-turn. Same model on a faster box changes only the first term, so it
+is a straight win.
 
 **The Claude default is Sonnet, not Opus, and the reason is cost.** `Interviewer`
 owns the history and re-sends the whole transcript every turn, so a drill's spend

@@ -4,6 +4,7 @@ import {
   extractOllamaError,
   normaliseHost,
   ollamaChatBody,
+  ollamaHeaders,
   ollamaStream,
   preloadOllama,
 } from './ollama'
@@ -234,6 +235,92 @@ describe('preloadOllama', () => {
     const { impl } = fakeFetch([], { status: 500 })
     await expect(preloadOllama({ host: 'http://box:11434', fetchImpl: impl })).resolves.toMatch(
       /preload failed \(HTTP 500\)/,
+    )
+  })
+})
+
+describe('ollamaHeaders', () => {
+  // Absent must keep meaning unauthenticated: pointing OLLAMA_HOST straight at a
+  // box is the arrangement that works today, and the gateway is an addition
+  // rather than a migration. A drill should not start depending on a service
+  // that can be down.
+  it('sends only content-type when there is no key', () => {
+    expect(ollamaHeaders(undefined)).toEqual({ 'content-type': 'application/json' })
+  })
+
+  it('adds a bearer token when there is one', () => {
+    expect(ollamaHeaders('k')).toEqual({
+      'content-type': 'application/json',
+      authorization: 'Bearer k',
+    })
+  })
+
+  // Same stance as `chooseBackend`'s variables: an empty or whitespace-only
+  // value reads as unset, so `OLLAMA_API_KEY= ` clears an inherited export
+  // instead of sending `Bearer `.
+  it('treats a blank key as unset', () => {
+    expect(ollamaHeaders('   ')).toEqual({ 'content-type': 'application/json' })
+  })
+})
+
+describe('gateway authentication', () => {
+  it('preloadOllama sends the bearer token when a key is configured', async () => {
+    let seen: Record<string, string> = {}
+    await preloadOllama({
+      apiKey: 'secret-token',
+      fetchImpl: async (_url, init) => {
+        seen = init?.headers as Record<string, string>
+        return new Response('{}', { status: 200 })
+      },
+    })
+    expect(seen.authorization).toBe('Bearer secret-token')
+  })
+
+  it('preloadOllama sends no authorization header without a key', async () => {
+    let seen: Record<string, string> = {}
+    await preloadOllama({
+      fetchImpl: async (_url, init) => {
+        seen = init?.headers as Record<string, string>
+        return new Response('{}', { status: 200 })
+      },
+    })
+    expect(seen.authorization).toBeUndefined()
+  })
+
+  it('ollamaStream sends the bearer token when a key is configured', async () => {
+    let seen: Record<string, string> = {}
+    const stream = ollamaStream({
+      apiKey: 'secret-token',
+      fetchImpl: async (_url, init) => {
+        seen = init?.headers as Record<string, string>
+        return new Response('{"message":{"content":"hi"},"done":true}\n', { status: 200 })
+      },
+    })
+    await drain(stream('SYSTEM', []))
+    expect(seen.authorization).toBe('Bearer secret-token')
+  })
+
+  it('ollamaStream sends no authorization header without a key', async () => {
+    let seen: Record<string, string> = {}
+    const stream = ollamaStream({
+      fetchImpl: async (_url, init) => {
+        seen = init?.headers as Record<string, string>
+        return new Response('{"message":{"content":"hi"},"done":true}\n', { status: 200 })
+      },
+    })
+    await drain(stream('SYSTEM', []))
+    expect(seen.authorization).toBeUndefined()
+  })
+
+  // A token in a saved transcript would be a bad way to discover this. Error
+  // text from this module reaches the client and the drill transcript.
+  it('never puts the key in an error message', async () => {
+    const stream = ollamaStream({
+      apiKey: 'secret-token',
+      fetchImpl: async () => new Response('{"error":"model not found"}', { status: 404 }),
+    })
+    await expect(drain(stream('SYSTEM', []))).rejects.toThrow(
+      expect.not.stringContaining('secret-token') as unknown as string,
     )
   })
 })
