@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { SentenceBuffer } from './chunk'
+import { speechText } from './reply-code'
 
 export interface Message {
   role: 'user' | 'assistant'
@@ -17,10 +18,16 @@ export interface Interviewer {
 }
 
 /**
- * The trailer is a fenced block, and a fence opens with a backtick run that the
- * sentence chunker would happily speak. Hold output back once a fence starts.
+ * A fence opens with a backtick run that the sentence chunker would happily
+ * speak, so nothing inside one may reach the synthesiser — not a `drill-log`
+ * trailer, not a code block. `speechText` does that removal; this constant is
+ * how much of the tail is withheld while a fence might still be arriving.
+ *
+ * Two characters, because "``" is the longest prefix of a fence that is not yet
+ * a fence. Withholding it means the backticks are never spoken in the delta
+ * before the one that completes them.
  */
-const FENCE = '```'
+const FENCE_HOLDBACK = 2
 
 export function createInterviewer(system: string, stream: StreamFn): Interviewer {
   const messages: Message[] = []
@@ -31,35 +38,32 @@ export function createInterviewer(system: string, stream: StreamFn): Interviewer
       messages.push({ role: 'user', content: said })
       const buffer = new SentenceBuffer()
       raw = ''
-      let fenced = false
-      let carry = ''
-      const holdback = FENCE.length - 1
+      // How much of `speechText(raw)` has already gone to the chunker. Tracking
+      // a length into the projection — rather than a fence flag — is what lets a
+      // fence *end*: prose after the closing fence simply extends the projection
+      // and gets spoken, so the pairing coach can show a snippet mid-turn and
+      // keep talking. The previous flag sealed the rest of the turn permanently.
+      let spoken = 0
 
       try {
         for await (const delta of stream(system, messages)) {
           raw += delta
-          if (fenced) continue
-
-          const text = carry + delta
-          const fenceAt = text.indexOf(FENCE)
-          if (fenceAt !== -1) {
-            fenced = true
-            carry = ''
-            for (const sentence of buffer.push(text.slice(0, fenceAt))) yield sentence
-            continue
+          const prose = speechText(raw)
+          // The projection can shrink by up to a fence's length as a backtick
+          // run resolves into an opener, so this can go backwards; the guard is
+          // what keeps that from re-speaking or slicing negatively.
+          const safe = prose.length - FENCE_HOLDBACK
+          if (safe > spoken) {
+            for (const sentence of buffer.push(prose.slice(spoken, safe))) yield sentence
+            spoken = safe
           }
-
-          if (text.length < holdback) {
-            carry = text
-            continue
-          }
-
-          carry = text.slice(text.length - holdback)
-          for (const sentence of buffer.push(text.slice(0, text.length - holdback))) yield sentence
         }
 
-        if (!fenced && carry) {
-          for (const sentence of buffer.push(carry)) yield sentence
+        // The stream is done, so nothing more can turn a trailing backtick run
+        // into a fence. Release the held-back tail.
+        const prose = speechText(raw)
+        if (prose.length > spoken) {
+          for (const sentence of buffer.push(prose.slice(spoken))) yield sentence
         }
 
         for (const sentence of buffer.flush()) yield sentence

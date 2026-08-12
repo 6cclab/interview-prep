@@ -1,4 +1,5 @@
 import type { Interviewer } from './interviewer'
+import { displayText, hasCodeBlock } from './reply-code'
 import type { Recorder } from './audio'
 import type { Speaker, Transcriber } from './speech'
 import type { Track } from './context'
@@ -123,7 +124,17 @@ export function createSession(opts: CreateSessionOptions): Session {
       reportFailure(errorMessage(error), at)
       return
     }
-    entries.push({ speaker: 'interviewer', text: spoken.join(' '), at })
+    // Normally the entry *is* what was said, joined back together. A reply
+    // carrying a code block is the exception: the code was deliberately withheld
+    // from speech, so rebuilding the entry from spoken sentences alone would
+    // drop the snippet from the pane and from the saved transcript — the two
+    // places it is the whole point of showing.
+    //
+    // `displayText`, not `lastRaw()`: the raw reply may also carry a log
+    // trailer, and that must reach neither. See voice/reply-code.ts.
+    const raw = opts.interviewer.lastRaw()
+    const text = hasCodeBlock(raw) ? displayText(raw) : spoken.join(' ')
+    entries.push({ speaker: 'interviewer', text, at })
   }
 
   return {

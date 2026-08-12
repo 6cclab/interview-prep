@@ -1,5 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Entry } from '../types'
+import { Markdown } from './Markdown'
+
+/**
+ * A turn's body, rendered as markdown only when it actually contains a fenced
+ * block.
+ *
+ * The narrow condition is deliberate. Only the pairing coach is allowed to emit
+ * code, and every other track's prose is written to be *spoken* — running it
+ * through a markdown renderer would let a stray asterisk or hyphen silently
+ * restyle a sentence that was never meant as markup. So the existing tracks keep
+ * rendering exactly as they did, byte for byte.
+ */
+function TurnBody({ text, className }: { text: string; className: string }) {
+  if (!text.includes('```')) return <div className={className}>{text}</div>
+  return (
+    <div className={className}>
+      <Markdown source={text} />
+    </div>
+  )
+}
 
 interface Props {
   entries: Entry[]
@@ -135,7 +155,7 @@ export function Transcript({ entries, interimSentences, streaming, meta, partner
                 </div>
                 {collapsible ? (
                   <div>
-                    <div className="turn__body turn__body--collapsed">{entry.text}</div>
+                    <TurnBody text={entry.text} className="turn__body turn__body--collapsed" />
                     <button
                       type="button"
                       className="turn__expand"
@@ -145,7 +165,7 @@ export function Transcript({ entries, interimSentences, streaming, meta, partner
                     </button>
                   </div>
                 ) : (
-                  <div className="turn__body">{entry.text}</div>
+                  <TurnBody text={entry.text} className="turn__body" />
                 )}
               </div>
             )

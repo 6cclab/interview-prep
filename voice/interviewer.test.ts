@@ -86,6 +86,42 @@ describe('createInterviewer', () => {
     }
   })
 
+  // The pairing coach shows a snippet and then keeps talking about it. Before
+  // `speechText`, the first fence sealed the rest of the turn, so everything
+  // after a code block was silently dropped from speech *and* from the entry.
+  it('resumes speaking after a code block closes', async () => {
+    const { stream } = scripted([
+      ['Start from the counts. ', '```ts\nfor (const k in a) {\n  return false\n}\n```', '\n\nNow why return early?'],
+    ])
+    const interviewer = createInterviewer('SYSTEM', stream)
+    const sentences = await collect(interviewer.turn('Done.'))
+    expect(sentences).toEqual(['Start from the counts.', 'Now why return early?'])
+    for (const sentence of sentences) {
+      expect(sentence).not.toContain('`')
+      expect(sentence).not.toContain('return false')
+    }
+  })
+
+  it('still seals the turn after a trailer, which has no prose to follow it', async () => {
+    const { stream } = scripted([['Good session. ', '```drill-log\nsolved: yes\nnote: n\n```']])
+    const interviewer = createInterviewer('SYSTEM', stream)
+    const sentences = await collect(interviewer.turn('Done.'))
+    expect(sentences).toEqual(['Good session.'])
+    expect(sentences.join(' ')).not.toContain('solved')
+    expect(interviewer.lastRaw()).toContain('solved: yes')
+  })
+
+  it('speaks neither block when a reply carries code and a trailer', async () => {
+    const { stream } = scripted([
+      ['Try this. ', '```ts\nconst a = 1\n```', '\n\nThat is the shape. ', '```drill-log\nsolved: yes\nnote: n\n```'],
+    ])
+    const interviewer = createInterviewer('SYSTEM', stream)
+    const sentences = await collect(interviewer.turn('Done.'))
+    expect(sentences).toEqual(['Try this.', 'That is the shape.'])
+    expect(sentences.join(' ')).not.toContain('const a')
+    expect(sentences.join(' ')).not.toContain('solved')
+  })
+
   it('does not lose the tail when no fence appears', async () => {
     const { stream } = scripted([['One two three']])
     const interviewer = createInterviewer('SYSTEM', stream)

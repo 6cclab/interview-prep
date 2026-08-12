@@ -86,8 +86,31 @@ describe('buildCoachPrompt', () => {
   })
 
   it('keeps the spoken constraints, including spelling complexity aloud', () => {
-    expect(prompt).toMatch(/no markdown/)
+    expect(prompt).toMatch(/no bullet lists and no headings/)
     expect(prompt).toContain('"O of n", not "O(n)"')
+  })
+
+  // Bullets stay forbidden for a measured reason, and it is not tidiness: on
+  // 2026-08-12 a reply that opened with a markdown bullet was parsed by `say` as
+  // a command-line flag, exited 1, and dropped the whole turn silently. Code
+  // fences are safe from that because they never reach `say` at all.
+  it('still forbids the bullet lists that broke speech, while allowing code', () => {
+    expect(prompt).toMatch(/no bullet lists/)
+    expect(prompt).toMatch(/```ts/)
+  })
+
+  // The point of the feature: a snippet is shown, not dictated, and the coach
+  // may keep talking after it rather than being cut off for the rest of the turn.
+  it('tells the coach that code is shown and never spoken, mid-turn included', () => {
+    expect(prompt).toMatch(/shown\s+to him on screen and never spoken/)
+    expect(prompt).toMatch(/middle of a turn/)
+  })
+
+  // A coach that shows a wall of code stops the conversation while he reads it,
+  // and the spoken half stops making sense on its own.
+  it('asks for short snippets whose purpose is spoken before they appear', () => {
+    expect(prompt).toMatch(/few lines that carry the point/)
+    expect(prompt).toMatch(/stand on its own if he is not looking/)
   })
 
   // The same omission that produced a third-person *interview* on the coding

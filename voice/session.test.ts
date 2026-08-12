@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runSession, type SessionDeps, type SessionOutcome } from './session'
-import type { Interviewer } from './interviewer'
+import { createInterviewer, type Interviewer } from './interviewer'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -245,6 +245,56 @@ describe('createSession', () => {
     for await (const s of session.begin()) sentences.push(s)
     expect(sentences).toEqual(['Ready when you are.'])
     expect(session.entries()).toEqual([{ speaker: 'interviewer', text: 'Ready when you are.', at: 0 }])
+  })
+
+  // End to end over the *real* interviewer, because this is the one property the
+  // pairing code feature rests on and the unit tests each only see half of it:
+  // the snippet has to reach the entry (so the pane and the saved transcript
+  // show it) while never reaching the sentences (so it is not read aloud).
+  describe('a coach reply carrying code', () => {
+    function codeSession() {
+      const deltas = [
+        'Start from the counts. ',
+        '```ts\nfor (const k in a) {\n  if (a[k] !== b[k]) return false\n}\n```',
+        '\n\nNow why return early?',
+      ]
+      const interviewer = createInterviewer('SYSTEM', async function* () {
+        for (const delta of deltas) yield delta
+      })
+      return createSession({ interviewer, now: () => 0 })
+    }
+
+    it('keeps the snippet out of everything that gets spoken', async () => {
+      const spoken: string[] = []
+      for await (const s of codeSession().begin()) spoken.push(s)
+      expect(spoken).toEqual(['Start from the counts.', 'Now why return early?'])
+      expect(spoken.join(' ')).not.toContain('`')
+      expect(spoken.join(' ')).not.toContain('return false')
+    })
+
+    it('puts the snippet in the entry, fence intact, with the prose around it', async () => {
+      const session = codeSession()
+      for await (const _ of session.begin()) void _
+      const { text } = session.entries()[0]!
+      expect(text).toContain('```ts')
+      expect(text).toContain('if (a[k] !== b[k]) return false')
+      expect(text).toContain('Start from the counts.')
+      expect(text).toContain('Now why return early?')
+    })
+
+    it('still keeps a log trailer out of the entry when one follows the code', async () => {
+      const interviewer = createInterviewer('SYSTEM', async function* () {
+        yield 'Good session. '
+        yield '```ts\nconst a = 1\n```'
+        yield '\n\n```drill-log\nsolved: yes\nnote: n\n```'
+      })
+      const session = createSession({ interviewer, now: () => 0 })
+      for await (const _ of session.begin()) void _
+      const { text } = session.entries()[0]!
+      expect(text).toContain('const a = 1')
+      expect(text).not.toContain('solved')
+      expect(text).not.toContain('drill-log')
+    })
   })
 
   it('submitTurn() records the Andre entry immediately, before the reply arrives', async () => {
