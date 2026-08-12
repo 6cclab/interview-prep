@@ -53,6 +53,21 @@ describe('isPalindrome — correctness', () => {
     const reversed = half.split('').reverse().join('')
     expect(isPalindrome(half + reversed)).toBe(true)
     expect(isPalindrome(half + '#' + reversed)).toBe(true)
-    expect(isPalindrome(half + 'z' + reversed)).toBe(false)
+
+    // This line used to read `isPalindrome(half + 'z' + reversed)).toBe(false)`,
+    // and it was wrong: a single character inserted at the exact centre of an
+    // odd-length string is never compared against anything, because that is
+    // precisely where the two pointers meet. `half + <anything> + reversed` is a
+    // palindrome for every possible middle character, so no correct solution can
+    // return false there — the assertion failed only correct code.
+    //
+    // The intent was a large input that is genuinely not a palindrome, so the
+    // mismatch now sits just left of centre instead of on it. Its mirror is just
+    // right of centre, which means both pointers still walk nearly the whole
+    // string before the comparison fails — the traversal this case exists to
+    // exercise is unchanged.
+    const palindrome = half + reversed
+    const offCentre = palindrome.slice(0, half.length - 1) + 'z' + palindrome.slice(half.length)
+    expect(isPalindrome(offCentre)).toBe(false)
   })
 })
