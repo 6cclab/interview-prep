@@ -24,6 +24,7 @@ import {
 } from './context'
 import { findCodingProblem, listCodingProblems, problemDir } from './problems'
 import { readSolution, writeSolution, versionOf } from './solution-file'
+import { buildExercise } from './coding-exercise'
 import { findCompetency, listCompetencies } from './competencies'
 import { findExercise, listExercises } from './exercises'
 import { runDebugTests, debugVerdictCue, type DebugVerdict } from './debug-tests'
@@ -842,6 +843,36 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         return
       }
       sendJson(res, 200, { version: versionOf(text) })
+      return
+    }
+
+    // Everything a browser needs to run the drill's suite itself: the stub,
+    // the suite, and the `test-utils/*` modules it imports. Slug-only in and
+    // out, same rule as `/solution` above and for the same reason — this is
+    // the second route that reads out of a coding problem's directory.
+    //
+    // Reads `stub.ts`, never `solution.ts` — see `coding-exercise.ts` for why
+    // that particular file is the one this route must never touch. The suite
+    // is served exactly as written, comments included: `solution.test.ts`
+    // carries doc comments explaining why each test exists, which is
+    // spoiler-bearing, but stripping comments out of TypeScript source safely
+    // needs a real parser — a regex over the text would as happily eat a `//`
+    // inside a string literal or a regex, corrupting the suite it also has to
+    // hand `vitest` a working copy of. A fragile transform failing silently
+    // in a browser sandbox is worse than the spoiler it would sometimes catch.
+    const exerciseRoute = /^\/api\/coding\/([^/]+)\/exercise$/.exec(url.pathname)
+    if (req.method === 'GET' && exerciseRoute) {
+      const slug = exerciseRoute[1]!
+      if (!PROBLEM_SLUG.test(slug)) {
+        sendJson(res, 400, { error: 'Invalid problem name.' })
+        return
+      }
+      const exercise = buildExercise(deps.root, slug)
+      if (exercise === null) {
+        notFound(res)
+        return
+      }
+      sendJson(res, 200, exercise)
       return
     }
 
