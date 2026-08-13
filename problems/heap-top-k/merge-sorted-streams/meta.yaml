@@ -1,0 +1,35 @@
+pattern: heap-top-k
+title: One Sorted Stream From Many
+difficulty: medium
+budget: call budget — pulling 10 values from 500 sources must read at most ~520 values total, which rejects any solution that materialises and sorts; plus an infinite source, which such a solution never returns from
+complexity:
+  time: O(total log k) to drain fully, where k is the number of sources — each value costs one push and one pop against a structure holding at most one entry per source
+  space: O(k) — one pending value per source, independent of how long the sources are
+hints:
+  nudge: At any moment, the next value out can only be the smallest of the values currently at the front of each source. What lets you find that repeatedly without re-examining every source each time?
+  approach: >-
+    Hold one pending value per source — the smallest each still has to offer.
+    The next output is the minimum of those, so you need a structure that gives
+    you the minimum and lets you replace it cheaply: pop the smallest, emit it,
+    then pull one more value from whichever source it came from and put that
+    back. The structure only ever holds as many entries as there are sources,
+    which is what keeps this lazy and bounded regardless of source length. A
+    source that runs dry simply stops being replaced. Scanning all sources for
+    the minimum each time also works and is O(k) per value rather than O(log k);
+    it passes the call budget but is worth knowing you settled for.
+companies:
+  - name: crowdstrike
+    confidence: low
+    source: >-
+      **Unsourced.** Suggested to Andre 2026-08-12 as a reported CrowdStrike
+      problem ("merging multiple sorted iterators, exposed as an API"), with no
+      citation, date or seniority. Three research passes found no first-person
+      report of it at this company. Recorded as a hypothesis.
+      The lazy-iterator framing is worth practising on its own merits regardless:
+      it is the version of this problem that tests API design rather than recall,
+      which is the axis a senior loop is more likely to probe.
+    date: "2026-08-12"
+  - name: amazon
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 23, Merge k Sorted Lists); no company-specific report
+    date: "general"

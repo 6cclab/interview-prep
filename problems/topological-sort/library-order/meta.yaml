@@ -1,0 +1,37 @@
+pattern: topological-sort
+title: Library Initialization Order
+difficulty: medium
+budget: scale test — 200,000 libraries in a single dependency chain plus 150,000 isolated ones must finish well under 5s, which rejects the repeated-rescan solution (quadratic)
+complexity:
+  time: O(V + E) — every library and every dependency edge is examined a constant number of times
+  space: O(V + E) for the adjacency structure and the pending-count map, plus the output
+hints:
+  nudge: You can safely initialize anything that has nothing left to wait for. What happens to the things that were waiting on it, and how do you avoid rescanning everything to find that out?
+  approach: >-
+    Count, for each library, how many dependencies it is still waiting on. Start
+    with every library whose count is zero. Each time you take one, walk the
+    libraries that depend on it and decrement their counts; any that reach zero
+    become available. The counts are what let you avoid rescanning — you never
+    look at a library until the moment it might have become ready. If the output
+    ends up shorter than the input, the leftovers are exactly the ones trapped in
+    a cycle. Unknown names are worth rejecting up front, before any of this.
+companies:
+  - name: crowdstrike
+    confidence: low
+    source: >-
+      **Unsourced.** Suggested to Andre 2026-08-12 as a reported CrowdStrike
+      problem, with no citation, date or seniority attached. Three independent
+      research passes — including a browser session against LeetCode Discuss,
+      Glassdoor, Blind, Reddit and 1point3acres — found no first-person report
+      naming a dependency-ordering question at this company. Recorded as a
+      hypothesis, not a finding.
+      What *does* support graph work here is independent: the sibling
+      "Sr. Software Engineer (Cloud) - Asset Graph" req describes the team as
+      owning "a cutting-edge search and distributed graph system", with
+      graph-database experience as a bonus qualification. That is a reason to
+      drill graphs; it is not evidence about this problem.
+    date: "2026-08-12"
+  - name: meta
+    confidence: low
+    source: widely reported as a frequently asked public interview problem (LeetCode 210, Course Schedule II); no company-specific report
+    date: "general"

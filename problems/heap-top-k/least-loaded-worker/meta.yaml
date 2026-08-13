@@ -1,0 +1,34 @@
+pattern: heap-top-k
+title: When Does the Last Job Finish
+difficulty: medium
+budget: scale test — 200,000 jobs across 50,000 workers must finish well under 5s, which rejects scanning every worker per job (1e10 operations)
+complexity:
+  time: O(n log w) — one pop and one push per job against a structure of at most w entries
+  space: O(w) for the worker free-times, and O(1) beyond that
+hints:
+  nudge: You only ever care about one worker at a time — the one free soonest. What does the set of free-times need to support, and which operations does it need to be fast at?
+  approach: >-
+    Track the time each worker next becomes free. For each job in order, take
+    the smallest of those times, add the job's duration, and put the result
+    back. That is a pop and a push against a structure that keeps the minimum
+    cheap to reach — a min-heap. The answer is the largest free-time at the end,
+    which you can also just track as a running maximum. Seed the heap with w
+    zeroes; if there are more workers than jobs, the extra zeroes simply never
+    get popped, which handles that case without a branch.
+companies:
+  - name: crowdstrike
+    confidence: low
+    source: >-
+      **RECONSTRUCTION — not a CrowdStrike question, and must not be recorded as
+      one.** Candidate reports referenced by Andre on 2026-08-12 mention a coding
+      problem "where a heap was the intended data structure", with the original
+      statement unknown. Rather than invent a question and attach the company's
+      name to it, this exercise was authored to drill the same recognition step.
+      Three research passes found no first-person report of any specific heap
+      problem at this company. The provenance is stated on the README too, so it
+      cannot be lost by reading the file alone.
+    date: "2026-08-12"
+  - name: amazon
+    confidence: low
+    source: widely reported as a frequently asked public interview problem shape (task/worker scheduling by earliest availability); no company-specific report
+    date: "general"

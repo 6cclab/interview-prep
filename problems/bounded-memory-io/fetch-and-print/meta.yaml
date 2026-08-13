@@ -1,0 +1,28 @@
+pattern: bounded-memory-io
+title: Fetch a URL and Print It
+difficulty: easy
+budget: retention budget — a 200,000-chunk body must never leave more than a couple of chunks unwritten, which rejects collecting the body and writing it at the end
+complexity:
+  time: O(n) in the number of bytes; each byte is read once and written once
+  space: O(1) — bounded by the largest single chunk, not by the response size
+hints:
+  nudge: What is the largest thing your solution ever holds at once, and does that number depend on how big the response is?
+  approach: >-
+    Iterate the async body with for-await and write each chunk as it arrives.
+    That is the whole solution; the difficulty is resisting the accumulate-then-
+    write shape, which reads naturally and is what the suite is built to catch.
+    Do not wrap the loop in try/catch unless you intend to rethrow — an error
+    partway through iteration must propagate, because a caller that gets a
+    resolved promise will believe it received the whole body.
+companies:
+  - name: crowdstrike
+    confidence: low
+    source: >-
+      **RECONSTRUCTION.** The reported prompt, in full, was "efficiently fetch
+      and print a URL" — provided to Andre 2026-08-12 with no citation, date or
+      seniority, and not corroborated by any of three research passes. The
+      injected `open`/`write` dependencies, the AsyncIterable body shape, and
+      the reading of "efficiently" as bounded memory were all added here to make
+      it gradable; none is known to have been in the original. The assumptions
+      are listed on the README so they cannot be lost by reading the file alone.
+    date: "2026-08-12"
