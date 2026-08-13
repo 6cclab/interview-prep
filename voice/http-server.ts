@@ -1,3 +1,4 @@
+import { deriveUserId } from './identity'
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { mkdtempSync, existsSync, readdirSync, rmSync, readFileSync } from 'node:fs'
@@ -58,6 +59,36 @@ import {
 
 export interface VoiceServerDeps {
   root: string
+  /**
+   * Which instance this is. Defaults to `local`, so every existing caller and
+   * every existing test keeps today's behaviour without saying anything.
+   *
+   * `deployed` is a different mode rather than a loosened local one: identity
+   * is required, state is per user, and the coach track is gated. Local stays
+   * exactly as it is — one person, one session, `local/`, no headers read.
+   */
+  mode?: 'local' | 'deployed'
+  /**
+   * A secret only the edge can set, checked in constant time.
+   *
+   * Traefik's forwardAuth does not strip a client-supplied `X-authentik-*`
+   * header of its own accord, so the middleware chain has to clear them before
+   * the outpost repopulates them. This is the backstop for the day that chain
+   * is edited wrong: without it, one misordered middleware makes identity
+   * forgeable by anyone who can reach the port.
+   */
+  gatewaySecret?: string
+  /**
+   * Who may open the coach track on a deployed instance. Undefined means
+   * unrestricted, which is what a local instance wants.
+   *
+   * `coachPaths` deliberately serves `solutions/**` and `patterns.md`. That is
+   * right for a choice you make about your own drilling and wrong the moment
+   * the same route has a URL other people can reach, where it is an answer key.
+   * An allowlist is another explicit door, not the existing door with its lock
+   * off — see `voice/coach.ts` on why conditional safety gates leak.
+   */
+  coachAllowlist?: ReadonlySet<string>
   /**
    * The interviewer transport for a session on `track`.
    *
@@ -660,10 +691,36 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   // for both and no caller has to care which one it got.
   return deps.tls ? createHttpsServer({ cert: deps.tls.cert, key: deps.tls.key }, onRequest) : createServer(onRequest)
 
+  /**
+   * Whether this user may open the pairing track.
+   *
+   * Unrestricted unless a deployed instance says otherwise, so a local
+   * instance — where opening it is your own choice about your own drilling —
+   * is untouched.
+   */
+  function mayCoach(track: Track, userId: string | null): boolean {
+    if (track !== 'coach') return true
+    if (deps.mode !== 'deployed') return true
+    return userId !== null && deps.coachAllowlist?.has(userId) === true
+  }
+
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
 
     if (req.method === 'GET' && serveStatic(distDir, url.pathname, res)) return
+
+    // Derived once, before any route runs, so no route can forget to ask and
+    // read the wrong person's directory. `null` is the local instance, and in
+    // local mode this never looks at a header at all.
+    const userId = deriveUserId(req, { mode: deps.mode ?? 'local', gatewaySecret: deps.gatewaySecret })
+    if (deps.mode === 'deployed' && userId === null && url.pathname.startsWith('/api/')) {
+      // Fails closed. A deployed request with no usable identity is a broken
+      // edge configuration, and the one thing that must never happen is
+      // falling back to a default user — that hands a bare request somebody
+      // else's drill log.
+      sendJson(res, 401, { error: 'unauthenticated' })
+      return
+    }
 
     // Lists speaker/output devices for the client to render a selector.
     // `SpeechSynthesis` exposes no output-device API, so the browser cannot
@@ -712,7 +769,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // instead of requiring one. There is at most one, per `hasActive`'s
     // invariant.
     if (req.method === 'DELETE' && url.pathname === '/api/session') {
-      const id = store.activeId()
+      const id = store.activeId(userId)
       if (!id) {
         sendJson(res, 404, { error: 'no active session' })
         return
@@ -980,12 +1037,20 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         return
       }
 
-      if (store.hasActive()) {
+      // Checked here rather than deeper in, because the coach track's whole
+      // job is to serve `solutions/**` and `patterns.md` — by the time any
+      // coach code runs, the answer key is already being assembled.
+      if (!mayCoach(drill.track, userId)) {
+        sendJson(res, 403, { error: 'the coach track is not available on this instance' })
+        return
+      }
+
+      if (store.hasActive(userId)) {
         // The 409 carries the stuck session's id and start time so the client
         // can offer both recoveries the design calls for: end it, or open it.
         // Without the id there was nothing to reopen and nothing honest to put
         // in the banner's "a session started at 07:12" — see ERROR_COPY.stuck.
-        const active = store.get(store.activeId()!)!
+        const active = store.get(store.activeId(userId)!)!
         sendJson(res, 409, {
           error: 'a session is already in progress',
           id: active.id,
@@ -1063,7 +1128,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
               : () => timeCue(entryClock(), drill.budgetMs),
       })
       const scratchDir = mkdtempSync(join(tmpdir(), 'voice-web-'))
-      const stored = store.create(session, interviewer, new Date(), scratchDir, drill)
+      const stored = store.create(session, interviewer, new Date(), scratchDir, drill, userId)
       entryClocks.set(stored.id, entryClock)
       sendJson(res, 201, { id: stored.id, ...drill })
       return

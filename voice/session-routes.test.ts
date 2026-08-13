@@ -854,7 +854,7 @@ describe('the track/problem boundary', () => {
     expect(res.status).toBe(400)
     // Nothing was created, so a following valid request is not blocked by a
     // half-built session sitting in the store.
-    expect(store.hasActive()).toBe(false)
+    expect(store.hasActive(null)).toBe(false)
   })
 
   // A slug that is well-formed but names nothing is the client asking for a
@@ -868,7 +868,7 @@ describe('the track/problem boundary', () => {
       body: JSON.stringify({ track: 'design', problem: 'no-such-problem' }),
     })
     expect(res.status).toBe(400)
-    expect(store.hasActive()).toBe(false)
+    expect(store.hasActive(null)).toBe(false)
   })
 
   // Reading the request body means yielding to the event loop for as long as

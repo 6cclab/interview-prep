@@ -23,13 +23,13 @@ describe('createSessionStore', () => {
   it('assigns ids from the injected factory', () => {
     let n = 0
     const store = createSessionStore(() => `id-${++n}`)
-    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch-1', MOCK)
+    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch-1', MOCK, null)
     expect(stored.id).toBe('id-1')
   })
 
   it('get() finds a stored session by id', () => {
     const store = createSessionStore(() => 'abc')
-    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
+    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK, null)
     expect(store.get('abc')).toBe(stored)
   })
 
@@ -39,26 +39,58 @@ describe('createSessionStore', () => {
   })
 
   it('reports no active session before any is created', () => {
-    expect(createSessionStore().hasActive()).toBe(false)
+    expect(createSessionStore().hasActive(null)).toBe(false)
   })
 
   it('reports an active session once one exists', () => {
     const store = createSessionStore()
-    store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
-    expect(store.hasActive()).toBe(true)
+    store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK, null)
+    expect(store.hasActive(null)).toBe(true)
   })
 
   it('remove() clears the session so hasActive() goes false again', () => {
     const store = createSessionStore(() => 'abc')
-    store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
+    store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK, null)
     store.remove('abc')
-    expect(store.hasActive()).toBe(false)
+    expect(store.hasActive(null)).toBe(false)
     expect(store.get('abc')).toBeUndefined()
+  })
+
+  // The one-at-a-time rule was a property of the process because the process
+  // was one person's. On a shared instance that same rule means the first
+  // person to start a drill locks everyone else out, and the 409 they get
+  // reports someone else's session as their own to recover.
+  describe('one session at a time, per person', () => {
+    it('does not report another user\'s session as this user\'s', () => {
+      const store = createSessionStore()
+      store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK, 'ak-alice')
+      expect(store.hasActive('ak-alice')).toBe(true)
+      expect(store.hasActive('ak-bob')).toBe(false)
+    })
+
+    it('gives each user their own session id to recover', () => {
+      let n = 0
+      const store = createSessionStore(() => `id-${++n}`)
+      store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK, 'ak-alice')
+      store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK, 'ak-bob')
+      expect(store.activeId('ak-alice')).toBe('id-1')
+      expect(store.activeId('ak-bob')).toBe('id-2')
+    })
+
+    // Local mode is the null user, the same sentinel every other per-user path
+    // uses. Null rather than a `'local'` string so it can never collide with a
+    // uid an identity provider actually issues.
+    it('keeps the local instance a single session, as it is today', () => {
+      const store = createSessionStore()
+      expect(store.hasActive(null)).toBe(false)
+      store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK, null)
+      expect(store.hasActive(null)).toBe(true)
+    })
   })
 
   it('touch() updates lastActivity', () => {
     const store = createSessionStore(() => 'abc')
-    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
+    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK, null)
     store.touch('abc', 9999)
     expect(stored.lastActivity).toBe(9999)
   })
@@ -72,7 +104,7 @@ describe('createSessionStore', () => {
   // being guarded against.
   it('create() stamps lastActivity from the injected clock, not the wall clock', () => {
     const store = createSessionStore(() => 'abc', () => 4242)
-    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
+    const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK, null)
     expect(stored.lastActivity).toBe(4242)
   })
 
@@ -80,7 +112,7 @@ describe('createSessionStore', () => {
     // No pre-emptive touch(): create() itself must land lastActivity on the
     // injected clock for this timing to hold.
     const store = createSessionStore(() => 'abc', () => 1000)
-    store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
+    store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK, null)
     expect(store.reapIdle(1000 + 4_000, 5_000)).toEqual([])
     expect(store.reapIdle(1000 + 6_000, 5_000).map((s) => s.id)).toEqual(['abc'])
   })
@@ -98,7 +130,7 @@ describe('createSessionStore', () => {
   describe('reapIdle() and a browser that is still attached', () => {
     function storeWithIdleSession() {
       const store = createSessionStore(() => 'abc', () => 1000)
-      const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK)
+      const stored = store.create(fakeSession(), fakeInterviewer, new Date(), '/tmp/scratch', MOCK, null)
       return { store, stored, wellPastIdle: 1000 + 60_000 }
     }
 

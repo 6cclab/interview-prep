@@ -72,16 +72,37 @@ export interface StoredSession {
    * live count without the interviewer having to report one per turn.
    */
   hintRung: number
+  /**
+   * Whose session this is. `null` is the local instance — the same sentinel
+   * every other per-user path uses, and null rather than a `'local'` string so
+   * it can never collide with a uid an identity provider actually issues.
+   */
+  userId: string | null
 }
 
 export interface SessionStore {
-  create(session: Session, interviewer: Interviewer, startedAt: Date, scratchDir: string, drill: Drill): StoredSession
+  create(
+    session: Session,
+    interviewer: Interviewer,
+    startedAt: Date,
+    scratchDir: string,
+    drill: Drill,
+    userId: string | null,
+  ): StoredSession
   get(id: string): StoredSession | undefined
   remove(id: string): void
-  /** True once any session is live — the web path allows exactly one at a time. */
-  hasActive(): boolean
-  /** The id of the one active session, if any — mirrors `hasActive`'s "at most one" invariant. */
-  activeId(): string | undefined
+  /**
+   * True once this user has a session live — the web path allows each of them
+   * exactly one at a time.
+   *
+   * Per-user, not global. The one-at-a-time rule was a property of the process
+   * because the process was one person's; left global on a shared instance it
+   * means the first person to start a drill locks everyone else out, and the
+   * 409 they get hands them someone else's session id to recover.
+   */
+  hasActive(userId: string | null): boolean
+  /** The id of this user's active session, if any — mirrors `hasActive`'s "at most one" invariant. */
+  activeId(userId: string | null): string | undefined
   touch(id: string, now: number): void
   /**
    * Sessions that are **orphaned** — idle past `idleMs` *and* with no browser
@@ -121,7 +142,7 @@ export function createSessionStore(
   const sessions = new Map<string, StoredSession>()
 
   return {
-    create(session, interviewer, startedAt, scratchDir, drill) {
+    create(session, interviewer, startedAt, scratchDir, drill, userId) {
       const stored: StoredSession = {
         id: idFactory(),
         session,
@@ -131,6 +152,7 @@ export function createSessionStore(
         scratchDir,
         lastActivity: now(),
         hintRung: 0,
+        userId,
       }
       sessions.set(stored.id, stored)
       return stored
@@ -139,8 +161,10 @@ export function createSessionStore(
     remove: (id) => {
       sessions.delete(id)
     },
-    hasActive: () => sessions.size > 0,
-    activeId: () => sessions.keys().next().value,
+    // `get`, `remove`, `touch` and `reapIdle` stay global on purpose: an id is
+    // already unique across users, and an idle session is idle whoever owns it.
+    hasActive: (userId) => [...sessions.values()].some((s) => s.userId === userId),
+    activeId: (userId) => [...sessions.values()].find((s) => s.userId === userId)?.id,
     touch(id, now) {
       const stored = sessions.get(id)
       if (stored) stored.lastActivity = now
