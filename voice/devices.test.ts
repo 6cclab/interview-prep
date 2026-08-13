@@ -85,50 +85,50 @@ describe('readDeviceConfig', () => {
 
   it('reads both devices', () => {
     writeConfig('{ "input": ":3", "output": "75" }')
-    expect(readDeviceConfig(root)).toEqual({ input: ':3', output: '75' })
+    expect(readDeviceConfig(root, null)).toEqual({ input: ':3', output: '75' })
   })
 
   it('returns an empty config when the file is absent', () => {
-    expect(readDeviceConfig(root)).toEqual({})
+    expect(readDeviceConfig(root, null)).toEqual({})
   })
 
   it('returns an empty config rather than throwing on malformed JSON', () => {
     writeConfig('{ not json')
-    expect(readDeviceConfig(root)).toEqual({})
+    expect(readDeviceConfig(root, null)).toEqual({})
   })
 
   it('ignores non-string values rather than passing them to a subprocess', () => {
     writeConfig('{ "input": 3, "output": null }')
-    expect(readDeviceConfig(root)).toEqual({})
+    expect(readDeviceConfig(root, null)).toEqual({})
   })
 
   it('reads a webInput field, distinct from input', () => {
     writeConfig('{ "input": ":3", "webInput": "browser-device-abc" }')
-    expect(readDeviceConfig(root)).toEqual({ input: ':3', webInput: 'browser-device-abc' })
+    expect(readDeviceConfig(root, null)).toEqual({ input: ':3', webInput: 'browser-device-abc' })
   })
 })
 
 describe('writeDeviceConfig', () => {
   it('creates local/ and the file when neither exists yet', () => {
-    writeDeviceConfig(root, { output: '75' })
-    expect(readDeviceConfig(root)).toEqual({ output: '75' })
+    writeDeviceConfig(root, null, { output: '75' })
+    expect(readDeviceConfig(root, null)).toEqual({ output: '75' })
   })
 
   it('merges with the existing config rather than clobbering unrelated fields', () => {
-    writeDeviceConfig(root, { input: ':3' })
-    writeDeviceConfig(root, { output: '75' })
-    expect(readDeviceConfig(root)).toEqual({ input: ':3', output: '75' })
+    writeDeviceConfig(root, null, { input: ':3' })
+    writeDeviceConfig(root, null, { output: '75' })
+    expect(readDeviceConfig(root, null)).toEqual({ input: ':3', output: '75' })
   })
 
   it('overwrites only the field it is given', () => {
-    writeDeviceConfig(root, { output: '75', webInput: 'old-id' })
-    writeDeviceConfig(root, { webInput: 'new-id' })
-    expect(readDeviceConfig(root)).toEqual({ output: '75', webInput: 'new-id' })
+    writeDeviceConfig(root, null, { output: '75', webInput: 'old-id' })
+    writeDeviceConfig(root, null, { webInput: 'new-id' })
+    expect(readDeviceConfig(root, null)).toEqual({ output: '75', webInput: 'new-id' })
   })
 
   it('returns the merged config it wrote', () => {
-    writeDeviceConfig(root, { input: ':3' })
-    expect(writeDeviceConfig(root, { output: '75' })).toEqual({ input: ':3', output: '75' })
+    writeDeviceConfig(root, null, { input: ':3' })
+    expect(writeDeviceConfig(root, null, { output: '75' })).toEqual({ input: ':3', output: '75' })
   })
 })
 
@@ -179,7 +179,7 @@ describe('readDeviceConfig — voice and rate', () => {
 
   it('reads a voice name and a rate', () => {
     writeConfig('{ "voice": "Ava (Premium)", "rate": 170 }')
-    expect(readDeviceConfig(root)).toEqual({ voice: 'Ava (Premium)', rate: 170 })
+    expect(readDeviceConfig(root, null)).toEqual({ voice: 'Ava (Premium)', rate: 170 })
   })
 
   it('drops a rate that is not a usable number rather than poisoning the utterance', () => {
@@ -187,19 +187,19 @@ describe('readDeviceConfig — voice and rate', () => {
     // and the voice's default is used — a bad rate costs the rate, not the drill.
     for (const bad of ['"fast"', '0', '-40', 'null', 'true']) {
       writeConfig(`{ "voice": "Ava (Premium)", "rate": ${bad} }`)
-      expect(readDeviceConfig(root)).toEqual({ voice: 'Ava (Premium)' })
+      expect(readDeviceConfig(root, null)).toEqual({ voice: 'Ava (Premium)' })
     }
   })
 
   it('drops a blank voice name, which would select nothing', () => {
     writeConfig('{ "voice": "   ", "output": "75" }')
-    expect(readDeviceConfig(root)).toEqual({ output: '75' })
+    expect(readDeviceConfig(root, null)).toEqual({ output: '75' })
   })
 
   it('does not lose voice or rate when another field is written', () => {
     writeConfig('{ "voice": "Ava (Premium)", "rate": 170 }')
-    writeDeviceConfig(root, { output: '75' })
-    expect(readDeviceConfig(root)).toEqual({ voice: 'Ava (Premium)', rate: 170, output: '75' })
+    writeDeviceConfig(root, null, { output: '75' })
+    expect(readDeviceConfig(root, null)).toEqual({ voice: 'Ava (Premium)', rate: 170, output: '75' })
   })
 })
 

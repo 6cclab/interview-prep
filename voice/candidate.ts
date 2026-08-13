@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { userDataDir } from './user-root'
 
 /**
  * Who the drill is for.
@@ -22,8 +23,8 @@ export const DEFAULT_CANDIDATE = 'the candidate'
 // string would be the only runtime dependency this repo has for config.
 const NAME_LINE = /^candidate_name:\s*(.*)$/m
 
-export function readCandidateName(root: string): string {
-  const path = join(root, 'local/config.yaml')
+export function readCandidateName(root: string, userId: string | null): string {
+  const path = join(userDataDir(root, userId), 'config.yaml')
   if (!existsSync(path)) return DEFAULT_CANDIDATE
   let text: string
   try {

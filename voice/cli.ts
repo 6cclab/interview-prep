@@ -28,7 +28,7 @@ const WHISPER_MODEL = process.env.WHISPER_MODEL ?? 'models/ggml-large-v3-turbo.b
  * which looks identical to a broken microphone.
  */
 function resolveDevices(root: string): { input?: string; output?: string } {
-  const configured = readDeviceConfig(root)
+  const configured = readDeviceConfig(root, null)
   return {
     input: process.env.MIC_DEVICE ?? configured.input,
     output: process.env.SAY_DEVICE ?? configured.output,
@@ -64,7 +64,7 @@ const AUDITION =
  */
 async function printVoices(requested?: string): Promise<void> {
   const root = process.cwd()
-  const speech = resolveSpeech(readDeviceConfig(root))
+  const speech = resolveSpeech(readDeviceConfig(root, null))
   const english = (await listVoices()).filter((v) => v.locale.startsWith('en'))
 
   if (requested) {
@@ -140,7 +140,7 @@ async function main(): Promise<void> {
   const startedAt = new Date()
   const started = Date.now()
 
-  const interviewer = createInterviewer(buildSystemPrompt(root, track, problem), streamForBackend(track))
+  const interviewer = createInterviewer(buildSystemPrompt(root, null, track, problem), streamForBackend(track))
 
   if (!devices.input) {
     // Silently defaulting here is the trap: an unconfigured index can point at
@@ -155,7 +155,7 @@ async function main(): Promise<void> {
   try {
     const entries = await runSession({
       transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
-      speaker: resolveSpeaker({ audioDevice: devices.output, ...resolveSpeech(readDeviceConfig(root)) }),
+      speaker: resolveSpeaker({ audioDevice: devices.output, ...resolveSpeech(readDeviceConfig(root, null)) }),
       interviewer,
       startRecording: () => record(scratch, devices.input),
       nextTurn: async () => ((await rl.question('')).trim() === 'end' ? 'end' : 'speak'),
@@ -174,12 +174,12 @@ async function main(): Promise<void> {
     // not overwrite an existing transcript — so print what it actually used,
     // not what was requested. Otherwise a collision sends Andre looking for a
     // file that isn't where the terminal said it was.
-    const relPath = writeSession(root, sessionPath(track, startedAt, problem), formatSession(entries, startedAt))
+    const relPath = writeSession(root, null, sessionPath(track, startedAt, problem), formatSession(entries, startedAt))
     console.log(`\nTranscript: ${relPath}`)
 
     const { log } = splitTrailer(interviewer.lastRaw())
     if (track === 'mock' && log) {
-      appendStoryLog(root, log)
+      appendStoryLog(root, null, log)
       console.log('Story bank: local/stories.md')
     }
   } finally {

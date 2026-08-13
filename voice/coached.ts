@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { userDataDir } from './user-root'
 
 /**
  * The record of which problems have been coached, and when.
@@ -65,9 +66,13 @@ export function formatCoachedRow(row: CoachedRow): string {
  * throws: a session's transcript is the product, and losing it to a failed
  * bookkeeping append would be the wrong trade.
  */
-export function appendCoached(root: string, row: CoachedRow): string | null {
+export function appendCoached(root: string, userId: string | null, row: CoachedRow): string | null {
+  // Returned to the caller as a `local/`-rooted path regardless of `userId`,
+  // matching every other relative path this server hands back (e.g.
+  // `writeSession`'s return value) — it is a display string, not something
+  // joined against `root` again.
   const relPath = 'local/coached.md'
-  const full = join(root, relPath)
+  const full = join(userDataDir(root, userId), 'coached.md')
   try {
     const body = existsSync(full) ? '' : `${HEADER.join('\n')}\n`
     appendFileSync(full, `${body}${formatCoachedRow(row)}\n`, 'utf8')
@@ -79,8 +84,8 @@ export function appendCoached(root: string, row: CoachedRow): string | null {
 }
 
 /** Problem slugs that appear in `local/coached.md`. Empty when the file does not exist. */
-export function readCoachedProblems(root: string): string[] {
-  const full = join(root, 'local/coached.md')
+export function readCoachedProblems(root: string, userId: string | null): string[] {
+  const full = join(userDataDir(root, userId), 'coached.md')
   if (!existsSync(full)) return []
   const slugs = new Set<string>()
   for (const line of readFileSync(full, 'utf8').split('\n')) {

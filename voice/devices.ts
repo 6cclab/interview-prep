@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { userDataDir } from './user-root'
 
 const run = promisify(execFile)
 
@@ -157,8 +158,8 @@ export interface DeviceConfig {
  * committed default. Any problem reading it yields an empty config — a bad
  * config file must not stop a drill from starting.
  */
-export function readDeviceConfig(root: string): DeviceConfig {
-  const path = join(root, 'local/voice.json')
+export function readDeviceConfig(root: string, userId: string | null): DeviceConfig {
+  const path = join(userDataDir(root, userId), 'voice.json')
   if (!existsSync(path)) return {}
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
@@ -212,10 +213,11 @@ export function resolveSpeech(config: DeviceConfig, env: NodeJS.ProcessEnv = pro
  * must not clobber a field it doesn't know about (e.g. `cli.ts`'s `input`).
  * `local/` is gitignored and gets created if this is the first write.
  */
-export function writeDeviceConfig(root: string, patch: DeviceConfig): DeviceConfig {
-  const current = readDeviceConfig(root)
+export function writeDeviceConfig(root: string, userId: string | null, patch: DeviceConfig): DeviceConfig {
+  const current = readDeviceConfig(root, userId)
   const next: DeviceConfig = { ...current, ...patch }
-  mkdirSync(join(root, 'local'), { recursive: true })
-  writeFileSync(join(root, 'local/voice.json'), JSON.stringify(next, null, 2))
+  const dir = userDataDir(root, userId)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'voice.json'), JSON.stringify(next, null, 2))
   return next
 }

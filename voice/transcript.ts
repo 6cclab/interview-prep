@@ -1,7 +1,8 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { isoDate } from './coached'
 import type { Track } from './context'
+import { userDataDir } from './user-root'
 
 export interface Entry {
   speaker: 'interviewer' | 'andre'
@@ -200,8 +201,22 @@ export function sessionPath(track: Track, startedAt: Date, problem?: string): st
  * rather than being clobbered. Callers must use the returned path, not the one
  * they passed in.
  */
-export function writeSession(root: string, relPath: string, body: string): string {
-  const full = join(root, relPath)
+export function writeSession(root: string, userId: string | null, relPath: string, body: string): string {
+  // `sessionPath` always returns a `local/`-prefixed path — that convention is
+  // unchanged by this parameter, so the `local` segment is swapped for
+  // `userDataDir`'s answer rather than `sessionPath` itself learning about
+  // users. For `userId: null` `userDataDir` returns `join(root, 'local')`
+  // byte-for-byte, so this reduces to the original `join(root, relPath)`.
+  const within = relative('local', relPath)
+  // That swap is only correct while the prefix is really there. Without this
+  // the failure is silent and lands in the worst place available: `coaching/x`
+  // resolves to `local/users/coaching/x`, outside the user's directory and
+  // inside the namespace where other users' directories live. Unreachable from
+  // `sessionPath` today, guarded because a transcript overwrite has no undo.
+  if (isAbsolute(relPath) || within.startsWith('..')) {
+    throw new Error(`A session path must be under local/, got ${JSON.stringify(relPath)}`)
+  }
+  const full = join(userDataDir(root, userId), within)
   mkdirSync(dirname(full), { recursive: true })
   const free = firstFreePath(full)
   writeFileSync(free, body)
@@ -243,8 +258,8 @@ export interface DrillLogRow {
  * somewhere else would leave that report quietly blind to half the practice —
  * which is what it was before this existed.
  */
-export function appendDrillLog(root: string, row: DrillLogRow): void {
-  const full = join(root, 'local/drill-log.md')
+export function appendDrillLog(root: string, userId: string | null, row: DrillLogRow): void {
+  const full = join(userDataDir(root, userId), 'drill-log.md')
   mkdirSync(dirname(full), { recursive: true })
   const header = '| Date | Problem | Pattern | Solved | Hints | Time | Note |'
   const existing = existsSync(full) ? readFileSync(full, 'utf8') : ''
@@ -276,8 +291,8 @@ export function appendDrillLog(root: string, row: DrillLogRow): void {
   appendFileSync(full, `${lines.join('\n')}\n`)
 }
 
-export function appendStoryLog(root: string, log: StoryLog): void {
-  const full = join(root, 'local/stories.md')
+export function appendStoryLog(root: string, userId: string | null, log: StoryLog): void {
+  const full = join(userDataDir(root, userId), 'stories.md')
   mkdirSync(dirname(full), { recursive: true })
   const hasExistingContent = existsSync(full) && readFileSync(full, 'utf8').length > 0
   const entry = [

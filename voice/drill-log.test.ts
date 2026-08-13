@@ -130,7 +130,7 @@ describe('round trip with appendDrillLog', () => {
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
   it('reads back exactly what it wrote, pipes and all', () => {
-    appendDrillLog(root, {
+    appendDrillLog(root, null, {
       startedAt: new Date('2026-08-09T19:25:00Z'),
       problem: 'contains-duplicate',
       pattern: 'hashmap-counting',
@@ -140,7 +140,7 @@ describe('round trip with appendDrillLog', () => {
       note: 'Split 0 from -0 | needed a nudge',
     })
 
-    expect(readDrillLog(root)).toEqual([
+    expect(readDrillLog(root, null)).toEqual([
       {
         date: '2026-08-09',
         problem: 'contains-duplicate',
@@ -154,12 +154,12 @@ describe('round trip with appendDrillLog', () => {
   })
 
   it('is an empty history when there is no log at all', () => {
-    expect(readDrillLog(mkdtempSync(join(tmpdir(), 'voice-nolog-')))).toEqual([])
+    expect(readDrillLog(mkdtempSync(join(tmpdir(), 'voice-nolog-')), null)).toEqual([])
   })
 
   it('is an empty history for a log with only a header', () => {
     writeFileSync(join(root, 'local/drill-log.md'), log())
-    expect(readDrillLog(root)).toEqual([])
+    expect(readDrillLog(root, null)).toEqual([])
   })
 })
 

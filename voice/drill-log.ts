@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DrillLogRow } from './transcript'
+import { userDataDir } from './user-root'
 
 /**
  * Reads `local/drill-log.md` back.
@@ -97,8 +98,8 @@ export function parseDrillLog(markdown: string): HistoryRow[] {
   return rows.reverse()
 }
 
-export function readDrillLog(root: string): HistoryRow[] {
-  const full = join(root, 'local/drill-log.md')
+export function readDrillLog(root: string, userId: string | null): HistoryRow[] {
+  const full = join(userDataDir(root, userId), 'drill-log.md')
   if (!existsSync(full)) return []
   try {
     return parseDrillLog(readFileSync(full, 'utf8'))

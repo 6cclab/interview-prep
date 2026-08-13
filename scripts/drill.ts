@@ -113,11 +113,11 @@ async function main(): Promise<void> {
     }
     // A pattern with several problems still picks by rust within it, rather
     // than always handing over the same one.
-    const picked = selectByRust(matches, readDrillLog(root))
+    const picked = selectByRust(matches, readDrillLog(root, null))
     problem = picked?.problem ?? matches[0]!
     why = matches.length === 1 ? 'you asked for it' : `${picked?.why ?? 'first under that pattern'}`
   } else {
-    const picked = selectByRust(problems, readDrillLog(root))
+    const picked = selectByRust(problems, readDrillLog(root, null))
     if (!picked) {
       print('Nothing to drill.')
       process.exit(1)

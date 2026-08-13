@@ -15,20 +15,20 @@ function root(configBody?: string): string {
 
 describe('readCandidateName', () => {
   it('reads the configured name', () => {
-    expect(readCandidateName(root('candidate_name: Dana\n'))).toBe('Dana')
+    expect(readCandidateName(root('candidate_name: Dana\n'), null)).toBe('Dana')
   })
 
   it('tolerates quotes and trailing comments, as the other yaml readers do', () => {
-    expect(readCandidateName(root('candidate_name: "Dana Q"  # what she goes by\n'))).toBe('Dana Q')
+    expect(readCandidateName(root('candidate_name: "Dana Q"  # what she goes by\n'), null)).toBe('Dana Q')
   })
 
   // A missing local/ is the state a fresh clone is in, and a drill must still
   // run — bootstrap is a convenience, not a precondition.
   it('falls back when the file, the key or the value is absent', () => {
-    expect(readCandidateName(root())).toBe(DEFAULT_CANDIDATE)
-    expect(readCandidateName(root('job_search_path: ~/job-search\n'))).toBe(DEFAULT_CANDIDATE)
-    expect(readCandidateName(root('candidate_name:\n'))).toBe(DEFAULT_CANDIDATE)
-    expect(readCandidateName(root('candidate_name: "   "\n'))).toBe(DEFAULT_CANDIDATE)
+    expect(readCandidateName(root(), null)).toBe(DEFAULT_CANDIDATE)
+    expect(readCandidateName(root('job_search_path: ~/job-search\n'), null)).toBe(DEFAULT_CANDIDATE)
+    expect(readCandidateName(root('candidate_name:\n'), null)).toBe(DEFAULT_CANDIDATE)
+    expect(readCandidateName(root('candidate_name: "   "\n'), null)).toBe(DEFAULT_CANDIDATE)
   })
 })
 

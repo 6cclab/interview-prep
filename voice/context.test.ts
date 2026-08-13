@@ -93,49 +93,49 @@ describe('allowedPaths', () => {
 
 describe('competencyCoverage', () => {
   it('lists every competency heading', () => {
-    expect(competencyCoverage(root).all).toEqual(['Conflict', 'Ambiguity'])
+    expect(competencyCoverage(root, null).all).toEqual(['Conflict', 'Ambiguity'])
   })
 
   it('reports none covered when there is no story bank yet', () => {
-    expect(competencyCoverage(root).covered).toEqual([])
+    expect(competencyCoverage(root, null).covered).toEqual([])
   })
 
   it('reports covered competencies from the story bank headings', () => {
     seed('local/stories.md', '## Conflict\n\nThe Redis migration story, in full.\n')
-    expect(competencyCoverage(root).covered).toEqual(['Conflict'])
+    expect(competencyCoverage(root, null).covered).toEqual(['Conflict'])
   })
 })
 
 describe('buildSystemPrompt', () => {
   it('includes the command prompt and the competency map', () => {
-    const prompt = buildSystemPrompt(root, 'mock')
+    const prompt = buildSystemPrompt(root, null, 'mock')
     expect(prompt).toContain('MOCK COMMAND')
     expect(prompt).toContain('Conflict')
   })
 
   it('never includes a story body, only the competency name', () => {
     seed('local/stories.md', '## Conflict\n\nThe Redis migration story, in full.\n')
-    const prompt = buildSystemPrompt(root, 'mock')
+    const prompt = buildSystemPrompt(root, null, 'mock')
     expect(prompt).toContain('Conflict')
     expect(prompt).not.toContain('Redis migration')
   })
 
   it('includes the rubric for a design drill', () => {
-    expect(buildSystemPrompt(root, 'design', 'rate-limiter')).toContain('RUBRIC')
+    expect(buildSystemPrompt(root, null, 'design', 'rate-limiter')).toContain('RUBRIC')
   })
 
   it('never includes the reference design', () => {
-    expect(buildSystemPrompt(root, 'design', 'rate-limiter')).not.toContain('THE ANSWER')
+    expect(buildSystemPrompt(root, null, 'design', 'rate-limiter')).not.toContain('THE ANSWER')
   })
 
   it('throws a clear error for a nonexistent problem', () => {
-    expect(() => buildSystemPrompt(root, 'design', 'no-such-problem')).toThrow(
+    expect(() => buildSystemPrompt(root, null, 'design', 'no-such-problem')).toThrow(
       /no-such-problem/,
     )
   })
 
   it('redirects the mock story-log step and names every field it expects back', () => {
-    const prompt = buildSystemPrompt(root, 'mock')
+    const prompt = buildSystemPrompt(root, null, 'mock')
     expect(prompt).toContain('story-log')
     for (const field of ['competency', 'story', 'worked', 'fix']) {
       expect(prompt).toContain(`${field}:`)
@@ -143,7 +143,7 @@ describe('buildSystemPrompt', () => {
   })
 
   it('never mentions story-log for a design drill — only mock ends in a trailer', () => {
-    const prompt = buildSystemPrompt(root, 'design', 'rate-limiter')
+    const prompt = buildSystemPrompt(root, null, 'design', 'rate-limiter')
     expect(prompt).not.toContain('story-log')
   })
 
@@ -153,7 +153,7 @@ describe('buildSystemPrompt', () => {
     // prompt's fence marker, field names, or key: value shape ever drifts
     // from what splitTrailer expects, this fails — even though each half
     // still looks fine read on its own.
-    const prompt = buildSystemPrompt(root, 'mock')
+    const prompt = buildSystemPrompt(root, null, 'mock')
     const { log } = splitTrailer(prompt)
     expect(log).not.toBeNull()
     expect(log!.competency.length).toBeGreaterThan(0)
@@ -202,7 +202,7 @@ describe('buildSystemPrompt on the design track', () => {
   // the command file's "write to a file" step, so the step was unfollowable and
   // silently skipped while every test still passed.
   it('replaces design.md step 6 file write with speaking the score, and explains the clock', () => {
-    const prompt = buildSystemPrompt(root, 'design', 'rate-limiter')
+    const prompt = buildSystemPrompt(root, null, 'design', 'rate-limiter')
     expect(prompt).toContain('cannot write files')
     expect(prompt).toContain('deliver the score out')
     expect(prompt).toContain('time check')
@@ -211,7 +211,7 @@ describe('buildSystemPrompt on the design track', () => {
   })
 
   it('never includes the reference design', () => {
-    const prompt = buildSystemPrompt(root, 'design', 'rate-limiter')
+    const prompt = buildSystemPrompt(root, null, 'design', 'rate-limiter')
     expect(prompt).toContain('Design a rate limiter')
     expect(prompt).not.toContain('WORKED-DESIGN-SPOILER')
   })
@@ -233,7 +233,7 @@ describe('buildSystemPrompt on the coding track', () => {
   })
 
   it('never reads meta.yaml or the test file', () => {
-    const prompt = buildSystemPrompt(root, 'coding', 'container-with-most-water', 'two-pointers')
+    const prompt = buildSystemPrompt(root, null, 'coding', 'container-with-most-water', 'two-pointers')
     expect(prompt).toContain('largest container')
     // meta.yaml names the pattern in a field, and the test file's comments have
     // leaked an approach once before.
@@ -245,7 +245,7 @@ describe('buildSystemPrompt on the coding track', () => {
   // hint ladder is "the pattern name, and nothing else", and an interviewer that
   // does not know the answer cannot ration it.
   it('tells the interviewer the pattern, once and explicitly', () => {
-    const prompt = buildSystemPrompt(root, 'coding', 'container-with-most-water', 'two-pointers')
+    const prompt = buildSystemPrompt(root, null, 'coding', 'container-with-most-water', 'two-pointers')
     expect(prompt).toContain('<pattern>two-pointers</pattern>')
   })
 
@@ -254,7 +254,7 @@ describe('buildSystemPrompt on the coding track', () => {
     // phrase can straddle a newline. The wrapping is presentational and asserting
     // through it would make the test break on a reflow rather than on a change of
     // meaning.
-    const prompt = buildSystemPrompt(root, 'coding', 'container-with-most-water', 'two-pointers').replace(/\s+/g, ' ')
+    const prompt = buildSystemPrompt(root, null, 'coding', 'container-with-most-water', 'two-pointers').replace(/\s+/g, ' ')
     expect(prompt).toMatch(/no clock/i)
     expect(prompt).toMatch(/he runs them/i) // step 7, the tests
     expect(prompt).toMatch(/cannot write it/i) // the drill log
@@ -267,7 +267,7 @@ describe('buildSystemPrompt on the coding track', () => {
 
   describe('clarify-first mode', () => {
     const build = (vague: boolean): string =>
-      buildSystemPrompt(root, 'coding', 'container-with-most-water', 'two-pointers', undefined, vague).replace(
+      buildSystemPrompt(root, null, 'coding', 'container-with-most-water', 'two-pointers', undefined, vague).replace(
         /\s+/g,
         ' ',
       )
@@ -309,8 +309,8 @@ describe('buildSystemPrompt on the coding track', () => {
       // Design's premise is an open prompt that stays on screen for the whole
       // drill, and debug's report is already written the way a real one is. A
       // caller passing the flag anyway gets nothing rather than a broken drill.
-      const design = buildSystemPrompt(root, 'design', 'rate-limiter', undefined, undefined, true)
-      const debug = buildSystemPrompt(root, 'debug', 'loyalty-discount', undefined, undefined, true)
+      const design = buildSystemPrompt(root, null, 'design', 'rate-limiter', undefined, undefined, true)
+      const debug = buildSystemPrompt(root, null, 'debug', 'loyalty-discount', undefined, undefined, true)
       expect(design).not.toContain('<clarify-first>')
       expect(debug).not.toContain('<clarify-first>')
     })
@@ -342,7 +342,7 @@ const PROBLEM_FOR = { mock: undefined, design: 'rate-limiter', coding: 'containe
 
 describe('the spoken interviewer asks one question at a time', () => {
   it.each(['mock', 'design', 'coding'] as const)('instructs one question per turn on %s', (track) => {
-    const prompt = buildSystemPrompt(root, track, PROBLEM_FOR[track], 'two-pointers')
+    const prompt = buildSystemPrompt(root, null, track, PROBLEM_FOR[track], 'two-pointers')
     expect(prompt).toContain('one question per turn')
     // The reason, not just the rule: an instruction without its rationale is the
     // first thing a model discards under pressure.
@@ -350,7 +350,7 @@ describe('the spoken interviewer asks one question at a time', () => {
   })
 
   it('forbids faulting him for the half of a question he could not retain', () => {
-    const prompt = buildSystemPrompt(root, 'design', 'rate-limiter')
+    const prompt = buildSystemPrompt(root, null, 'design', 'rate-limiter')
     expect(prompt).toContain('Never')
     expect(prompt.toLowerCase()).toContain('did not answer')
   })
@@ -363,7 +363,7 @@ describe('the spoken interviewer asks one question at a time', () => {
  */
 describe('the timed interviewer owns the clock it is holding', () => {
   it.each(['design', 'coding'] as const)('tells %s to cut a stalled sub-question loose', (track) => {
-    const prompt = buildSystemPrompt(root, track, PROBLEM_FOR[track], 'two-pointers')
+    const prompt = buildSystemPrompt(root, null, track, PROBLEM_FOR[track], 'two-pointers')
     expect(prompt).toContain('four minutes')
     expect(prompt).toContain('move on')
   })
@@ -372,7 +372,7 @@ describe('the timed interviewer owns the clock it is holding', () => {
   // exercise" — so a clock instruction there would be describing a clock that
   // does not exist.
   it('says nothing about a clock on the untimed behavioural track', () => {
-    const prompt = buildSystemPrompt(root, 'mock')
+    const prompt = buildSystemPrompt(root, null, 'mock')
     expect(prompt).not.toContain('four minutes')
   })
 })
@@ -431,7 +431,7 @@ describe('the spoken register', () => {
     ['coding', 'container-with-most-water', 'two-pointers'],
     ['debug', 'loyalty-discount', undefined],
   ] as const)('tells the %s interviewer to address him in the second person', (track, problem, pattern) => {
-    const prompt = buildSystemPrompt(root, track, problem, pattern)
+    const prompt = buildSystemPrompt(root, null, track, problem, pattern)
     expect(prompt).toMatch(/Speak to him directly, in the second person/)
     expect(prompt).toMatch(/say "you"/)
     expect(prompt).toMatch(/never describe what he\s+said as though reporting it to someone else/)
@@ -477,7 +477,7 @@ describe('closingCue', () => {
  * cost the last third of a fifteen-minute session.
  */
 describe('what the debugging interviewer may and may not say', () => {
-  const prompt = (): string => buildSystemPrompt(root, 'debug', 'loyalty-discount')
+  const prompt = (): string => buildSystemPrompt(root, null, 'debug', 'loyalty-discount')
 
   it('forbids a theory about the cause, including one phrased as a question', () => {
     expect(prompt()).toMatch(/Never offer a theory about the cause, including as a question/)
@@ -534,7 +534,7 @@ describe('candidate token rendering', () => {
   ] as const)('renders the candidate name into the %s prompt, replacing every {{candidate}} token', (track, problem, pattern) => {
     seed(COMMAND_FILE[track], 'Hello {{candidate}}, this is the command file, {{candidate}}.')
     seed('local/config.yaml', 'candidate_name: Ada\n')
-    const prompt = buildSystemPrompt(root, track, problem, pattern)
+    const prompt = buildSystemPrompt(root, null, track, problem, pattern)
     expect(prompt).toContain('Hello Ada, this is the command file, Ada.')
     expect(prompt).not.toContain('{{candidate}}')
   })

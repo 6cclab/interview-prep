@@ -107,7 +107,7 @@ export function readWorkingFile(root: string, problem: ProblemLocation): string 
  * `allowedPaths` and then `assertNoSpoilers`, and both must keep refusing this
  * track. See the file comment.
  */
-export function buildCoachPrompt(root: string, problem: ProblemLocation): string {
+export function buildCoachPrompt(root: string, userId: string | null, problem: ProblemLocation): string {
   const sections = coachPaths(problem).map((path) => {
     const full = join(root, path)
     if (!existsSync(full)) {
@@ -175,5 +175,5 @@ export function buildCoachPrompt(root: string, problem: ProblemLocation): string
     '</voice-mode>',
   ].join('\n')
 
-  return renderCandidate(prompt, readCandidateName(root))
+  return renderCandidate(prompt, readCandidateName(root, userId))
 }

@@ -188,27 +188,40 @@ describe('sessionPath', () => {
 
 describe('writeSession', () => {
   it('creates missing parent directories', () => {
-    writeSession(root, 'local/designs/rate-limiter-live-2026-08-07.md', 'BODY')
+    writeSession(root, null, 'local/designs/rate-limiter-live-2026-08-07.md', 'BODY')
     expect(
       readFileSync(join(root, 'local/designs/rate-limiter-live-2026-08-07.md'), 'utf8'),
     ).toBe('BODY')
   })
 
   it('returns the path it wrote', () => {
-    expect(writeSession(root, 'local/mock-2026-08-07-1000.md', 'BODY')).toBe('local/mock-2026-08-07-1000.md')
+    expect(writeSession(root, null, 'local/mock-2026-08-07-1000.md', 'BODY')).toBe('local/mock-2026-08-07-1000.md')
   })
+
+  // The `local` segment is swapped for `userDataDir`'s answer, which is only
+  // correct while every caller passes a `local/`-prefixed path. `sessionPath`
+  // does, so this is unreachable today — and it is guarded anyway because the
+  // failure is silent and lands in the worst possible place: `coaching/x.md`
+  // resolves to `local/users/coaching/x.md`, escaping the user's directory
+  // into the namespace where other users' directories live.
+  it.each(['coaching/x.md', '../etc/x.md', '/abs/x.md'])(
+    'refuses a path that is not under local/, rather than writing outside the user directory: %s',
+    (bad) => {
+      expect(() => writeSession(root, 'ak-9f31', bad, 'BODY')).toThrow(/local\//)
+    },
+  )
 
   // `local/` is gitignored, so an overwritten transcript is gone for good. This
   // is the backstop behind the unique naming in `sessionPath`, not a substitute
   // for it.
   it('never overwrites an existing transcript, and reports the path it used instead', () => {
-    writeSession(root, 'local/mock-2026-08-07-1000.md', 'FIRST')
-    const second = writeSession(root, 'local/mock-2026-08-07-1000.md', 'SECOND')
+    writeSession(root, null, 'local/mock-2026-08-07-1000.md', 'FIRST')
+    const second = writeSession(root, null, 'local/mock-2026-08-07-1000.md', 'SECOND')
     expect(second).toBe('local/mock-2026-08-07-1000-2.md')
     expect(readFileSync(join(root, 'local/mock-2026-08-07-1000.md'), 'utf8')).toBe('FIRST')
     expect(readFileSync(join(root, 'local/mock-2026-08-07-1000-2.md'), 'utf8')).toBe('SECOND')
 
-    const third = writeSession(root, 'local/mock-2026-08-07-1000.md', 'THIRD')
+    const third = writeSession(root, null, 'local/mock-2026-08-07-1000.md', 'THIRD')
     expect(third).toBe('local/mock-2026-08-07-1000-3.md')
   })
 
@@ -216,10 +229,10 @@ describe('writeSession', () => {
   // caller, but this function's whole job is protecting data that cannot be
   // recovered, so it should not have a shape that quietly produces nonsense.
   it('suffixes a name with no extension, and a dotfile, without mangling it', () => {
-    writeSession(root, 'local/notes', 'FIRST')
-    expect(writeSession(root, 'local/notes', 'SECOND')).toBe('local/notes-2')
-    writeSession(root, 'local/.hidden', 'FIRST')
-    expect(writeSession(root, 'local/.hidden', 'SECOND')).toBe('local/.hidden-2')
+    writeSession(root, null, 'local/notes', 'FIRST')
+    expect(writeSession(root, null, 'local/notes', 'SECOND')).toBe('local/notes-2')
+    writeSession(root, null, 'local/.hidden', 'FIRST')
+    expect(writeSession(root, null, 'local/.hidden', 'SECOND')).toBe('local/.hidden-2')
   })
 })
 
@@ -232,21 +245,21 @@ describe('appendStoryLog', () => {
   }
 
   it('creates the story bank when it does not exist', () => {
-    appendStoryLog(root, log)
+    appendStoryLog(root, null, log)
     expect(readFileSync(join(root, 'local/stories.md'), 'utf8')).toContain('## Conflict')
   })
 
   it('appends without clobbering existing stories', () => {
     mkdirSync(join(root, 'local'), { recursive: true })
     writeFileSync(join(root, 'local/stories.md'), '## Ambiguity\n\nexisting\n')
-    appendStoryLog(root, log)
+    appendStoryLog(root, null, log)
     const body = readFileSync(join(root, 'local/stories.md'), 'utf8')
     expect(body).toContain('## Ambiguity')
     expect(body).toContain('## Conflict')
   })
 
   it('does not open a fresh file with a leading blank line', () => {
-    appendStoryLog(root, log)
+    appendStoryLog(root, null, log)
     const body = readFileSync(join(root, 'local/stories.md'), 'utf8')
     expect(body.startsWith('\n')).toBe(false)
   })
@@ -254,7 +267,7 @@ describe('appendStoryLog', () => {
   it('keeps entries separated when appending to an existing file', () => {
     mkdirSync(join(root, 'local'), { recursive: true })
     writeFileSync(join(root, 'local/stories.md'), '## Ambiguity\n\nexisting\n')
-    appendStoryLog(root, log)
+    appendStoryLog(root, null, log)
     const body = readFileSync(join(root, 'local/stories.md'), 'utf8')
     expect(body).not.toContain('existing\n## Conflict')
     expect(body).toContain('existing\n\n## Conflict')
@@ -319,7 +332,7 @@ describe('appendDrillLog — the date is local, not UTC', () => {
     try {
       // 21:30 local — past UTC midnight for every timezone from UTC-3 westward.
       const startedAt = new Date(2026, 7, 10, 21, 30, 0)
-      appendDrillLog(root, {
+      appendDrillLog(root, null, {
         startedAt,
         problem: 'reverse-string',
         pattern: 'in-place-array',

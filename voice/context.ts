@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, normalize, sep } from 'node:path'
 import { readCandidateName, renderCandidate } from './candidate'
+import { userDataDir } from './user-root'
 
 /**
  * `coach` is not a drill. It is included here because a session, a transcript and
@@ -120,9 +121,9 @@ function headings(markdown: string): string[] {
  * the story being asked for. Parsing headings makes that mechanical: the bodies
  * never leave this function.
  */
-export function competencyCoverage(root: string): { all: string[]; covered: string[] } {
+export function competencyCoverage(root: string, userId: string | null): { all: string[]; covered: string[] } {
   const all = headings(readFileSync(join(root, 'behavioral/competencies.md'), 'utf8'))
-  const bank = join(root, 'local/stories.md')
+  const bank = join(userDataDir(root, userId), 'stories.md')
   const covered = existsSync(bank) ? headings(readFileSync(bank, 'utf8')) : []
   return { all, covered }
 }
@@ -241,6 +242,7 @@ const CLARIFY_FIRST = [
  */
 export function buildSystemPrompt(
   root: string,
+  userId: string | null,
   track: Track,
   problem?: string,
   pattern?: string,
@@ -260,7 +262,7 @@ export function buildSystemPrompt(
   })
 
   if (track === 'mock') {
-    const { all, covered } = competencyCoverage(root)
+    const { all, covered } = competencyCoverage(root, userId)
     const lines = all.map((c) => `- ${c}${covered.includes(c) ? '' : ' (no story yet)'}`)
     sections.push(`<competency-coverage>\n${lines.join('\n')}\n</competency-coverage>`)
 
@@ -515,7 +517,7 @@ export function buildSystemPrompt(
   voiceMode.push('</voice-mode>')
   sections.push(voiceMode.join('\n'))
 
-  return renderCandidate(sections.join('\n\n'), readCandidateName(root))
+  return renderCandidate(sections.join('\n\n'), readCandidateName(root, userId))
 }
 
 /**

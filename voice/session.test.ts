@@ -373,6 +373,7 @@ describe('finishSession', () => {
     const startedAt = new Date('2026-08-07T10:00:00.000Z')
     const { relPath } = finishSession(session, { turn: async function* () {}, lastRaw: () => '' }, {
       root,
+      userId: null,
       track: 'mock',
       startedAt,
     })
@@ -385,6 +386,7 @@ describe('finishSession', () => {
     const raw = '```story-log\ncompetency: Conflict\nstory: The migration\nworked: Owned the timeline\nfix: Name the tradeoff sooner\n```'
     const { storyLogWritten } = finishSession(session, { turn: async function* () {}, lastRaw: () => raw }, {
       root,
+      userId: null,
       track: 'mock',
       startedAt: new Date('2026-08-07T10:00:00.000Z'),
     })
@@ -396,6 +398,7 @@ describe('finishSession', () => {
     const session = createSession({ interviewer: { turn: async function* () {}, lastRaw: () => '' }, now: () => 0 })
     const { storyLogWritten } = finishSession(session, { turn: async function* () {}, lastRaw: () => 'No trailer here.' }, {
       root,
+      userId: null,
       track: 'mock',
       startedAt: new Date('2026-08-07T10:00:00.000Z'),
     })

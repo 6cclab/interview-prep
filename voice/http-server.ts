@@ -447,6 +447,7 @@ async function streamTurn(
 function finishOptions(deps: VoiceServerDeps, stored: StoredSession, elapsedMs: number) {
   return {
     root: deps.root,
+    userId: null,
     transport: (deps.transportLabel ?? transportLabel)(stored.drill.track),
     // The session's own drill, not a hardcoded 'mock' — a design session's
     // transcript belongs under local/designs/<problem>-live-..., and naming it
@@ -560,7 +561,7 @@ function endAndPersist(
     // scratch-directory cleanup down with it. An unresolvable pattern is
     // recorded as `unknown`, which is true.
     const found = findCodingProblem(deps.root, stored.drill.problem)
-    appendCoached(deps.root, {
+    appendCoached(deps.root, null, {
       date: isoDate(stored.startedAt),
       problem: stored.drill.problem,
       pattern: found?.pattern ?? 'unknown',
@@ -686,7 +687,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // speaker choice must not clobber `input`, which only `cli.ts` ever sets.
     if (url.pathname === '/api/devices/config') {
       if (req.method === 'GET') {
-        sendJson(res, 200, readDeviceConfig(deps.root))
+        sendJson(res, 200, readDeviceConfig(deps.root, null))
         return
       }
       if (req.method === 'POST') {
@@ -700,7 +701,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // — `input` is `cli.ts`'s ffmpeg-index space, not the browser's.
         if (typeof body.output === 'string') patch.output = body.output
         if (typeof body.webInput === 'string') patch.webInput = body.webInput
-        sendJson(res, 200, writeDeviceConfig(deps.root, patch))
+        sendJson(res, 200, writeDeviceConfig(deps.root, null, patch))
         return
       }
     }
@@ -811,7 +812,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // complete list. `hasStory` comes from headings in `local/stories.md` and
         // never its bodies — `mock.md` allows the story bank to be consulted for
         // gaps only, and that stays true of what reaches the browser.
-        const competencies = listCompetencies(deps.root)
+        const competencies = listCompetencies(deps.root, null)
         sendJson(res, 200, {
           problems: competencies.map((c) => c.slug),
           titles: Object.fromEntries(competencies.map((c) => [c.slug, c.title])),
@@ -865,7 +866,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // field it was handed.
     if (req.method === 'GET' && url.pathname === '/api/history') {
       const withPatterns = url.searchParams.get('patterns') === '1'
-      const rows = readDrillLog(deps.root)
+      const rows = readDrillLog(deps.root, null)
       sendJson(res, 200, {
         summary: summarise(rows),
         rows: rows.map(({ pattern, ...row }) => (withPatterns ? { ...row, pattern } : row)),
@@ -874,7 +875,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // there is nothing to spoil by saying it happened. It is here because a
         // cold solve of a problem he was walked through is a weaker fact than a
         // cold solve of one he was not, and the screen leads with the cold count.
-        coached: readCoachedProblems(deps.root),
+        coached: readCoachedProblems(deps.root, null),
       })
       return
     }
@@ -1010,14 +1011,14 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
           // A separate builder, not a branch of `buildSystemPrompt`: that
           // function goes through `allowedPaths` and `assertNoSpoilers`, both of
           // which refuse this track on purpose. See voice/coach.ts.
-          system = buildCoachPrompt(deps.root, { slug: drill.problem!, pattern: pattern! })
+          system = buildCoachPrompt(deps.root, null, { slug: drill.problem!, pattern: pattern! })
         } else {
           // Resolved against the real headings, so an unknown slug fails here as a
           // 400 rather than quietly producing an unfocused drill the candidate
           // thinks is focused.
           let focus: string | undefined
           if (drill.competency) {
-            const found = findCompetency(deps.root, drill.competency)
+            const found = findCompetency(deps.root, null, drill.competency)
             if (!found) throw new Error(`Unknown competency "${drill.competency}": no such behavioral competency.`)
             focus = found.title
           }
@@ -1028,6 +1029,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
           // describes out loud — would just be a broken drill.
           system = buildSystemPrompt(
             deps.root,
+            null,
             drill.track,
             drill.problem,
             pattern,
@@ -1678,7 +1680,7 @@ export function configuredSpeaker(root: string, makeSpeaker: (opts: SayOptions) 
 
   return {
     async speak(text: string): Promise<void> {
-      const config = readDeviceConfig(root)
+      const config = readDeviceConfig(root, null)
       // Env beats the file, and the file beats the system default — resolved by
       // the same function `cli.ts` uses, so one variable means one thing
       // whichever front end is running.

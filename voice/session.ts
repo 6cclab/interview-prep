@@ -162,6 +162,7 @@ export function createSession(opts: CreateSessionOptions): Session {
  */
 export interface FinishOptions {
   root: string
+  userId: string | null
   track: Track
   problem?: string
   startedAt: Date
@@ -199,6 +200,7 @@ export function finishSession(session: Session, interviewer: Interviewer, opts: 
   // overwrite an existing transcript — so report back what it actually used.
   const relPath = writeSession(
     opts.root,
+    opts.userId,
     sessionPath(opts.track, opts.startedAt, opts.problem),
     formatSession(session.entries(), opts.startedAt, opts.transport, opts.editor),
   )
@@ -207,7 +209,7 @@ export function finishSession(session: Session, interviewer: Interviewer, opts: 
   if (opts.track === 'mock') {
     const { log } = splitTrailer(interviewer.lastRaw())
     if (log) {
-      appendStoryLog(opts.root, log)
+      appendStoryLog(opts.root, opts.userId, log)
       storyLogWritten = true
     }
   }
@@ -221,7 +223,7 @@ export function finishSession(session: Session, interviewer: Interviewer, opts: 
     // come from `opts.drill`, which the server counted.
     const { log } = splitDrillLog(interviewer.lastRaw())
     if (log) {
-      appendDrillLog(opts.root, {
+      appendDrillLog(opts.root, opts.userId, {
         startedAt: opts.startedAt,
         problem: opts.problem,
         pattern: opts.drill.pattern,

@@ -53,7 +53,7 @@ describe('slugify', () => {
 
 describe('listCompetencies', () => {
   it('lists the headings, and only the headings', () => {
-    const listed = listCompetencies(root(FIXTURE))
+    const listed = listCompetencies(root(FIXTURE), null)
     expect(listed.map((c) => c.title)).toEqual([
       'Conflict / disagreement with a peer',
       'Failure',
@@ -64,19 +64,19 @@ describe('listCompetencies', () => {
   })
 
   it('reports which competencies have a story and which do not', () => {
-    const listed = listCompetencies(root(FIXTURE, '# Stories\n\n## Failure\n\nSomething.\n'))
+    const listed = listCompetencies(root(FIXTURE, '# Stories\n\n## Failure\n\nSomething.\n'), null)
     expect(listed.find((c) => c.title === 'Failure')?.hasStory).toBe(true)
     expect(listed.find((c) => c.title === 'Conflict / disagreement with a peer')?.hasStory).toBe(false)
   })
 
   it('treats a missing story bank as no stories rather than an error', () => {
-    expect(listCompetencies(root(FIXTURE)).every((c) => c.hasStory === false)).toBe(true)
+    expect(listCompetencies(root(FIXTURE), null).every((c) => c.hasStory === false)).toBe(true)
   })
 
   // The real file, so authoring a competency whose heading slugifies to
   // something unusable breaks this test rather than the picker.
   it('every real competency has a usable, unique slug', () => {
-    const listed = listCompetencies(process.cwd())
+    const listed = listCompetencies(process.cwd(), null)
     expect(listed.length).toBeGreaterThan(0)
     for (const c of listed) expect(c.slug).toMatch(PROBLEM_SLUG)
     expect(new Set(listed.map((c) => c.slug)).size).toBe(listed.length)
@@ -85,20 +85,20 @@ describe('listCompetencies', () => {
 
 describe('findCompetency', () => {
   it('resolves a slug to the authored title', () => {
-    expect(findCompetency(root(FIXTURE), 'conflict-disagreement-with-a-peer')?.title).toBe(
+    expect(findCompetency(root(FIXTURE), null, 'conflict-disagreement-with-a-peer')?.title).toBe(
       'Conflict / disagreement with a peer',
     )
   })
 
   it('returns null for an unknown slug rather than guessing', () => {
-    expect(findCompetency(root(FIXTURE), 'teamwork')).toBeNull()
+    expect(findCompetency(root(FIXTURE), null, 'teamwork')).toBeNull()
   })
 
   // Resolution goes through the file, so a slug is never reconstructed into a
   // title — a collision would surface as a duplicate entry, not a wrong drill.
   it('round-trips every real competency', () => {
-    for (const c of listCompetencies(process.cwd())) {
-      expect(findCompetency(process.cwd(), c.slug)?.title).toBe(c.title)
+    for (const c of listCompetencies(process.cwd(), null)) {
+      expect(findCompetency(process.cwd(), null, c.slug)?.title).toBe(c.title)
     }
   })
 })

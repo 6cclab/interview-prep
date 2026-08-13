@@ -940,7 +940,7 @@ describe('GET /api/history', () => {
   // weaker evidence of recall, and the screen leads with the cold count.
   it('reports which problems have been paired on, unconditionally', async () => {
     seedLog(ROW)
-    appendCoached(root, {
+    appendCoached(root, null, {
       date: '2026-08-08',
       problem: 'container-with-most-water',
       pattern: 'two-pointers',

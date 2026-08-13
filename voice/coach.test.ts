@@ -55,7 +55,7 @@ describe('the spoiler gate is untouched by coaching', () => {
   })
 
   it('refuses to build a drill system prompt for the coach track', () => {
-    expect(() => buildSystemPrompt(seedRoot(), 'coach', PROBLEM.slug, PROBLEM.pattern)).toThrow(
+    expect(() => buildSystemPrompt(seedRoot(), null, 'coach', PROBLEM.slug, PROBLEM.pattern)).toThrow(
       /does not use allowedPaths/,
     )
   })
@@ -70,7 +70,7 @@ describe('coachPaths', () => {
 })
 
 describe('buildCoachPrompt', () => {
-  const prompt = buildCoachPrompt(seedRoot(), PROBLEM)
+  const prompt = buildCoachPrompt(seedRoot(), null, PROBLEM)
 
   it('hands over the worked solution and the pattern notes', () => {
     expect(prompt).toContain('WALK-INWARD-FROM-BOTH-ENDS')
@@ -126,7 +126,7 @@ describe('buildCoachPrompt', () => {
   it('refuses to coach a problem with no worked solution', () => {
     const dir = seedRoot()
     const other = { slug: 'nonexistent', pattern: 'two-pointers' }
-    expect(() => buildCoachPrompt(dir, other)).toThrow(/Cannot coach "nonexistent"/)
+    expect(() => buildCoachPrompt(dir, null, other)).toThrow(/Cannot coach "nonexistent"/)
   })
 })
 
@@ -158,7 +158,7 @@ describe('candidate token rendering', () => {
   }
 
   it('replaces every {{candidate}} token, including ones from the assembled fixture files', () => {
-    const prompt = buildCoachPrompt(seedRootWithToken(), PROBLEM)
+    const prompt = buildCoachPrompt(seedRootWithToken(), null, PROBLEM)
     expect(prompt).toContain('Welcome, Ada.')
     expect(prompt).toContain('Nice work, Ada — Ada nailed it.')
     expect(prompt).not.toContain('{{candidate}}')
@@ -204,7 +204,7 @@ describe('appendCoached', () => {
   it('creates the file with a preamble that says these are not attempts', () => {
     const dir = mkdtempSync(join(tmpdir(), 'coached-'))
     mkdirSync(join(dir, 'local'), { recursive: true })
-    const rel = appendCoached(dir, { date: '2026-08-10', problem: 'two-sum-sorted', pattern: 'two-pointers', minutes: 22 })
+    const rel = appendCoached(dir, null, { date: '2026-08-10', problem: 'two-sum-sorted', pattern: 'two-pointers', minutes: 22 })
     expect(rel).toBe('local/coached.md')
     const body = readFileSync(join(dir, 'local/coached.md'), 'utf8')
     expect(body).toMatch(/\*\*Not attempts\.\*\*/)
@@ -216,11 +216,11 @@ describe('appendCoached', () => {
     const dir = mkdtempSync(join(tmpdir(), 'coached-'))
     mkdirSync(join(dir, 'local'), { recursive: true })
     const row = { date: '2026-08-10', problem: 'a', pattern: 'p', minutes: 1 }
-    appendCoached(dir, row)
-    appendCoached(dir, { ...row, problem: 'b' })
+    appendCoached(dir, null, row)
+    appendCoached(dir, null, { ...row, problem: 'b' })
     const body = readFileSync(join(dir, 'local/coached.md'), 'utf8')
     expect(body.match(/Not attempts/g)?.length).toBe(1)
-    expect(readCoachedProblems(dir).sort()).toEqual(['a', 'b'])
+    expect(readCoachedProblems(dir, null).sort()).toEqual(['a', 'b'])
   })
 
   // A transcript is the product of a session. Losing it to a failed bookkeeping
@@ -228,19 +228,19 @@ describe('appendCoached', () => {
   it('reports rather than throws when it cannot write', () => {
     const dir = mkdtempSync(join(tmpdir(), 'coached-'))
     // No `local/` directory, so the append cannot succeed.
-    expect(appendCoached(dir, { date: '2026-08-10', problem: 'a', pattern: 'p', minutes: 1 })).toBeNull()
+    expect(appendCoached(dir, null, { date: '2026-08-10', problem: 'a', pattern: 'p', minutes: 1 })).toBeNull()
   })
 })
 
 describe('readCoachedProblems', () => {
   it('is empty when nothing has been coached', () => {
-    expect(readCoachedProblems(mkdtempSync(join(tmpdir(), 'coached-')))).toEqual([])
+    expect(readCoachedProblems(mkdtempSync(join(tmpdir(), 'coached-')), null)).toEqual([])
   })
 
   it('skips the header rows rather than reading them as data', () => {
     const dir = mkdtempSync(join(tmpdir(), 'coached-'))
     mkdirSync(join(dir, 'local'), { recursive: true })
-    appendCoached(dir, { date: '2026-08-10', problem: 'only-one', pattern: 'p', minutes: 3 })
-    expect(readCoachedProblems(dir)).toEqual(['only-one'])
+    appendCoached(dir, null, { date: '2026-08-10', problem: 'only-one', pattern: 'p', minutes: 3 })
+    expect(readCoachedProblems(dir, null)).toEqual(['only-one'])
   })
 })

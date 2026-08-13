@@ -48,8 +48,8 @@ export function slugify(title: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
-export function listCompetencies(root: string): Competency[] {
-  const { all, covered } = competencyCoverage(root)
+export function listCompetencies(root: string, userId: string | null): Competency[] {
+  const { all, covered } = competencyCoverage(root, userId)
   return all.map((title) => ({
     slug: slugify(title),
     title,
@@ -58,6 +58,6 @@ export function listCompetencies(root: string): Competency[] {
 }
 
 /** The competency a slug names, or null. Resolved against the file, never reconstructed from the slug. */
-export function findCompetency(root: string, slug: string): Competency | null {
-  return listCompetencies(root).find((c) => c.slug === slug) ?? null
+export function findCompetency(root: string, userId: string | null, slug: string): Competency | null {
+  return listCompetencies(root, userId).find((c) => c.slug === slug) ?? null
 }
