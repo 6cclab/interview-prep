@@ -18,9 +18,21 @@ import { join } from 'node:path'
 const SAFE_USER_ID = /^[A-Za-z0-9._-]+$/
 const TRAVERSAL = new Set(['.', '..'])
 
+/**
+ * Whether an id can name a directory here.
+ *
+ * Exported so `deriveUserId` can refuse at the trust boundary and return null,
+ * which the caller turns into the 401 it always was. Without it the bad id
+ * travels as authenticated and only dies at the `userDataDir` throw below —
+ * surfacing a request with no usable identity as an internal error.
+ */
+export function isSafeUserId(userId: string): boolean {
+  return SAFE_USER_ID.test(userId) && !TRAVERSAL.has(userId)
+}
+
 export function userDataDir(root: string, userId: string | null): string {
   if (userId === null) return join(root, 'local')
-  if (!SAFE_USER_ID.test(userId) || TRAVERSAL.has(userId)) {
+  if (!isSafeUserId(userId)) {
     // Refused, not sanitised. A id needing repair is not one this server
     // issued, so it is a bug or an attack; quietly correcting it would write
     // someone's drill log into a directory nobody can account for.
