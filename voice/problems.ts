@@ -108,6 +108,94 @@ export function findCodingProblem(root: string, slug: string): CodingProblem | n
   return listCodingProblems(root).find((problem) => problem.slug === slug) ?? null
 }
 
+/** One company lead from `meta.yaml`'s `companies:` list. Never the pattern. */
+export interface Company {
+  name: string
+  confidence: string
+}
+
+/** `CodingProblem` plus the two fields `GET /api/problems/coding/detail` needs. */
+export type CodingProblemDetail = CodingProblem & {
+  title: string
+  companies: Company[]
+}
+
+const TITLE_LINE = /^title:[ \t]*(.*)$/m
+
+/**
+ * The `title:` line from a problem's `meta.yaml`, or `fallback` when there is
+ * none.
+ *
+ * `fallback` is a parameter rather than a constant inside the function because
+ * the picker has nothing better than the slug to show if a problem's title is
+ * missing, and that fallback is the caller's problem to choose, not this
+ * reader's — same separation `readDifficulty` keeps by returning `'unrated'`
+ * rather than guessing.
+ */
+function readTitle(dir: string, fallback: string): string {
+  let text: string
+  try {
+    text = readFileSync(join(dir, 'meta.yaml'), 'utf8')
+  } catch {
+    return fallback
+  }
+  const raw = TITLE_LINE.exec(text)?.[1]?.trim()
+  return raw ? raw : fallback
+}
+
+/**
+ * The `companies:` list from a problem's `meta.yaml` — name and confidence
+ * only, never `source` or `date`, which sometimes carry an internal note about
+ * how the lead was reconstructed and are not fit for the wire.
+ *
+ * A second single-key regex parser, not a nested extension of
+ * `scripts/drill-select.ts`'s `readBlockField`: that helper reads one scalar
+ * out of one named block, and `companies:` is a *list* of blocks with no name
+ * to match on. So each entry is carved out by splitting on its own `- name:`
+ * marker — the one line every entry is guaranteed to start with — and the two
+ * fields wanted are read out of the resulting chunk the same line-anchored way
+ * as everywhere else in this file. `companies: []` (the documented shape for
+ * "no lead") is not a parse failure: the block regex only matches a nested
+ * list, so an inline empty array falls through to the same empty result as a
+ * `companies:` key that is absent entirely.
+ */
+function readCompanies(dir: string): Company[] {
+  let text: string
+  try {
+    text = readFileSync(join(dir, 'meta.yaml'), 'utf8')
+  } catch {
+    return []
+  }
+  const block = /^companies:[ \t]*\n((?:[ \t]+.*\n?)*)/m.exec(text)?.[1] ?? ''
+  const entries = block.split(/(?=^[ \t]*-[ \t]*name:)/m).filter((chunk) => chunk.trim() !== '')
+  const companies: Company[] = []
+  for (const entry of entries) {
+    const name = /name:[ \t]*(.*)$/m.exec(entry)?.[1]?.trim()
+    if (!name) continue
+    const confidence = /^[ \t]+confidence:[ \t]*(.*)$/m.exec(entry)?.[1]?.trim()
+    companies.push({ name, confidence: confidence || 'unrated' })
+  }
+  return companies
+}
+
+/**
+ * Every coding problem with the fields the detail picker shows — title and
+ * companies alongside the slug and tier `listCodingProblems` already reads.
+ *
+ * Deliberately still returns `pattern` on every entry, same as
+ * `listCodingProblems`: this stays a reader, and a reader that quietly drops a
+ * field depending on who might be looking is the kind of conditional safety
+ * gate `voice/coach.ts` warns leaks. The route this feeds is what strips it
+ * before the response is serialised — see `GET /api/problems/coding/detail`.
+ */
+export function listCodingProblemDetails(root: string): CodingProblemDetail[] {
+  const base = join(root, 'problems')
+  return listCodingProblems(root).map((problem) => {
+    const dir = join(base, problem.pattern, problem.slug)
+    return { ...problem, title: readTitle(dir, problem.slug), companies: readCompanies(dir) }
+  })
+}
+
 /**
  * Strips anything that would name the pattern out of text bound for Andre.
  *

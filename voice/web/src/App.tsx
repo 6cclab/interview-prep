@@ -12,6 +12,10 @@ import { MicCheck } from './components/MicCheck'
 import { DeviceSettings } from './components/DeviceSettings'
 import { Home } from './components/Home'
 import { History } from './components/History'
+import { Problems } from './components/Problems'
+import { Progress } from './components/Progress'
+import { Study } from './components/Study'
+import { Review } from './components/Review'
 import { HomeHeader } from './components/HomeHeader'
 import { ProblemPane } from './components/ProblemPane'
 import { CodingTools } from './components/CodingTools'
@@ -77,6 +81,45 @@ export default function App() {
       </div>
     )
   }
+  // Four more non-drill screens, same shape as `history` above: no session, no
+  // clock, no microphone, and each owns its own `app-root` + header the same
+  // way `History` does.
+  if (route.view === 'problems') {
+    return (
+      <div className="app-root">
+        <HomeHeader dark={dark} onToggleTheme={toggleTheme} />
+        <Problems
+          onGoHome={() => navigate({ view: 'home' })}
+          onStudy={() => navigate({ view: 'study' })}
+          onReview={(slug) => navigate({ view: 'review', slug })}
+        />
+      </div>
+    )
+  }
+  if (route.view === 'progress') {
+    return (
+      <div className="app-root">
+        <HomeHeader dark={dark} onToggleTheme={toggleTheme} />
+        <Progress onGoHome={() => navigate({ view: 'home' })} onStudy={() => navigate({ view: 'study' })} />
+      </div>
+    )
+  }
+  if (route.view === 'study') {
+    return (
+      <div className="app-root">
+        <HomeHeader dark={dark} onToggleTheme={toggleTheme} />
+        <Study onGoHome={() => navigate({ view: 'home' })} />
+      </div>
+    )
+  }
+  if (route.view === 'review') {
+    return (
+      <div className="app-root">
+        <HomeHeader dark={dark} onToggleTheme={toggleTheme} />
+        <Review slug={route.slug} onGoHome={() => navigate({ view: 'home' })} />
+      </div>
+    )
+  }
   return <DrillScreen key={routeHash(route)} route={route} dark={dark} onToggleTheme={toggleTheme} onGoHome={() => navigate({ view: 'home' })} />
 }
 
@@ -95,11 +138,16 @@ const HEADER = {
   // "Debugging round", not "Debugging interview": the thing being rehearsed is
   // the "here is some code, something is wrong with it" round.
   debug: { title: 'Debugging round', kicker: 'Root cause, not symptom' },
-  // Neither `home` nor `history` reaches DrillScreen, but the record is keyed by
-  // the full Route view so a new view cannot be added without deciding what the
-  // header says. Adding `history` to Route is what made the compiler ask.
+  // None of these five reaches DrillScreen, but the record is keyed by the full
+  // Route view so a new view cannot be added without deciding what the header
+  // says. Adding `history` to Route is what made the compiler ask originally;
+  // `problems`/`progress`/`study`/`review` are here for the same reason.
   home: { title: 'Mock interview', kicker: 'Behavioral · voice' },
   history: { title: 'Past drills', kicker: 'Coding drill log' },
+  problems: { title: 'Coding problems', kicker: 'Browse' },
+  progress: { title: 'Progress', kicker: 'Cold vs helped vs unsolved' },
+  study: { title: 'Study Mode', kicker: 'Pattern roadmap' },
+  review: { title: 'Review', kicker: 'Worked answer' },
 } as const
 
 /**
@@ -113,6 +161,10 @@ const PARTNER = {
   debug: 'Interviewer',
   home: 'Interviewer',
   history: 'Interviewer',
+  problems: 'Interviewer',
+  progress: 'Interviewer',
+  study: 'Interviewer',
+  review: 'Interviewer',
 } as const
 
 interface DrillScreenProps {

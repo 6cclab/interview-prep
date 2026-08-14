@@ -184,3 +184,101 @@ export interface HistoryPayload {
    */
   coached?: string[]
 }
+
+/** One company that has asked this problem, from `GET /api/problems/coding/detail`. */
+export interface ProblemCompany {
+  name: string
+  confidence: string
+}
+
+/**
+ * One coding problem's browsing metadata, from `GET /api/problems/coding/detail`.
+ *
+ * **Never carries a `pattern` field.** See Problems.tsx: this is the default,
+ * always-on list, and AGENTS.md's rule ("a permanent problem-to-pattern list
+ * would spoil every re-drill at a glance") applies to it exactly as it applies
+ * to `HistoryRow` without `?patterns=1`.
+ */
+export interface ProblemDetail {
+  slug: string
+  title: string
+  difficulty: string
+  companies: ProblemCompany[]
+}
+
+export interface ProblemsDetailPayload {
+  problems: ProblemDetail[]
+}
+
+/**
+ * One difficulty's tally, from `GET /api/progress`'s `byDifficulty`.
+ *
+ * Cold and helped are separate fields, never a single `solved`. Same rule as
+ * `HistorySummary`/`History.tsx`: a solve that took hints is a different fact
+ * from a cold one, and collapsing them here would be the same flattening one
+ * level up.
+ */
+export interface DifficultyProgress {
+  difficulty: string
+  cold: number
+  helped: number
+  unsolved: number
+  unattempted: number
+  total: number
+}
+
+/**
+ * The overall tally on `GET /api/progress`. Same shape as a `DifficultyProgress`
+ * row minus `difficulty` — the server's total across every difficulty.
+ */
+export interface ProgressSummary {
+  cold: number
+  helped: number
+  unsolved: number
+  unattempted: number
+  total: number
+}
+
+export interface ProgressPayload {
+  summary: ProgressSummary
+  byDifficulty: DifficultyProgress[]
+}
+
+/**
+ * One problem inside a pattern's group, from `GET /api/roadmap?study=1`.
+ *
+ * This is the one payload in the client that is allowed to imply a pattern —
+ * the whole point of Study Mode is naming it — which is why the route that
+ * reaches it is gated behind an explicit confirmation. See Study.tsx.
+ */
+export interface RoadmapProblem {
+  slug: string
+  title: string
+  attempted: boolean
+  cold: boolean
+}
+
+export interface RoadmapPattern {
+  pattern: string
+  problems: RoadmapProblem[]
+}
+
+export interface RoadmapPayload {
+  patterns: RoadmapPattern[]
+}
+
+/**
+ * The worked debrief for one problem, from `GET /api/review/<slug>`.
+ *
+ * The server 403s this route when there is no logged attempt for the slug —
+ * Review.tsx renders that as an explanation, not an error, and the client never
+ * offers a link here except from a row that already has one. `row` carries the
+ * pattern unconditionally: unlike the history and problems screens, this one is
+ * reached only by a deliberate act and its entire purpose is the spoiler.
+ */
+export interface ReviewPayload {
+  answer: string
+  readme: string
+  attempt: string | null
+  row: HistoryRow
+}

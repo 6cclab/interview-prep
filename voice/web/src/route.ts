@@ -39,10 +39,46 @@ export type Route =
   | { view: 'debug'; problem: string }
   /** Past drills. Not a drill screen — it is read between them. */
   | { view: 'history' }
+  /**
+   * The browsable coding list: difficulty, solved-state and company, joined
+   * client-side from `GET /api/problems/coding/detail` and `GET /api/history`.
+   * Not a drill screen, and never fetches or shows a `pattern` — see Problems.tsx.
+   */
+  | { view: 'problems' }
+  /** Cold vs helped vs unsolved, plus the by-difficulty breakdown. Not a drill screen. */
+  | { view: 'progress' }
+  /**
+   * The pattern roadmap. Reachable only by a deliberate link from `#/problems`
+   * or `#/progress` — never from header nav, the same reasoning as `#/coach`
+   * being reachable only from the landing page. `Study.tsx` gates the actual
+   * fetch behind an in-page confirmation; this route existing is not itself the
+   * reveal.
+   */
+  | { view: 'study' }
+  /**
+   * The worked debrief for one problem, from `GET /api/review/<slug>`. `slug`
+   * gets the same treatment as every other filesystem-reaching segment off a
+   * hand-editable hash — see `PROBLEM_SLUG` below. Only ever linked to from a
+   * row with a logged attempt; the 403 for one without is rendered as an
+   * explanation, not routed away from.
+   */
+  | { view: 'review'; slug: string }
 
 /** The route's drill, or `null` on `home`. What `start()` is called with. */
 export function routeDrill(route: Route): Drill | null {
-  if (route.view === 'home' || route.view === 'history') return null
+  // None of these four hold a session, a clock or a microphone — same as
+  // `history`, and for the same reason: they are read between drills, not
+  // during one.
+  if (
+    route.view === 'home' ||
+    route.view === 'history' ||
+    route.view === 'problems' ||
+    route.view === 'progress' ||
+    route.view === 'study' ||
+    route.view === 'review'
+  ) {
+    return null
+  }
   if (route.view === 'mock') {
     // Omitted rather than sent as undefined: the server treats an absent
     // competency as the interviewer's choice, and a key present with no value is
@@ -64,6 +100,10 @@ export function routeHash(route: Route): string {
     return route.competency ? `#/mock/${encodeURIComponent(route.competency)}` : '#/mock'
   }
   if (route.view === 'history') return '#/history'
+  if (route.view === 'problems') return '#/problems'
+  if (route.view === 'progress') return '#/progress'
+  if (route.view === 'study') return '#/study'
+  if (route.view === 'review') return `#/review/${encodeURIComponent(route.slug)}`
   return `#/${route.view}/${encodeURIComponent(route.problem)}`
 }
 
@@ -77,7 +117,10 @@ export function parseRoute(hash: string): Route {
   if (path === '' || path === 'home') return { view: 'home' }
   if (path === 'mock') return { view: 'mock' }
   if (path === 'history') return { view: 'history' }
-  const withProblem = /^(design|coding|coach|debug|mock)\/([^/]+)$/.exec(path)
+  if (path === 'problems') return { view: 'problems' }
+  if (path === 'progress') return { view: 'progress' }
+  if (path === 'study') return { view: 'study' }
+  const withProblem = /^(design|coding|coach|debug|mock|review)\/([^/]+)$/.exec(path)
   if (withProblem) {
     let slug: string
     try {
@@ -87,8 +130,10 @@ export function parseRoute(hash: string): Route {
       return { view: 'home' }
     }
     if (PROBLEM_SLUG.test(slug)) {
-      const view = withProblem[1] as 'design' | 'coding' | 'coach' | 'debug' | 'mock'
-      return view === 'mock' ? { view: 'mock', competency: slug } : { view, problem: slug }
+      const view = withProblem[1] as 'design' | 'coding' | 'coach' | 'debug' | 'mock' | 'review'
+      if (view === 'mock') return { view: 'mock', competency: slug }
+      if (view === 'review') return { view: 'review', slug }
+      return { view, problem: slug }
     }
     // A segment that is not a slug falls through to `home` below, the same as a
     // bad design or coding problem. Deliberately not "drop the focus and run the

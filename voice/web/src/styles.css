@@ -1674,3 +1674,136 @@ ol.md__list {
   justify-content: space-between;
   gap: 1rem;
 }
+
+/* ---------------------------------------------------------------------- */
+/* Problems / Progress / Study / Review — the browsing screens             */
+/*                                                                          */
+/* Deliberately reuses `.history__summary`, `.history__stat`, `.history__of`,
+   `.history__paired` and `.history__empty` above rather than redefining
+   them: those four screens and this one are the same "read between drills"
+   family, and a stat tile or a muted annotation should look identical
+   wherever it appears. Only what actually differs — the header, the generic
+   table shell, and each screen's own extras — gets a new class here.       */
+/* ---------------------------------------------------------------------- */
+
+/* Shared with `.history__header` in every property but the class name —
+   kept separate rather than reused so `Problems.tsx`/`Progress.tsx`/
+   `Study.tsx`/`Review.tsx` do not have to import a component named for a
+   different screen just to get their own title row. */
+.screen__header {
+  inline-size: 100%;
+  max-inline-size: var(--measure);
+  margin-inline: auto;
+  padding: 1.25rem 1.5rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.screen {
+  inline-size: 100%;
+  max-inline-size: var(--measure);
+  margin-inline: auto;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-inline-size: 0;
+}
+
+.screen__scroller {
+  overflow-x: auto;
+  min-inline-size: 0;
+  border: 2px solid var(--border);
+}
+
+.screen__table {
+  border-collapse: collapse;
+  inline-size: 100%;
+  font-size: 0.9rem;
+}
+
+.screen__table th,
+.screen__table td {
+  text-align: start;
+  padding: 0.6rem 0.85rem;
+  border-block-end: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  vertical-align: top;
+}
+
+.screen__table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+/* Four solved-states, not History's three: `unattempted` gets a fourth
+   treatment because "never tried" and "tried and lost" are different facts —
+   see `problems.ts`'s `SolvedState`. */
+.screen__row--cold td:first-child {
+  box-shadow: inset 3px 0 0 var(--brand, currentColor);
+}
+
+.screen__row--helped td:first-child {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, currentColor 45%, transparent);
+}
+
+.screen__row--unsolved td:first-child {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.screen__row--unattempted td:first-child {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.problems__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Below the list rather than beside it: this is a detour away from browsing,
+   not one more filter alongside difficulty/company. */
+.problems__study-link {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--border);
+}
+
+/* Study Mode's gate. Its own screen, not a modal over the roadmap — the point
+   is that nothing behind it has loaded yet, and a modal over a rendered page
+   would be exactly the wrong picture of that. */
+.study__gate {
+  max-inline-size: 60ch;
+  gap: 1rem;
+}
+
+.study__gate-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.study__patterns {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.study__pattern {
+  border: 2px solid var(--border);
+  padding: 1rem 1.25rem;
+}
+
+.review__block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}

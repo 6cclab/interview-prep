@@ -508,6 +508,51 @@ export function Home({ onChoose }: Props) {
             </CardAction>
           </CardFooter>
         </Card>
+
+        {/* Also not a track — browsing the full coding set by difficulty,
+            solved-state and company. No pattern reaches this card or the screen
+            it opens; that is only ever a deliberate detour from inside it. */}
+        <Card>
+          <CardHeader className="w-full">
+            <CardTitle>Coding problems</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <span className="home__note">
+              Every coding problem, filterable by difficulty, solved-state and company. No pattern shown.
+            </span>
+          </CardContent>
+          <CardFooter>
+            <CardAction>
+              <Button
+                variant="outline"
+                onClick={() => onChoose({ view: 'problems' })}
+              >
+                Browse problems
+              </Button>
+            </CardAction>
+          </CardFooter>
+        </Card>
+
+        <Card>
+          <CardHeader className="w-full">
+            <CardTitle>Progress</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <span className="home__note">
+              Cold vs helped vs unsolved, overall and by difficulty.
+            </span>
+          </CardContent>
+          <CardFooter>
+            <CardAction>
+              <Button
+                variant="outline"
+                onClick={() => onChoose({ view: 'progress' })}
+              >
+                View progress
+              </Button>
+            </CardAction>
+          </CardFooter>
+        </Card>
       </div>
     </main>
   );

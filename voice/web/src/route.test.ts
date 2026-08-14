@@ -252,3 +252,73 @@ describe('debugging route', () => {
     expect(parseRoute('#/mock/failure')).toEqual({ view: 'mock', competency: 'failure' })
   })
 })
+
+/**
+ * The browsable problem list, the progress screen, and the pattern roadmap.
+ *
+ * None of the three is a drill: no session, no clock, no microphone — same as
+ * `history`, and `routeDrill` must return null for every one of them.
+ */
+describe('problems / progress / study routes', () => {
+  it.each([
+    ['#/problems', { view: 'problems' }],
+    ['#/progress', { view: 'progress' }],
+    ['#/study', { view: 'study' }],
+  ] as const)('round-trips %j through the hash', (hash, route) => {
+    expect(parseRoute(hash)).toEqual(route)
+    expect(routeHash(route)).toBe(hash)
+    expect(routeDrill(route)).toBeNull()
+  })
+
+  it.each(['#/problems', '#/progress', '#/study'])('parses without the leading slash', (hash) => {
+    expect(parseRoute(hash.replace('#/', '#'))).toEqual(parseRoute(hash))
+  })
+
+  // A problem-shaped or trailing-slash path must not be silently swallowed into
+  // one of these three, the same rule `history` already gets.
+  it.each(['#/problems/celebrity', '#/progress/celebrity', '#/study/celebrity', '#/problems/', '#/progress/'])(
+    'does not swallow a trailing segment',
+    (hash) => {
+      expect(parseRoute(hash).view).toBe('home')
+    },
+  )
+})
+
+/**
+ * The review route.
+ *
+ * `slug` reaches `solutions/**` on the server (the debrief's answer file), so it
+ * gets exactly the same slug validation as a design or coding problem — see
+ * `PROBLEM_SLUG`. Unlike those two, there is no problem-less form: a bare
+ * `#/review` is not "the interviewer's choice" the way `#/mock` is, because
+ * review is always about one specific attempt.
+ */
+describe('review route', () => {
+  it('round-trips a slug', () => {
+    expect(parseRoute('#/review/two-sum-sorted')).toEqual({ view: 'review', slug: 'two-sum-sorted' })
+    expect(routeHash({ view: 'review', slug: 'two-sum-sorted' })).toBe('#/review/two-sum-sorted')
+    expect(parseRoute(routeHash({ view: 'review', slug: 'celebrity' }))).toEqual({
+      view: 'review',
+      slug: 'celebrity',
+    })
+  })
+
+  it('is not a drill', () => {
+    expect(routeDrill({ view: 'review', slug: 'celebrity' })).toBeNull()
+  })
+
+  it.each([
+    '#/review',
+    '#/review/',
+    '#/review/../../solutions/two-sum-sorted.md',
+    '#/review/Two-Sum',
+    '#/review/a/b',
+  ])('refuses to route %j anywhere but home', (hash) => {
+    expect(parseRoute(hash).view).toBe('home')
+  })
+
+  it('does not confuse a review slug with a coding problem or a competency', () => {
+    expect(parseRoute('#/coding/two-sum-sorted')).toEqual({ view: 'coding', problem: 'two-sum-sorted' })
+    expect(parseRoute('#/mock/failure')).toEqual({ view: 'mock', competency: 'failure' })
+  })
+})

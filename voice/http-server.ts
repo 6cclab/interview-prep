@@ -22,7 +22,10 @@ import {
   PROBLEM_SLUG,
   type Track,
 } from './context'
-import { findCodingProblem, listCodingProblems, problemDir } from './problems'
+import { findCodingProblem, listCodingProblemDetails, listCodingProblems, problemDir } from './problems'
+import { progressByDifficulty } from './progress'
+import { buildRoadmap } from './roadmap'
+import { selectByRust } from '../scripts/drill-select'
 import { readSolution, writeSolution, versionOf } from './solution-file'
 import { buildExercise } from './coding-exercise'
 import { findCompetency, listCompetencies } from './competencies'
@@ -974,6 +977,122 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // cold solve of one he was not, and the screen leads with the cold count.
         coached: readCoachedProblems(deps.root, null),
       })
+      return
+    }
+
+    // The picker's richer listing for a NeetCode-style browsing surface: title
+    // and company leads alongside the slug and tier `/api/problems?track=coding`
+    // already sends. `listCodingProblemDetails` still carries `pattern` on every
+    // entry — see its own comment — so stripping it here, on the way to
+    // `sendJson`, is what keeps this route's guarantee the same structural kind
+    // as `voice/problems.ts`'s: the pattern never rode along in the first place,
+    // rather than a field the client is trusted to ignore.
+    if (req.method === 'GET' && url.pathname === '/api/problems/coding/detail') {
+      const problems = listCodingProblemDetails(deps.root)
+      sendJson(res, 200, {
+        problems: problems.map(({ slug, title, difficulty, companies }) => ({ slug, title, difficulty, companies })),
+      })
+      return
+    }
+
+    // Aggregate progress for the browsing surface's headline numbers.
+    // `summary` is `voice/drill-log.ts`'s `summarise()` unchanged — this route
+    // adds nothing to it and must not reimplement it, or the two screens that
+    // read a drill log could quietly drift apart on what "cold" means.
+    // `byDifficulty` carries no `pattern` axis at all: a per-pattern progress
+    // bar is `patterns.md` again, just rendered with numbers glued on.
+    if (req.method === 'GET' && url.pathname === '/api/progress') {
+      const rows = readDrillLog(deps.root, userId)
+      sendJson(res, 200, {
+        summary: summarise(rows),
+        byDifficulty: progressByDifficulty(listCodingProblems(deps.root), rows),
+      })
+      return
+    }
+
+    // The study roadmap: problems grouped by pattern, gated the same way
+    // `?patterns=1` gates `/api/history` — opt-in on the wire, per request —
+    // except stricter, on purpose. `buildRoadmap` only ever reads a group's
+    // pattern off a `HistoryRow`, which exists only for a problem that has
+    // actually been drilled, so an unattempted problem cannot appear under its
+    // real pattern here even though the repo full well knows it — see
+    // `voice/roadmap.ts`'s module comment for why that is structural rather
+    // than a check that could be forgotten.
+    if (req.method === 'GET' && url.pathname === '/api/roadmap') {
+      if (url.searchParams.get('study') !== '1') {
+        sendJson(res, 400, { error: 'GET /api/roadmap requires ?study=1.' })
+        return
+      }
+      const rows = readDrillLog(deps.root, userId)
+      sendJson(res, 200, { patterns: buildRoadmap(listCodingProblemDetails(deps.root), rows) })
+      return
+    }
+
+    // The debrief `prompts/review.md` describes, ported to server logic so a
+    // browsing client can request it directly. The gate is the whole point:
+    // `review.md` says "no row means no finished attempt," and there is no
+    // `?anyway=1` here the way the prompt offers one in conversation — a URL is
+    // bookmarkable in a way a spoken "review it anyway" is not, so the escape
+    // hatch that is fine to grant out loud is not fine to grant to a link.
+    // This is the only route in the server permitted to read `solutions/**`.
+    const reviewMatch = /^\/api\/review\/([^/]+)$/.exec(url.pathname)
+    if (req.method === 'GET' && reviewMatch) {
+      const slug = decodeURIComponent(reviewMatch[1]!)
+      if (!PROBLEM_SLUG.test(slug)) {
+        sendJson(res, 400, { error: 'Invalid problem name.' })
+        return
+      }
+      const problem = findCodingProblem(deps.root, slug)
+      if (problem === null) {
+        notFound(res)
+        return
+      }
+      // Rows are newest-first (`readDrillLog`), so the first match is the most
+      // recent attempt — the one a review would debrief.
+      const rows = readDrillLog(deps.root, userId)
+      const row = rows.find((r) => r.problem === slug)
+      if (row === undefined) {
+        sendJson(res, 403, {
+          error: `No logged attempt at ${slug}. Reviewing it now would burn the drill.`,
+        })
+        return
+      }
+      const dir = problemDir(problem)
+      let readme: string
+      try {
+        readme = readFileSync(join(deps.root, dir, 'README.md'), 'utf8')
+      } catch {
+        readme = ''
+      }
+      let answer: string
+      try {
+        answer = readFileSync(join(deps.root, 'solutions', problem.pattern, `${problem.slug}.md`), 'utf8')
+      } catch {
+        sendJson(res, 404, { error: `No worked solution recorded for ${slug}.` })
+        return
+      }
+      sendJson(res, 200, {
+        answer,
+        readme,
+        attempt: readSolution(deps.root, slug)?.text ?? '',
+        row,
+      })
+      return
+    }
+
+    // "What's rusty" as its own endpoint, for a client that wants a single
+    // suggestion without opening a session. A thin wrapper: the actual
+    // decision is `scripts/drill-select.ts`'s pure `selectByRust`, already
+    // exercised by `/drill`, and this must not reimplement it — a route that
+    // ranks staleness its own way would drift from what the CLI picks and be
+    // wrong for whichever one is not kept in sync.
+    if (req.method === 'GET' && url.pathname === '/api/rust') {
+      const selection = selectByRust(listCodingProblems(deps.root), readDrillLog(deps.root, userId))
+      if (selection === null) {
+        sendJson(res, 404, { error: 'No coding problems to select from.' })
+        return
+      }
+      sendJson(res, 200, { slug: selection.problem.slug, why: selection.why })
       return
     }
 
