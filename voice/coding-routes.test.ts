@@ -96,10 +96,16 @@ function listen(deps: VoiceServerDeps): Promise<{ port: number }> {
   })
 }
 
-async function startCodingSession(port: number, problem = SLUG): Promise<Response> {
+async function startCodingSession(
+  port: number,
+  problem = SLUG,
+  // Deployed-mode tests have to carry an identity; local ones send none, which
+  // is the state every other test in this file is asserting against.
+  headers: Record<string, string> = {},
+): Promise<Response> {
   return fetch(`http://127.0.0.1:${port}/api/session`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify({ track: 'coding', problem }),
   })
 }
@@ -1492,5 +1498,75 @@ describe('coach sees the working file', () => {
     expect(seenPerTurn.length).toBeGreaterThanOrEqual(2)
     expect(seenPerTurn[0]).toContain('const FIRST = 1')
     expect(seenPerTurn[seenPerTurn.length - 1]).toContain('const SECOND = 2')
+  })
+})
+
+/**
+ * A deployed instance runs the suite in the browser, so the verdict arrives
+ * with the request instead of being produced here. The interviewer still has
+ * to react to it, which is what this route is for either way.
+ */
+describe('POST /api/session/:id/tests with a verdict from the browser', () => {
+  // Deployed mode gates every `/api/` request on identity, so the header rides
+  // along here too — not only on the request that opened the session.
+  const postVerdict = (port: number, verdict: unknown, headers: Record<string, string> = {}) =>
+    fetch(`http://127.0.0.1:${port}/api/session/session-1/tests`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ verdict }),
+    })
+
+  const AS_ALICE = { 'x-authentik-uid': 'ak-alice' }
+
+  it('takes the browser\'s verdict instead of running the suite', async () => {
+    let ran = false
+    const { port } = await listen(
+      baseDeps({
+        mode: 'deployed',
+        runDrillTests: async (...args: Parameters<ReturnType<typeof reports>>) => {
+          ran = true
+          return reports([])(...args)
+        },
+      }),
+    )
+    await startCodingSession(port, SLUG, AS_ALICE)
+    const res = await postVerdict(port, { kind: 'cost-red', failed: ['maxArea — scale > big'] }, AS_ALICE)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ kind: 'cost-red', failed: ['maxArea — scale > big'] })
+    // The point of the branch: on a deployed box there is no vitest to spawn
+    // and the server must not try.
+    expect(ran).toBe(false)
+  })
+
+  // A local instance has the suite, the checkout and a real vitest, so it has
+  // no reason to believe a client about the outcome. Narrowing where a
+  // forgeable verdict is accepted to the one mode that cannot do better keeps
+  // the trusted surface as small as the design allows.
+  it('ignores a supplied verdict on a local instance and runs the suite itself', async () => {
+    let ran = false
+    const { port } = await listen(
+      baseDeps({
+        runDrillTests: async (...args: Parameters<ReturnType<typeof reports>>) => {
+          ran = true
+          return reports([])(...args)
+        },
+      }),
+    )
+    await startCodingSession(port)
+    const res = await postVerdict(port, { kind: 'cost-red', failed: ['a lie'] })
+    expect(await res.json()).toEqual({ kind: 'green' })
+    expect(ran).toBe(true)
+  })
+
+  it('refuses a verdict that is not one', async () => {
+    const { port } = await listen(baseDeps({ mode: 'deployed' }))
+    await startCodingSession(port, SLUG, AS_ALICE)
+    expect((await postVerdict(port, { kind: 'made-up' }, AS_ALICE)).status).toBe(400)
+  })
+
+  it('refuses a verdict whose failed list is not a list of strings', async () => {
+    const { port } = await listen(baseDeps({ mode: 'deployed' }))
+    await startCodingSession(port, SLUG, AS_ALICE)
+    expect((await postVerdict(port, { kind: 'cost-red', failed: [{ nope: 1 }] }, AS_ALICE)).status).toBe(400)
   })
 })

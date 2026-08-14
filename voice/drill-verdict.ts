@@ -37,6 +37,29 @@ export type DrillVerdict =
   /** The suite could not be run at all — a compile error, a missing file. */
   | { kind: 'errored'; message: string }
 
+/**
+ * A `DrillVerdict` from an untrusted source, or null.
+ *
+ * A deployed instance runs the suite in the browser, so the verdict arrives
+ * over the wire and is forgeable — that trade is accepted, because there is no
+ * server-side execution left to protect and the interviewer's reaction is
+ * coaching, not a score anyone can spend.
+ *
+ * What is *not* accepted is an unchecked shape reaching `verdictCue`, which
+ * reads `failed` and interpolates it into the interviewer's prompt. Validating
+ * here keeps a malformed body a 400 instead of a crash or a prompt built from
+ * whatever arbitrary JSON was posted.
+ */
+export function parseDrillVerdict(value: unknown): DrillVerdict | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { kind, failed, message } = value as Record<string, unknown>
+  if (kind === 'green') return { kind }
+  if (kind === 'errored') return typeof message === 'string' ? { kind, message } : null
+  if (kind !== 'correctness-red' && kind !== 'cost-red') return null
+  if (!Array.isArray(failed) || !failed.every((f) => typeof f === 'string')) return null
+  return { kind, failed: failed as string[] }
+}
+
 // A suite whose name marks it as testing behaviour rather than cost.
 const CORRECTNESS = /—\s*correctness\b/i
 

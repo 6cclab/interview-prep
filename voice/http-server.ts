@@ -31,6 +31,7 @@ import { runDebugTests, debugVerdictCue, type DebugVerdict } from './debug-tests
 import { buildCoachPrompt, codeCue, readWorkingFile } from './coach'
 import { appendCoached, isoDate, readCoachedProblems } from './coached'
 import { runDrillTests, verdictCue } from './drill-tests'
+import { parseDrillVerdict, type DrillVerdict } from './drill-verdict'
 import { createInterviewer, type StreamFn } from './interviewer'
 import { backendSummary, describeBackend, modelFor, streamForBackend, transportLabel } from './backend'
 import { preloadOllama } from './ollama'
@@ -1587,6 +1588,26 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         sendJson(res, 409, { error: 'a turn is already in progress for this session' })
         return
       }
+      // A deployed instance ran the suite in the browser, so the verdict comes
+      // with the request and there is no vitest here to spawn. Accepted only in
+      // that mode: a local instance has the checkout, the suite and a real
+      // runner, so it has no reason to take a client's word for the outcome,
+      // and confining the forgeable path to the one mode that cannot do better
+      // is the whole of the trade.
+      let supplied: DrillVerdict | null = null
+      if (deps.mode === 'deployed' && testable !== 'debug') {
+        const body = await readJsonBody(req)
+        if (body !== null && body.verdict !== undefined) {
+          // Validated rather than trusted onward: `verdictCue` reads `failed`
+          // straight into the interviewer's prompt.
+          supplied = parseDrillVerdict(body.verdict)
+          if (supplied === null) {
+            sendJson(res, 400, { error: 'not a verdict' })
+            return
+          }
+        }
+      }
+
       turnsInFlight.add(id)
       store.touch(id, idleClock())
 
@@ -1604,7 +1625,9 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       let verdict: DebugVerdict | Awaited<ReturnType<typeof runDrillTests>>
       try {
         verdict =
-          testable === 'debug'
+          supplied !== null
+            ? supplied
+            : testable === 'debug'
             ? await runDebugTests({
                 root: deps.root,
                 exercise: stored.drill.problem!,
