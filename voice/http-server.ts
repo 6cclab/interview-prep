@@ -50,6 +50,7 @@ import {
   type Transcriber,
 } from './speech'
 import { openDisabled, openInBrowser, openPlan } from './open-browser'
+import { serverConfig, type ServerConfig } from './server-config'
 import { readDrillLog, summarise } from './drill-log'
 import { transcriptionPrompt } from './vocabulary'
 import { transcodeToWav } from './transcode'
@@ -2080,14 +2081,25 @@ function main(): void {
     )
     process.exit(1)
   }
-  // Fail here, not on the interviewer's first sentence — several minutes into
-  // a drill, after a model turn has already been paid for.
-  let speechBanner: string
+  let config: ServerConfig
   try {
-    speechBanner = checkSpeechEngine()
+    config = serverConfig()
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err))
     process.exit(1)
+  }
+  // Fail here, not on the interviewer's first sentence — several minutes into
+  // a drill, after a model turn has already been paid for. Deployed mode is
+  // exempt because it never speaks: requiring piper on a box whose audio
+  // device nobody is listening to would refuse to start for no reason.
+  let speechBanner = 'The browser speaks — this instance does not.'
+  if (config.speaks) {
+    try {
+      speechBanner = checkSpeechEngine()
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err))
+      process.exit(1)
+    }
   }
   const tls = readTlsMaterial(root)
   const server = createVoiceServer({
@@ -2095,12 +2107,17 @@ function main(): void {
     createTransport: (track) => streamForBackend(track, (line) => console.log(`${track}: ${line}`)),
     transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
     tls,
-    speaker: configuredSpeaker(root),
+    speaker: config.speaks ? configuredSpeaker(root) : undefined,
     vague: VOICE_VAGUE,
+    mode: config.mode,
+    gatewaySecret: config.gatewaySecret,
+    coachAllowlist: config.coachAllowlist,
   })
-  // Still `127.0.0.1` only — TLS changes the scheme, never the reach. A live
-  // microphone and a private story bank have no business on the network.
-  server.listen(port, '127.0.0.1', () => {
+  // Locally still `127.0.0.1` only — TLS changes the scheme, never the reach.
+  // A live microphone and a private story bank have no business on the
+  // network. Deployed, the same address means unreachable: nothing outside the
+  // container can connect to its loopback. See `server-config.ts`.
+  server.listen(port, config.host, () => {
     const scheme = tls ? 'https' : 'http'
     // `127.0.0.1`, not `localhost`: the listen above binds IPv4 only, and
     // browsers resolve `localhost` to `::1` first — so a `localhost` URL
@@ -2110,6 +2127,13 @@ function main(): void {
     console.log(`Voice mock drill: ${url}`)
     console.log(`  ${speechBanner}`)
     announceBackends()
+    // The rest is about the machine someone is sitting at: a TLS nudge for the
+    // microphone prompt, and opening a browser. A deployed instance has no
+    // desktop to open one on, and Traefik terminates its TLS.
+    if (config.mode === 'deployed') {
+      console.log(`  Deployed mode: listening on ${config.host}:${port}, identity from the gateway.`)
+      return
+    }
     if (!tls) {
       console.log(
         'Serving plain HTTP. Chrome and Firefox treat localhost as secure, but Arc and Safari do not —\n' +

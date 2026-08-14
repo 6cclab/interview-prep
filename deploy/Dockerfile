@@ -41,4 +41,8 @@ ENV WHISPER_BINARY=/opt/whisper/whisper-cli \
     WHISPER_MODEL=/opt/whisper/models/ggml-base.en.bin
 
 EXPOSE 4173
-CMD ["node", "--experimental-strip-types", "voice/http-server.ts"]
+# tsx, not `node --experimental-strip-types`: the server's imports are
+# extensionless (`./identity`, not `./identity.ts`) and node's ESM resolver
+# will not complete them. tsx is what every local script already runs on, so
+# this is the same loader the tests exercise.
+CMD ["node_modules/.bin/tsx", "voice/http-server.ts"]
