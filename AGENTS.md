@@ -92,6 +92,43 @@ files under the day it felt like. The UTC version stamped an attempt saved at
 - `local/` — gitignored. Your drill log, designs, story bank, company research.
 - `templates/local/` — committed seeds for `local/`, copied by `pnpm bootstrap`.
 
+## A deployed instance is a different mode
+
+Everything above describes the local instance, and it is unchanged. `VOICE_MODE`
+defaults to `local`, and `userDataDir(root, null)` returns `local/`
+byte-for-byte — that equality is asserted, not intended, because it is the whole
+guarantee.
+
+`VOICE_MODE=deployed` is for a small known group on a homelab box. See
+`deploy/`. What changes:
+
+| | local | deployed |
+|---|---|---|
+| Identity | none; headers never read | Authentik uid, required, else 401 |
+| State | `local/` | `local/users/<uid>/` |
+| Sessions | one, globally | one **per person** |
+| Tests | vitest, server-side | in the browser, verdict posted back |
+| Coach track | open — it is your own choice | allowlist only |
+| Speech | speaks on this machine | the browser says it |
+
+Four of those are hazards recorded in `docs/superpowers/specs/`'s browser-editor
+design before any of it was built, and the reasoning there is worth reading
+before changing any of it. The fifth was not recorded and is the one that would
+have bitten hardest: **`voice/speech.ts` spawns its player on the machine the
+server runs on**, so a deployed instance left unchanged speaks every user's
+interview out of a box none of them are sitting at.
+
+Two rules that are load-bearing rather than tidy:
+
+- **Identity fails closed.** A deployed request with no usable uid is a 401 and
+  never a default user, because a default hands a bare request someone else's
+  drill log. `deriveUserId` refuses a uid that could not name a directory, so a
+  traversal is a 401 rather than a 500 from deeper in.
+- **A browser-computed verdict is accepted only in deployed mode.** A local
+  instance has the checkout, the suite and a real vitest, so it has no reason to
+  take a client's word for the outcome. The forgeable path is confined to the
+  one mode that cannot do better.
+
 ## Commands
 
 ```bash
