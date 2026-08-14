@@ -26,6 +26,40 @@ pnpm tsx scripts/migrate-local-to-user.ts <your-authentik-uid>
 Idempotent, and it leaves `local/certs/` alone — mkcert material belongs to the
 machine, not a person.
 
+## Running it on your own machine
+
+**For an ordinary drill, none of this applies.** `pnpm mock:web` is unchanged:
+`VOICE_MODE` defaults to `local`, no headers are read, and the container is not
+involved. Reach for the image only when the thing you want to test *is* the
+deployed build.
+
+The image bakes `VOICE_MODE=deployed`, so it refuses every `/api/` request
+without an Authentik uid — that is `deriveUserId` failing closed, and it is the
+whole point of the three layers below. Pointed a browser straight at it, you
+get a page that loads and every track showing **Unavailable**, because each
+problem list came back 401.
+
+`VOICE_MODE=local` on the container is not the way round it: local mode runs
+`checkSpeechEngine()`, there is no piper in the image, and it binds loopback
+inside its own namespace. It exits immediately, correctly.
+
+Put the edge in front instead — the same thing the cluster does:
+
+```bash
+pnpm deploy:image                        # build
+pnpm deploy:run                          # container on 4199, deployed mode
+pnpm deploy:edge                         # edge on 4200  -> open this one
+```
+
+`scripts/deploy-edge.ts` reproduces the middleware chain in the order that
+matters: clear `x-authentik-*`, then set the uid, then stamp the gateway
+secret. `EDGE_UID` chooses who you are (default `ak-local`), which is also how
+you exercise per-user isolation — two uids, two `local/users/<uid>/`
+directories. It listens on 127.0.0.1 only, and it is a proxy rather than a
+server flag deliberately: an env var that let the server accept an identity it
+was never given would be an auth bypass one misconfiguration away from
+production.
+
 ## Configuration
 
 Everything the container needs, and what happens when it is missing.
