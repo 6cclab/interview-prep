@@ -97,6 +97,30 @@ describe('local mode is unchanged', () => {
   })
 })
 
+// The client has to know which instance it is talking to, because the two run
+// the suite in different places. It cannot infer it: a deployed instance with
+// no identity looks exactly like a broken local one from the browser's side.
+describe('GET /api/instance', () => {
+  it('says local when nothing says otherwise', async () => {
+    const { port } = await listen(deps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/instance`)
+    expect(await res.json()).toEqual({ mode: 'local' })
+  })
+
+  it('says deployed on a deployed instance', async () => {
+    const { port } = await listen(deps({ mode: 'deployed' }))
+    const res = await fetch(`http://127.0.0.1:${port}/api/instance`, { headers: { 'x-authentik-uid': 'ak-alice' } })
+    expect(await res.json()).toEqual({ mode: 'deployed' })
+  })
+
+  // It is behind the same gate as everything else under /api/. The mode is not
+  // a secret, but an exception here would be a hole to remember forever.
+  it('is gated like every other api route', async () => {
+    const { port } = await listen(deps({ mode: 'deployed' }))
+    expect((await fetch(`http://127.0.0.1:${port}/api/instance`)).status).toBe(401)
+  })
+})
+
 describe('deployed mode requires an identity', () => {
   it('refuses an api request carrying no identity', async () => {
     const { port } = await listen(deps({ mode: 'deployed' }))

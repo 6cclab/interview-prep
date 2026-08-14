@@ -18,6 +18,7 @@ import { CodingTools } from './components/CodingTools'
 import { DebugTools } from './components/DebugTools'
 import { SolutionEditor } from './components/SolutionEditor'
 import { useSolution, runAfterSave } from './useSolution'
+import { computeVerdictInBrowser } from './testRunner/clientVerdict'
 import { routeDrill, routeHash, useRoute, type Route } from './route'
 import { useTheme } from './theme'
 import { derivePhase, fmt, wallClock, stuckBody, TIMED_BUDGET_MINUTES, ERROR_COPY, ANNOUNCEMENTS } from './phase'
@@ -122,6 +123,45 @@ interface DrillScreenProps {
 }
 
 function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps) {
+  // Where the suite runs. A deployed instance has no vitest to spawn, so the
+  // browser runs it and posts the verdict; a local one keeps doing exactly what
+  // it has always done. The client cannot infer which it is — see /api/instance.
+  const [instanceMode, setInstanceMode] = useState<'local' | 'deployed' | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch('/api/instance')
+        if (!res.ok) return
+        const body = (await res.json()) as { mode: 'local' | 'deployed' }
+        if (!cancelled) setInstanceMode(body.mode)
+      } catch {
+        // Left null, which means "run the suite the way it has always run".
+        // Failing towards the server is right: it is the mode that works
+        // without this request having succeeded at all.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // The editor buffer, readable from a callback created before `solution`
+  // exists. Assigned during render below, so the getter always sees the text
+  // the candidate is looking at rather than the first render's empty string.
+  const solutionTextRef = useRef('')
+
+  // Absent on a local instance, which leaves `runTests` posting an empty body
+  // and the server running the suite itself — today's behaviour, unchanged.
+  const codingSlug = route.view === 'coding' ? route.problem : undefined
+  const computeVerdict = useMemo(
+    () =>
+      instanceMode === 'deployed' && codingSlug !== undefined
+        ? () => computeVerdictInBrowser(codingSlug, solutionTextRef.current)
+        : undefined,
+    [instanceMode, codingSlug],
+  )
+
   const {
     mode,
     entries,
@@ -156,7 +196,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     outputDevices,
     selectedOutputId,
     selectOutput,
-  } = useVoiceSession()
+  } = useVoiceSession(computeVerdict)
 
   // The drill this screen runs, from the route rather than from a picker: the
   // route is the single source of truth for which track this is, which is what
@@ -184,6 +224,9 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   // not of the route, because it is chosen at start (Task 4).
   const editorMode = route.view === 'coding' ? drill?.editor : undefined
   const solution = useSolution(problem, editorMode === 'browser')
+  // Assigned during render so the deployed-mode verdict getter, created above
+  // before `solution` existed, always reads the current buffer.
+  solutionTextRef.current = solution.text
   const onRunTests = useCallback(() => {
     void runAfterSave(editorMode, solution.save, async () => {
       runTests()

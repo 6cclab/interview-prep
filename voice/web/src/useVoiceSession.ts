@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AnyVerdict, Drill, Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
 import { endOutcome } from './end-outcome'
+import type { DrillVerdict } from '../../drill-verdict'
 
 export interface VoiceSession {
   mode: Mode
@@ -270,7 +271,12 @@ const MIC_WATCHDOG_MESSAGE =
  */
 const STREAM_FAILURES_BEFORE_REPORTING = 2
 
-export function useVoiceSession(): VoiceSession {
+/**
+ * @param computeVerdict Present only on a deployed instance, where the suite
+ *   runs in this browser and the server has no vitest to spawn. Absent locally,
+ *   which leaves `runTests` doing exactly what it has always done.
+ */
+export function useVoiceSession(computeVerdict?: () => Promise<DrillVerdict>): VoiceSession {
   const [mode, setMode] = useState<Mode>('idle')
   const [status, setStatus] = useState('Idle.')
   const [entries, setEntries] = useState<Entry[]>([])
@@ -332,6 +338,9 @@ export function useVoiceSession(): VoiceSession {
   // `runTests` is a stable callback, so it would read a stale `testsRunning`
   // from the render it was created in and let a second press through.
   const testsRunningRef = useRef(false)
+  // Kept in a ref so the stable `runTests` callback never reads a stale one.
+  const computeVerdictRef = useRef(computeVerdict)
+  computeVerdictRef.current = computeVerdict
   const hintPendingRef = useRef(false)
   // Whether this session's `/end` is already in flight. Same reasoning as the
   // guards above, and one more: a coding drill's `/end` drives a closing
@@ -898,7 +907,18 @@ export function useVoiceSession(): VoiceSession {
     setStatus('Running the tests…')
     void (async () => {
       try {
-        const res = await fetch(`/api/session/${id}/tests`, { method: 'POST' })
+        // On a deployed instance the suite runs here and the outcome travels
+        // with the request; the server's job is the interviewer's reaction
+        // either way. Read from a ref because this callback is stable and
+        // would otherwise close over the first render's value.
+        const compute = computeVerdictRef.current
+        const verdict = compute ? await compute() : undefined
+        const res = await fetch(`/api/session/${id}/tests`, {
+          method: 'POST',
+          ...(verdict === undefined
+            ? {}
+            : { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ verdict }) }),
+        })
         if (!res.ok) {
           const { error } = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { error: string }
           setStatus(`Could not run the tests: ${error}`)

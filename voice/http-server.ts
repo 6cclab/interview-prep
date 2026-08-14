@@ -724,6 +724,14 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       return
     }
 
+    // Which instance this is. The client cannot infer it — a deployed instance
+    // with no identity looks exactly like a broken local one from the browser's
+    // side — and it decides where the suite runs: here, or in a Worker.
+    if (req.method === 'GET' && url.pathname === '/api/instance') {
+      sendJson(res, 200, { mode: deps.mode ?? 'local' })
+      return
+    }
+
     // Lists speaker/output devices for the client to render a selector.
     // `SpeechSynthesis` exposes no output-device API, so the browser cannot
     // route audio to a chosen speaker on its own — the server speaks instead
