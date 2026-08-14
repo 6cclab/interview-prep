@@ -19,6 +19,43 @@ export interface ServerConfig {
 /** Env values that mean "this is a deployed instance". */
 const MODES = new Set(['local', 'deployed'])
 
+/** Hostnames that mean "this machine" — correct locally, never in a container. */
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]', '0.0.0.0'])
+
+/**
+ * Refuse to start a deployed instance pointed at its own loopback for ollama.
+ *
+ * `OLLAMA_HOST` defaults to `http://127.0.0.1:11434` — ollama's own default,
+ * and the right answer on the machine you are sitting at. In a container it
+ * addresses the container, where nothing is listening, and the only warning is
+ * one `preloadOllama` line at boot. The drill then dies on its first turn,
+ * which is the failure `chooseBackend` already refuses to allow for the
+ * transport itself: "a transport you did not choose is one you discover
+ * mid-drill."
+ *
+ * `backends` is passed rather than read here so this stays a pure check, and so
+ * a deployed instance on some other transport is not made to configure a host
+ * it will never call.
+ */
+export function assertOllamaReachable(
+  env: NodeJS.ProcessEnv,
+  backends: Readonly<Record<string, string>>,
+): void {
+  if (serverConfig(env).mode !== 'deployed') return
+  if (!Object.values(backends).includes('ollama')) return
+  const raw = (env.OLLAMA_HOST ?? '').trim()
+  const host = raw
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/.*$/, '')
+    .replace(/:\d+$/, '')
+  if (raw !== '' && !LOOPBACK.has(host)) return
+  throw new Error(
+    `OLLAMA_HOST is ${raw === '' ? 'unset, which means ollama\'s own 127.0.0.1 default' : `"${raw}"`}, and a ` +
+      'deployed instance addressing its own loopback reaches nothing. Point it at the gateway, e.g. ' +
+      'http://ollama-gateway.ollama-gateway.svc.cluster.local.',
+  )
+}
+
 export function serverConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const raw = (env.VOICE_MODE ?? '').trim().toLowerCase()
   // A typo must not quietly mean local: local mode has no identity check and no

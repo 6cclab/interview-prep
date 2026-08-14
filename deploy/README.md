@@ -26,6 +26,32 @@ pnpm tsx scripts/migrate-local-to-user.ts <your-authentik-uid>
 Idempotent, and it leaves `local/certs/` alone — mkcert material belongs to the
 machine, not a person.
 
+## Configuration
+
+Everything the container needs, and what happens when it is missing.
+
+| Variable | From | Missing means |
+|---|---|---|
+| `VOICE_MODE` | Dockerfile | `local` — no identity check at all. An unrecognised value refuses to start rather than falling back. |
+| `VOICE_BACKEND` | manifest | refuses to start; a transport you did not choose is one you discover mid-drill |
+| `OLLAMA_HOST` | ConfigMap | refuses to start in deployed mode, because ollama's own default is loopback and a container's loopback is itself |
+| `OLLAMA_API_KEY` | Infisical | **silent** — absent means unauthenticated by design, so the gateway 401s on the first turn |
+| `VOICE_COACH_ALLOWLIST` | ConfigMap | nobody may open the coach track, which is the safe default |
+| `VOICE_GATEWAY_SECRET` | Infisical | every request is a 401, since `deriveUserId` fails closed |
+
+`OLLAMA_API_KEY` is the one with no boot-time signal. It is deliberate —
+pointing `OLLAMA_HOST` at a bare ollama box must keep working, so absent has to
+mean unauthenticated rather than an error (`voice/ollama.ts`, `ollamaHeaders`).
+It also runs in the opposite direction to `VOICE_GATEWAY_SECRET`: that one
+authenticates Traefik **to** this server, this one authenticates this server
+**to** the ollama gateway. They are two different secrets and must not be
+merged.
+
+Both live in Infisical, provisioned by the `HomelabSecret` in `k8s.yaml` the
+same way every other service in the cluster gets its credentials. **The
+Infisical project does not exist yet** — create it, put its UUID in the
+`projectId` field, and add the two keys before applying.
+
 ## Identity, and why there are three layers
 
 A forged `X-authentik-uid` reads and writes someone else's drill log, and

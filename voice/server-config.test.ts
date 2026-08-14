@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { serverConfig } from './server-config'
+import { assertOllamaReachable, serverConfig } from './server-config'
 
 describe('serverConfig', () => {
   // The hard requirement of the whole deployed-mode change: an instance with
@@ -64,5 +64,46 @@ describe('serverConfig', () => {
     expect(serverConfig({}).gatewaySecret).toBeUndefined()
     expect(serverConfig({ VOICE_GATEWAY_SECRET: '' }).gatewaySecret).toBeUndefined()
     expect(serverConfig({ VOICE_GATEWAY_SECRET: 's3cret' }).gatewaySecret).toBe('s3cret')
+  })
+})
+
+/**
+ * `OLLAMA_HOST` defaults to `http://127.0.0.1:11434` — ollama's own default,
+ * and the right one for the machine you are sitting at. Inside a container it
+ * points at the container, where nothing is listening, and the only symptom is
+ * a preload warning nobody reads until a drill dies on its first turn.
+ */
+describe('assertOllamaReachable', () => {
+  const usesOllama = { mock: 'ollama', coding: 'cli' } as const
+  const noOllama = { mock: 'cli', coding: 'cli' } as const
+
+  it('refuses to start a deployed instance whose ollama is its own loopback', () => {
+    expect(() => assertOllamaReachable({ VOICE_MODE: 'deployed' }, usesOllama)).toThrow(/OLLAMA_HOST/)
+    expect(() => assertOllamaReachable({ VOICE_MODE: 'deployed', OLLAMA_HOST: 'localhost:11434' }, usesOllama)).toThrow(
+      /OLLAMA_HOST/,
+    )
+    expect(() => assertOllamaReachable({ VOICE_MODE: 'deployed', OLLAMA_HOST: '[::1]:11434' }, usesOllama)).toThrow(
+      /OLLAMA_HOST/,
+    )
+  })
+
+  it('accepts a deployed instance pointed at something else', () => {
+    expect(() =>
+      assertOllamaReachable(
+        { VOICE_MODE: 'deployed', OLLAMA_HOST: 'http://ollama-gateway.ollama-gateway.svc.cluster.local' },
+        usesOllama,
+      ),
+    ).not.toThrow()
+  })
+
+  // A deployed instance on the claude transport never calls ollama, and must
+  // not be made to configure a host it will not use.
+  it('says nothing when no track is on ollama', () => {
+    expect(() => assertOllamaReachable({ VOICE_MODE: 'deployed' }, noOllama)).not.toThrow()
+  })
+
+  // Loopback is the correct and overwhelmingly common local answer.
+  it('leaves a local instance alone', () => {
+    expect(() => assertOllamaReachable({}, usesOllama)).not.toThrow()
   })
 })

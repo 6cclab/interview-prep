@@ -13,6 +13,35 @@
 # (3) is what makes (1) and (2) survivable. `deriveUserId` fails closed.
 ---
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: interview-prep
+data:
+  # The in-cluster address of `ollama-gateway`, which fronts several ollama
+  # boxes behind one name. NOT a loopback address: `serverConfig` refuses to
+  # start a deployed instance pointed at 127.0.0.1, because ollama's own
+  # default is loopback and inside a container that reaches nothing.
+  ollamaHost: http://ollama-gateway.ollama-gateway.svc.cluster.local
+  # Empty means nobody, which is the safe default: the coach track serves
+  # `solutions/**` and `patterns.md`. Add the owner's Authentik uid here.
+  coachAllowlist: ""
+---
+# Two secrets in opposite directions, deliberately not one:
+#   gatewaySecret  authenticates Traefik TO this server (`deriveUserId`)
+#   ollamaApiKey   authenticates this server TO the ollama gateway
+# The operator provisions a Secret named after this object from Infisical, the
+# same way every other service in the cluster gets its credentials.
+apiVersion: secrets.6cclab.dev/v1alpha1
+kind: HomelabSecret
+metadata:
+  name: interview-prep-secrets
+spec:
+  # The Infisical project UUID. This project does not exist yet — create it and
+  # put the UUID here before applying. Expected keys: gatewaySecret,
+  # ollamaApiKey.
+  projectId: REPLACE_WITH_INFISICAL_PROJECT_UUID
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: interview-prep
@@ -68,7 +97,13 @@ spec:
                 configMapKeyRef: { name: interview-prep, key: coachAllowlist }
             - name: VOICE_GATEWAY_SECRET
               valueFrom:
-                secretKeyRef: { name: interview-prep, key: gatewaySecret }
+                secretKeyRef: { name: interview-prep-secrets, key: gatewaySecret }
+            # `ollama-gateway` rejects every route but /healthz without this.
+            # Absent means unauthenticated by design (`ollamaHeaders`), so a
+            # missing key is a 401 on the first turn rather than a boot error.
+            - name: OLLAMA_API_KEY
+              valueFrom:
+                secretKeyRef: { name: interview-prep-secrets, key: ollamaApiKey }
           volumeMounts:
             - { name: users, mountPath: /app/local/users }
             - { name: whisper, mountPath: /opt/whisper, readOnly: true }

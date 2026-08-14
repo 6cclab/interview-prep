@@ -50,7 +50,7 @@ import {
   type Transcriber,
 } from './speech'
 import { openDisabled, openInBrowser, openPlan } from './open-browser'
-import { serverConfig, type ServerConfig } from './server-config'
+import { assertOllamaReachable, serverConfig, type ServerConfig } from './server-config'
 import { readDrillLog, summarise } from './drill-log'
 import { transcriptionPrompt } from './vocabulary'
 import { transcodeToWav } from './transcode'
@@ -2084,6 +2084,7 @@ function main(): void {
   let config: ServerConfig
   try {
     config = serverConfig()
+    assertOllamaReachable(process.env, backendSummary())
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err))
     process.exit(1)
