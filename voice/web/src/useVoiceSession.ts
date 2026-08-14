@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AnyVerdict, Drill, Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
 import { endOutcome } from './end-outcome'
 import type { DrillVerdict } from '../../drill-verdict'
+import type { Speaker } from './speak'
 
 export interface VoiceSession {
   mode: Mode
@@ -276,7 +277,16 @@ const STREAM_FAILURES_BEFORE_REPORTING = 2
  *   runs in this browser and the server has no vitest to spawn. Absent locally,
  *   which leaves `runTests` doing exactly what it has always done.
  */
-export function useVoiceSession(computeVerdict?: () => Promise<DrillVerdict>): VoiceSession {
+export function useVoiceSession(
+  computeVerdict?: () => Promise<DrillVerdict>,
+  /**
+   * Present only on a deployed instance, where the server deliberately does not
+   * speak — its speakers are in a room the candidate is not in. Absent locally,
+   * where `voice/speech.ts` is already saying this with a better voice and a
+   * second one would talk over it.
+   */
+  speaker?: Speaker | null,
+): VoiceSession {
   const [mode, setMode] = useState<Mode>('idle')
   const [status, setStatus] = useState('Idle.')
   const [entries, setEntries] = useState<Entry[]>([])
@@ -341,6 +351,8 @@ export function useVoiceSession(computeVerdict?: () => Promise<DrillVerdict>): V
   // Kept in a ref so the stable `runTests` callback never reads a stale one.
   const computeVerdictRef = useRef(computeVerdict)
   computeVerdictRef.current = computeVerdict
+  const speakerRef = useRef(speaker)
+  speakerRef.current = speaker
   const hintPendingRef = useRef(false)
   // Whether this session's `/end` is already in flight. Same reasoning as the
   // guards above, and one more: a coding drill's `/end` drives a closing
@@ -502,6 +514,10 @@ export function useVoiceSession(computeVerdict?: () => Promise<DrillVerdict>): V
 
     es.addEventListener('sentence', (event) => {
       const { text } = JSON.parse((event as MessageEvent<string>).data) as { text: string }
+      // Said here because a deployed server does not say it. Per sentence
+      // rather than per finished reply, so speech starts as the words arrive
+      // instead of after the whole turn has generated.
+      speakerRef.current?.say(text)
       setStatus('Interviewer speaking…')
       setInterviewerSpeaking(true)
       // The wait is over the moment the first sentence lands.
