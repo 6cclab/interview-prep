@@ -4,6 +4,7 @@ node_modules/
 .superpowers/
 /models/
 /voice/dist/
+/voice/dist-demo/
 # Worktrees created in-tree. The rest of .claude/ is committed (CLAUDE.md,
 # commands/, settings.json), so this needs an explicit rule: without it a
 # worktree here is a second, untracked copy of the whole repo inside the repo,
