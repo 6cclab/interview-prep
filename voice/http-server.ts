@@ -35,6 +35,7 @@ import { buildCoachPrompt, codeCue, readWorkingFile } from './coach'
 import { appendCoached, isoDate, readCoachedProblems } from './coached'
 import { runDrillTests, verdictCue } from './drill-tests'
 import { parseDrillVerdict, type DrillVerdict } from './drill-verdict'
+import { diagramCue, parseDiagram, type DesignDiagram } from './design-diagram'
 import { createInterviewer, type StreamFn } from './interviewer'
 import { backendSummary, describeBackend, modelFor, streamForBackend, transportLabel } from './backend'
 import { preloadOllama } from './ollama'
@@ -658,6 +659,10 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   // that one clock, same as before. When nothing is injected (production),
   // each session gets its own clock zeroed at that session's creation.
   const entryClocks = new Map<string, () => number>()
+  // The design track's canvas, per session. Keyed the same way `entryClocks`
+  // is, and for the same reason: the turn cue closure is built before the
+  // session has an id.
+  const canvases = new Map<string, { current: DesignDiagram | null }>()
   // Sessions being torn down. See `endAndPersist`: a session is still in the
   // store throughout POST /end's awaited closing turn, so this is what stops a
   // second caller persisting the same session twice.
@@ -1269,6 +1274,15 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         return
       }
       const interviewer = createInterviewer(system, deps.createTransport(drill.track))
+      // Sampled per turn, like the coach's working file: the candidate draws
+      // while they talk, so a diagram captured once would be the canvas as it
+      // was when the session opened.
+      // Empty, not null. `null` is reserved for a diagram that could not be
+      // read, and the cue says so — "do not guess at what he has drawn". A
+      // session that has only just opened has not failed at anything; its
+      // canvas is genuinely blank, which is a different thing to tell the
+      // interviewer.
+      const canvas: { current: DesignDiagram | null } = { current: { nodes: [], edges: [] } }
       const session = createSession({
         interviewer,
         now: () => entryClock(),
@@ -1282,13 +1296,25 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         turnCue:
           drill.track === 'coach'
             ? () => codeCue(readWorkingFile(deps.root, { slug: drill.problem!, pattern: codingPattern(deps.root, drill.problem!) }))
-            : drill.budgetMs === undefined
-              ? undefined
-              : () => timeCue(entryClock(), drill.budgetMs),
+            : drill.track === 'design'
+              // Two cues, not one. The clock still has to arrive — the track is
+              // graded on covering ground in the time — so the diagram is added
+              // to the time check rather than taking its slot.
+              ? () =>
+                  [
+                    drill.budgetMs === undefined ? '' : timeCue(entryClock(), drill.budgetMs),
+                    diagramCue(canvas.current),
+                  ]
+                    .filter((part) => part !== '')
+                    .join('\n\n')
+              : drill.budgetMs === undefined
+                ? undefined
+                : () => timeCue(entryClock(), drill.budgetMs),
       })
       const scratchDir = mkdtempSync(join(tmpdir(), 'voice-web-'))
       const stored = store.create(session, interviewer, new Date(), scratchDir, drill, userId)
       entryClocks.set(stored.id, entryClock)
+      canvases.set(stored.id, canvas)
       sendJson(res, 201, { id: stored.id, ...drill })
       return
     }
@@ -1694,6 +1720,27 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // recorded answer both drive an interviewer turn, and two interviewer turns
     // racing would interleave sentences into one another and corrupt the
     // transcript's ordering.
+    // The canvas, pushed up as it changes. A separate route rather than a field
+    // on `/turn`: that request carries recorded audio, and a diagram has no
+    // business riding along inside an upload.
+    const diagramMatch = /^\/api\/session\/([^/]+)\/diagram$/.exec(url.pathname)
+    if (req.method === 'PUT' && diagramMatch) {
+      const canvas = canvases.get(diagramMatch[1]!)
+      if (canvas === undefined) {
+        notFound(res)
+        return
+      }
+      const body = await readJsonBody(req)
+      const diagram = parseDiagram(body?.diagram)
+      if (diagram === null) {
+        sendJson(res, 400, { error: 'not a diagram' })
+        return
+      }
+      canvas.current = diagram
+      sendJson(res, 200, { ok: true })
+      return
+    }
+
     const testsMatch = /^\/api\/session\/([^/]+)\/tests$/.exec(url.pathname)
     if (req.method === 'POST' && testsMatch) {
       const id = testsMatch[1]!
