@@ -1,0 +1,142 @@
+# A deployed drill instance, for a small known group.
+#
+# Every identity decision here is defence in depth, because the failure mode is
+# silent: a forged `X-authentik-uid` reads and writes someone else's drill log,
+# and nothing about the response would look wrong. Three independent things
+# have to hold, so that no single misconfiguration is enough on its own:
+#
+#   1. the Service is ClusterIP and a NetworkPolicy admits only Traefik,
+#   2. the middleware chain CLEARS the identity headers before the outpost
+#      repopulates them,
+#   3. the app itself checks a gateway secret the edge alone can set.
+#
+# (3) is what makes (1) and (2) survivable. `deriveUserId` fails closed.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: interview-prep
+spec:
+  # Never NodePort or LoadBalancer. Either one puts the port somewhere the
+  # middleware chain does not run, and the headers are trusted input there.
+  type: ClusterIP
+  selector:
+    app: interview-prep
+  ports:
+    - port: 80
+      targetPort: 4173
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interview-prep
+spec:
+  # Pinned to one, deliberately. `SessionStore` is an in-memory Map, so a
+  # second pod would answer for sessions it has never heard of depending on
+  # where the request landed — with no sticky routing and no shared store.
+  # Raising this needs that solved first; it is not a scaling knob today.
+  replicas: 1
+  strategy:
+    # A rolling update would briefly run two pods, which is the same problem.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: interview-prep
+  template:
+    metadata:
+      labels:
+        app: interview-prep
+    spec:
+      containers:
+        - name: server
+          image: interview-prep:latest
+          ports:
+            - containerPort: 4173
+          env:
+            - name: VOICE_MODE
+              value: deployed
+            - name: VOICE_BACKEND
+              value: ollama
+            - name: OLLAMA_HOST
+              valueFrom:
+                configMapKeyRef: { name: interview-prep, key: ollamaHost }
+            # Only the owner may open the pairing track: `coachPaths` serves
+            # solutions/** and patterns.md by design, which is an answer key
+            # once the route has a URL other people can reach.
+            - name: VOICE_COACH_ALLOWLIST
+              valueFrom:
+                configMapKeyRef: { name: interview-prep, key: coachAllowlist }
+            - name: VOICE_GATEWAY_SECRET
+              valueFrom:
+                secretKeyRef: { name: interview-prep, key: gatewaySecret }
+          volumeMounts:
+            - { name: users, mountPath: /app/local/users }
+            - { name: whisper, mountPath: /opt/whisper, readOnly: true }
+      volumes:
+        # The only mutable state. Everything else — problems, solutions,
+        # prompts — is baked into the image and rebuilt from the repo.
+        - name: users
+          persistentVolumeClaim: { claimName: interview-prep-users }
+        - name: whisper
+          persistentVolumeClaim: { claimName: whisper-models }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: interview-prep
+spec:
+  podSelector:
+    matchLabels:
+      app: interview-prep
+  policyTypes: [Ingress]
+  ingress:
+    # Traefik only. Without this, anything in the cluster can reach the port
+    # directly and set its own identity headers.
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: traefik }
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: interview-prep-clear-identity
+spec:
+  headers:
+    customRequestHeaders:
+      # Emptied, not merely overwritten later. forwardAuth does not strip a
+      # client-supplied header of the same name before the outpost runs, so
+      # without this step a caller can present their own uid and have it
+      # survive. This middleware MUST come first in the chain.
+      X-authentik-uid: ""
+      X-authentik-username: ""
+      X-authentik-email: ""
+      X-authentik-groups: ""
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: interview-prep-gateway-secret
+spec:
+  headers:
+    customRequestHeaders:
+      # Set only here. The app compares it in constant time and refuses the
+      # request without it, so a broken chain fails closed rather than open.
+      X-Gateway-Secret: "REPLACE_FROM_SECRET"
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: interview-prep
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`drills.example.internal`)
+      kind: Rule
+      middlewares:
+        # Order is the security property: clear, then authenticate, then stamp.
+        - name: interview-prep-clear-identity
+        - name: authentik-forwardauth
+        - name: interview-prep-gateway-secret
+      services:
+        - name: interview-prep
+          port: 80
