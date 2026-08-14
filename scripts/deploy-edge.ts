@@ -44,7 +44,36 @@ export function edgeHeaders(
   return headers
 }
 
-function main(): void {
+/**
+ * Say out loud whether identity is actually being accepted.
+ *
+ * Both ways this goes wrong look identical from a browser — a plain 401 — and
+ * neither names itself: pointing at the container's own port instead of this
+ * one, or a `VOICE_GATEWAY_SECRET` set on the container but not in the shell
+ * that started the edge. One request at startup turns both into a sentence.
+ */
+async function reportIdentity(upstream: number, uid: string, secret: string | undefined): Promise<void> {
+  const headers = edgeHeaders({}, { uid, secret, host: `127.0.0.1:${upstream}` }) as Record<string, string>
+  let status: number
+  try {
+    status = (await fetch(`http://127.0.0.1:${upstream}/api/instance`, { headers })).status
+  } catch {
+    console.log(`  No container answering on ${upstream}. Start it with \`pnpm deploy:run\`.`)
+    return
+  }
+  if (status === 200) {
+    console.log(`  Upstream accepts this identity. Open the URL above, not ${upstream}.`)
+  } else if (status === 401) {
+    console.log(
+      `  Upstream returned 401 for this identity. The container has a VOICE_GATEWAY_SECRET this edge ` +
+        'does not — export the same value in this shell.',
+    )
+  } else {
+    console.log(`  Upstream answered ${status} to /api/instance, which is neither expected outcome.`)
+  }
+}
+
+export function startEdge(): void {
   const port = Number(process.env.EDGE_PORT ?? 4200)
   const upstream = Number(process.env.EDGE_UPSTREAM ?? 4199)
   const uid = process.env.EDGE_UID ?? 'ak-local'
@@ -63,10 +92,21 @@ function main(): void {
     req.pipe(proxied)
     // 127.0.0.1 only. This forges an identity by design, and has no business
     // being reachable from anywhere but the machine running it.
-  }).listen(port, '127.0.0.1', () => {
-    console.log(`Edge on http://127.0.0.1:${port} -> container on ${upstream}, signed in as ${uid}.`)
-    console.log('EDGE_UID to be someone else, EDGE_UPSTREAM to point elsewhere.')
+  })
+    .on('error', (err: NodeJS.ErrnoException) => {
+      // Overwhelmingly an edge left running by a previous attempt. Unhandled,
+      // this is a stack trace about `listen`, which buries the one useful fact.
+      if (err.code === 'EADDRINUSE') {
+        console.error(`\n  Something already holds ${port} — most likely an edge from an earlier run.`)
+        console.error(`  Stop it with \`pkill -f deploy-edge\`, or set EDGE_PORT to a free port.`)
+        process.exit(1)
+      }
+      throw err
+    })
+    .listen(port, '127.0.0.1', () => {
+    console.log(`\n  Open http://127.0.0.1:${port}  — signed in as ${uid}.`)
+    void reportIdentity(upstream, uid, secret)
   })
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main()
+if (import.meta.url === `file://${process.argv[1]}`) startEdge()

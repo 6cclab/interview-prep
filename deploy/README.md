@@ -50,17 +50,25 @@ export OLLAMA_HOST=https://ollama-gateway.apps.dev-01.6cclab.dev
 export OLLAMA_API_KEY=$(security find-internet-password \
   -s ollama-gateway.apps.dev-01.6cclab.dev -w)   # the key Zed already uses
 
-pnpm deploy:image                        # build
-pnpm deploy:run                          # container on 4199, deployed mode
-pnpm deploy:edge                         # edge on 4200  -> open this one
+pnpm deploy:image     # build, once
+pnpm deploy:local     # prints one URL — open that
 ```
 
-`deploy:run` bind-mounts `models/` at `/opt/whisper/models`, so a spoken turn
-works. `whisper-cli` itself is built into the image rather than mounted: it was
-a PVC, which is fine in the cluster and made the image useless on a laptop,
-since a macOS `whisper-cli` cannot be bind-mounted into a linux container. Note
-`models/` is untracked, so a **git worktree does not have it** — mount the main
-checkout's copy, or symlink it in.
+`deploy:local` starts the container and the edge together and cleans up on
+Ctrl-C. There are two processes because there have to be, but they are not two
+commands and two ports to keep straight.
+
+It also says whether identity is being accepted, because both ways this goes
+wrong look like the same bare 401 from a browser: opening the container's own
+port instead of the edge's, or a `VOICE_GATEWAY_SECRET` set on the container
+but not exported in the shell that starts the edge.
+
+`models/` is bind-mounted at `/opt/whisper/models`, so a spoken turn works.
+`whisper-cli` itself is built into the image rather than mounted — it was a
+PVC, which is fine in the cluster and made the image useless on a laptop, since
+a macOS `whisper-cli` cannot be bind-mounted into a linux container. `models/`
+is untracked, so a **git worktree has an empty one**: symlink the main
+checkout's copy, or spoken turns will not work and the run will say so.
 
 `scripts/deploy-edge.ts` reproduces the middleware chain in the order that
 matters: clear `x-authentik-*`, then set the uid, then stamp the gateway
