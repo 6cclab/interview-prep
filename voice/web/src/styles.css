@@ -1160,6 +1160,23 @@ body {
   .drill-body--split .main-column {
     justify-content: flex-start;
   }
+
+  /* The design track's whiteboard, split-layout only — same treatment as
+     `.problem-pane-slot` just above it: a column of its own next to the
+     transcript rather than a full-width block stacked above it. */
+  .drill-body--split .design-canvas-slot {
+    flex: 0 1 40%;
+    min-width: 26rem;
+    border-bottom: none;
+    border-right: 2px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .drill-body--split .design-canvas-slot .design-canvas__surface {
+    flex: 1;
+    min-height: 0;
+  }
 }
 
 .problem-pane-slot {
@@ -1220,6 +1237,118 @@ body {
   max-height: 32vh;
   overflow-y: auto;
   padding-bottom: 16px;
+}
+
+/*
+ * DesignCanvas — the design track's whiteboard.
+ *
+ * Stacked above the transcript by default, the same shape `.problem-pane-slot`
+ * has before the split layout kicks in; see the `.drill-body--split` rule
+ * above for the side-by-side version. React Flow measures its own container,
+ * so `.design-canvas__surface` needs a real height in both layouts — a fixed
+ * one here, `flex: 1` inside a stretched column there.
+ */
+.design-canvas-slot {
+  flex: none;
+  border-bottom: 2px solid var(--border);
+  background: var(--muted);
+}
+
+.design-canvas {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.design-canvas__palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 2px solid var(--border);
+}
+
+.design-canvas__surface {
+  height: 420px;
+  /* Brutalkit's own background wins inside React Flow's canvas — otherwise
+     the dotted `<Background>` sits on the page background instead of the
+     panel's, which reads as a rendering glitch rather than a grid. */
+  background: var(--background);
+}
+
+/* One node shape for every type on the palette — see ComponentNode's own
+   comment on why the type is a label inside the box, not nine different box
+   styles. Sized in ch/px rather than growing to fit the label, so a long
+   label wraps or truncates instead of making boxes visually unequal. */
+.design-canvas__node {
+  position: relative;
+  width: 160px;
+  padding: 8px 10px;
+  border: 2px solid var(--border);
+  background: var(--card, var(--background));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.design-canvas__node--selected {
+  border-color: var(--brand, currentColor);
+}
+
+.design-canvas__node-kind {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+}
+
+.design-canvas__node-label {
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+}
+
+.design-canvas__node-label:focus {
+  outline: 2px solid var(--brand, currentColor);
+  outline-offset: 2px;
+}
+
+.design-canvas__node-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  border: none;
+  background: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.design-canvas__node-delete:hover {
+  color: inherit;
+}
+
+/* The edge label — an input sitting directly on the connecting line (see
+   LabeledEdge's own comment on why it is editable there rather than in a side
+   panel). Small and mono, like every other short label on this screen. */
+.design-canvas__edge-label {
+  position: absolute;
+  width: 90px;
+  text-align: center;
+  border: 1px solid var(--border);
+  background: var(--background);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 4px;
+  pointer-events: all;
 }
 
 /* The rendered problem statement (Markdown.tsx). Prose in the body face, code in

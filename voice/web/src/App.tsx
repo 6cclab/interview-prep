@@ -21,12 +21,15 @@ import { ProblemPane } from './components/ProblemPane'
 import { CodingTools } from './components/CodingTools'
 import { DebugTools } from './components/DebugTools'
 import { SolutionEditor } from './components/SolutionEditor'
+import { DesignCanvas } from './components/DesignCanvas'
 import { useSolution, runAfterSave } from './useSolution'
 import { computeVerdictInBrowser } from './testRunner/clientVerdict'
+import { browserSpeaker } from './speak'
 import { routeDrill, routeHash, useRoute, type Route } from './route'
 import { useTheme } from './theme'
 import { derivePhase, fmt, wallClock, stuckBody, TIMED_BUDGET_MINUTES, ERROR_COPY, ANNOUNCEMENTS } from './phase'
 import type { DebugVerdict, DrillVerdict, ErrorKind } from './types'
+import type { DesignDiagram } from '../../design-diagram'
 
 // Status title/detail for the dock's left-hand block. The `requesting`
 // detail's short/long split mirrors the watchdog already in
@@ -206,6 +209,12 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   // Absent on a local instance, which leaves `runTests` posting an empty body
   // and the server running the suite itself — today's behaviour, unchanged.
   const codingSlug = route.view === 'coding' ? route.problem : undefined
+  // Only where the server has deliberately gone quiet. Locally `voice/speech.ts`
+  // is already saying this with a real voice, and a second one would talk over
+  // it. Built once: constructing it per render would leave `speechSynthesis`
+  // being cancelled by a speaker the previous render created.
+  const speaker = useMemo(() => (instanceMode === 'deployed' ? browserSpeaker() : null), [instanceMode])
+
   const computeVerdict = useMemo(
     () =>
       instanceMode === 'deployed' && codingSlug !== undefined
@@ -233,6 +242,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     stuckSession,
     reopenStuckSession,
     runTests,
+    sendDiagram,
     verdict,
     testsRunning,
     askForHint,
@@ -248,7 +258,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     outputDevices,
     selectedOutputId,
     selectOutput,
-  } = useVoiceSession(computeVerdict)
+  } = useVoiceSession(computeVerdict, speaker)
 
   // The drill this screen runs, from the route rather than from a picker: the
   // route is the single source of truth for which track this is, which is what
@@ -284,6 +294,24 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
       runTests()
     })
   }, [editorMode, solution.save, runTests])
+
+  // The design track's whiteboard. Kept for the reason `latestDiagramRef`
+  // says: sending it onward needs the live session's id, and `useVoiceSession`
+  // keeps that internal (`sessionIdRef`) rather than returning it — wiring
+  // `PUT /api/session/:id/diagram` (voice/http-server.ts) is follow-up work
+  // once that id is exposed here, not something this change invents a new
+  // return value on the hook for.
+  const latestDiagramRef = useRef<DesignDiagram | null>(null)
+  const onDesignDiagramChange = useCallback(
+    (diagram: DesignDiagram) => {
+      latestDiagramRef.current = diagram
+      // Straight up to the server. The cue is sampled per turn, so a diagram
+      // that only ever lived in this ref would be a canvas the interviewer
+      // never sees — which is the entire point of drawing it.
+      sendDiagram(diagram)
+    },
+    [sendDiagram],
+  )
 
   // The session clock ("8:34 session" in the header) is client-side display
   // only — the wire carries no session-duration field (see the handoff
@@ -610,6 +638,19 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
           {hasPane && (
             <div className={`problem-pane-slot${phase === 'idle' ? ' problem-pane-slot--roomy' : ''}`}>
               <ProblemPane problem={problem} track={route.view as 'design' | 'coding'} />
+            </div>
+          )}
+
+          {/* The design track only — the coding, coach and debug tracks have
+              no whiteboard because there is nothing on their screen the
+              interviewer cannot already see (a test verdict, a debugger's
+              source). Beside the problem pane, not inside it: the prompt is
+              read-then-collapsed, the canvas is drawn on for the whole
+              drill, and folding one into the other would make the canvas
+              disappear along with the prompt. */}
+          {route.view === 'design' && (
+            <div className="design-canvas-slot">
+              <DesignCanvas onChange={onDesignDiagramChange} />
             </div>
           )}
 

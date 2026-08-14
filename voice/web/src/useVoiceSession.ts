@@ -117,6 +117,11 @@ export interface VoiceSession {
    * speaking.
    */
   runTests(): void
+  /**
+   * Sends the design canvas to the server, which hands it to the interviewer
+   * as a cue it is told and never speaks. A no-op when nothing is live.
+   */
+  sendDiagram(diagram: unknown): void
   /** The most recent test run's verdict, or `null` before the first run. */
   verdict: AnyVerdict | null
   /** True while a suite is running, so the button can say so and not be pressed twice. */
@@ -915,6 +920,27 @@ export function useVoiceSession(
    * a red suite is the drill working as intended and arrives as a verdict, so
    * only a transport or server error reaches `status`.
    */
+  /**
+   * Push the design canvas up so the interviewer can see it.
+   *
+   * Exposed as a method rather than by returning the session id: the id is
+   * this hook's to own, and every other caller that needed it so far turned
+   * out to need an action instead. Silent on failure — a diagram that does not
+   * reach the server costs the interviewer some context, and interrupting a
+   * live interview with a banner about it would cost more.
+   */
+  const sendDiagram = useCallback((diagram: unknown) => {
+    const id = sessionIdRef.current
+    if (!id) return
+    void fetch(`/api/session/${id}/diagram`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ diagram }),
+    }).catch((error) => {
+      console.error('voice: PUT /diagram failed', error)
+    })
+  }, [])
+
   const runTests = useCallback(() => {
     const id = sessionIdRef.current
     if (!id || testsRunningRef.current) return
@@ -1124,6 +1150,7 @@ export function useVoiceSession(
     abandonTurn,
     start,
     runTests,
+    sendDiagram,
     verdict,
     testsRunning,
     askForHint,
