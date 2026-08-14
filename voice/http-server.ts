@@ -663,6 +663,18 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   // is, and for the same reason: the turn cue closure is built before the
   // session has an id.
   const canvases = new Map<string, { current: DesignDiagram | null }>()
+
+  /**
+   * The speaker, or nothing on a deployed instance.
+   *
+   * `voice/speech.ts` spawns `say` or `piper | ffplay` on the machine this
+   * process runs on, and the client has no playback code — so on a deployed
+   * box every user's interviewer would speak out of the server's own audio
+   * device, in a room none of them are in. The sentences still go out over
+   * SSE; the browser says them. Decided once here rather than at each
+   * `streamTurn`, because three of the four call sites are easy to miss.
+   */
+  const speaker = deps.mode === 'deployed' ? undefined : deps.speaker
   // Sessions being torn down. See `endAndPersist`: a session is still in the
   // store throughout POST /end's awaited closing turn, so this is what stops a
   // second caller persisting the same session twice.
@@ -745,6 +757,16 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // route audio to a chosen speaker on its own — the server speaks instead
     // (see `deps.speaker`/`streamTurn`), which is why this list needs to
     // exist server-side at all.
+    // Both device routes read and write which speaker THIS MACHINE plays
+    // through. Coherent when the server is the machine you are sitting at,
+    // incoherent the moment it is not — and on a deployed instance it lets one
+    // user reconfigure the audio of a box the others share. 410 rather than
+    // 404: the route existed, and on this instance it is gone for good.
+    if (deps.mode === 'deployed' && url.pathname.startsWith('/api/devices/')) {
+      sendJson(res, 410, { error: 'the server does not play audio on this instance' })
+      return
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/devices/output') {
       try {
         const devices = await (deps.listOutputDevices ?? listOutputDevices)()
@@ -1412,7 +1434,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       if (!alreadyBegun) {
         void (async () => {
           const before = stored.session.entries().length
-          await streamTurn(res, stored.session.begin(), deps.speaker, () => hasListener(store, id))
+          await streamTurn(res, stored.session.begin(), speaker, () => hasListener(store, id))
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(res, 'entry', entry)
           }
@@ -1441,7 +1463,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // No live SSE connection is a normal state (a turn submitted between
         // reconnects, say), not a reason to stop draining the reply — the
         // session's entries/endedEarly state must still advance either way.
-        await streamTurn(stored.sseClient, iterable, deps.speaker, () => hasListener(store, id))
+        await streamTurn(stored.sseClient, iterable, speaker, () => hasListener(store, id))
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before + 1)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -1689,7 +1711,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       void (async () => {
         const before = stored.session.entries().length
         const hint = laddered === 'debug' ? debugHintCue(requested) : hintCue(requested)
-        await streamTurn(stored.sseClient, stored.session.interject(hint), deps.speaker, () => hasListener(store, id))
+        await streamTurn(stored.sseClient, stored.session.interject(hint), speaker, () => hasListener(store, id))
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -1825,7 +1847,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       sendJson(res, 200, verdict)
       void (async () => {
         const before = stored.session.entries().length
-        await streamTurn(stored.sseClient, stored.session.interject(cue), deps.speaker, () => hasListener(store, id))
+        await streamTurn(stored.sseClient, stored.session.interject(cue), speaker, () => hasListener(store, id))
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -1889,7 +1911,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         turnsInFlight.add(id)
         try {
           const before = stored.session.entries().length
-          await streamTurn(stored.sseClient, stored.session.interject(closingCue()), deps.speaker, () => hasListener(store, id))
+          await streamTurn(stored.sseClient, stored.session.interject(closingCue()), speaker, () => hasListener(store, id))
           if (stored.sseClient) {
             for (const entry of stored.session.entries().slice(before)) {
               writeSSE(stored.sseClient, 'entry', entry)
