@@ -46,10 +46,21 @@ inside its own namespace. It exits immediately, correctly.
 Put the edge in front instead — the same thing the cluster does:
 
 ```bash
+export OLLAMA_HOST=https://ollama-gateway.apps.dev-01.6cclab.dev
+export OLLAMA_API_KEY=$(security find-internet-password \
+  -s ollama-gateway.apps.dev-01.6cclab.dev -w)   # the key Zed already uses
+
 pnpm deploy:image                        # build
 pnpm deploy:run                          # container on 4199, deployed mode
 pnpm deploy:edge                         # edge on 4200  -> open this one
 ```
+
+`deploy:run` bind-mounts `models/` at `/opt/whisper/models`, so a spoken turn
+works. `whisper-cli` itself is built into the image rather than mounted: it was
+a PVC, which is fine in the cluster and made the image useless on a laptop,
+since a macOS `whisper-cli` cannot be bind-mounted into a linux container. Note
+`models/` is untracked, so a **git worktree does not have it** — mount the main
+checkout's copy, or symlink it in.
 
 `scripts/deploy-edge.ts` reproduces the middleware chain in the order that
 matters: clear `x-authentik-*`, then set the uid, then stamp the gateway

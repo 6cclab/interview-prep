@@ -14,6 +14,24 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build:web
 
+# whisper-cli, built here rather than mounted.
+#
+# It was a mounted PVC, which works in the cluster and makes the image useless
+# on a laptop: a macOS whisper-cli cannot be bind-mounted into a linux
+# container, so every spoken turn failed with nothing to point at. Built in, the
+# same image runs both places.
+#
+# Static, so the runtime stage needs no libwhisper/libggml alongside it.
+FROM debian:12-slim AS whisper
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git build-essential cmake ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+ARG WHISPER_REF=v1.7.4
+RUN git clone --depth 1 --branch "$WHISPER_REF" https://github.com/ggml-org/whisper.cpp /src \
+ && cmake -S /src -B /build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_TESTS=OFF \
+      -DWHISPER_BUILD_EXAMPLES=ON -DGGML_NATIVE=OFF \
+ && cmake --build /build --target whisper-cli -j "$(nproc)"
+
 FROM node:24-slim AS runtime
 WORKDIR /app
 RUN corepack enable
@@ -35,10 +53,13 @@ ENV NODE_ENV=production \
     VOICE_MODE=deployed \
     PORT=4173
 
-# whisper-cli and its model are mounted rather than baked: the model is
-# hundreds of megabytes and changes on a different cadence than this image.
-ENV WHISPER_BINARY=/opt/whisper/whisper-cli \
-    WHISPER_MODEL=/opt/whisper/models/ggml-base.en.bin
+COPY --from=whisper /build/bin/whisper-cli /usr/local/bin/whisper-cli
+
+# The binary is baked; the model is not. A model is hundreds of megabytes to a
+# couple of gigabytes and changes on a different cadence than this image — the
+# cluster mounts it from a PVC, a laptop bind-mounts `models/` from the repo.
+ENV WHISPER_BINARY=/usr/local/bin/whisper-cli \
+    WHISPER_MODEL=/opt/whisper/models/ggml-large-v3-turbo.bin
 
 EXPOSE 4173
 # tsx, not `node --experimental-strip-types`: the server's imports are

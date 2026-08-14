@@ -106,7 +106,9 @@ spec:
                 secretKeyRef: { name: interview-prep-secrets, key: ollamaApiKey }
           volumeMounts:
             - { name: users, mountPath: /app/local/users }
-            - { name: whisper, mountPath: /opt/whisper, readOnly: true }
+            # Models only. `whisper-cli` is built into the image — mounting the
+            # binary made the image unrunnable anywhere but this cluster.
+            - { name: whisper, mountPath: /opt/whisper/models, readOnly: true }
       volumes:
         # The only mutable state. Everything else — problems, solutions,
         # prompts — is baked into the image and rebuilt from the repo.
