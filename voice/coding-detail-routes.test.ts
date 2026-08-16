@@ -176,7 +176,7 @@ describe('GET /api/progress', () => {
   it("reads the requesting user's own drill log in deployed mode, not local's", async () => {
     seedLog(root, 'local', `| 2026-08-01 | ${SLUG} | ${PATTERN} | yes | 0 | 04:12 | Local, not alice's. |`)
     seedLog(root, 'local/users/ak-alice', `| 2026-08-02 | ${OTHER_SLUG} | ${OTHER_PATTERN} | yes | 0 | 05:00 | Alice's own. |`)
-    const { port } = await listen(deps({ mode: 'deployed' }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
     const res = await fetch(`http://127.0.0.1:${port}/api/progress`, { headers: { 'x-authentik-uid': 'ak-alice' } })
     const body = (await res.json()) as { summary: { attempts: number; cold: number } }
     expect(body.summary.attempts).toBe(1)
@@ -233,7 +233,7 @@ describe('GET /api/roadmap', () => {
 
   it("reads the requesting user's own drill log in deployed mode", async () => {
     seedLog(root, 'local/users/ak-alice', `| 2026-08-02 | ${SLUG} | ${PATTERN} | yes | 0 | 05:00 | Alice's own. |`)
-    const { port } = await listen(deps({ mode: 'deployed' }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
     const res = await fetch(`http://127.0.0.1:${port}/api/roadmap?study=1`, { headers: { 'x-authentik-uid': 'ak-alice' } })
     const body = (await res.json()) as { patterns: { pattern: string | null }[] }
     expect(body.patterns.some((g) => g.pattern === PATTERN)).toBe(true)
@@ -280,14 +280,14 @@ describe('GET /api/review/:slug', () => {
 
   it('403s a user with no row of their own even when local/ has one', async () => {
     seedLog(root, 'local', `| 2026-08-01 | ${SLUG} | ${PATTERN} | yes | 0 | 04:12 | Local only. |`)
-    const { port } = await listen(deps({ mode: 'deployed' }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
     const res = await fetch(`http://127.0.0.1:${port}/api/review/${SLUG}`, { headers: { 'x-authentik-uid': 'ak-alice' } })
     expect(res.status).toBe(403)
   })
 
   it("succeeds once the requesting user's own log has the row", async () => {
     seedLog(root, 'local/users/ak-alice', `| 2026-08-02 | ${SLUG} | ${PATTERN} | yes | 0 | 05:00 | Alice's own. |`)
-    const { port } = await listen(deps({ mode: 'deployed' }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
     const res = await fetch(`http://127.0.0.1:${port}/api/review/${SLUG}`, { headers: { 'x-authentik-uid': 'ak-alice' } })
     expect(res.status).toBe(200)
   })
@@ -312,7 +312,7 @@ describe('GET /api/rust', () => {
 
   it("reads the requesting user's own drill log in deployed mode", async () => {
     seedLog(root, 'local/users/ak-alice', `| 2026-08-02 | ${SLUG} | ${PATTERN} | yes | 0 | 05:00 | Alice's own. |`)
-    const { port } = await listen(deps({ mode: 'deployed' }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
     const res = await fetch(`http://127.0.0.1:${port}/api/rust`, { headers: { 'x-authentik-uid': 'ak-alice' } })
     const body = (await res.json()) as { slug: string; why: string }
     // Alice has solved SLUG cold, so the never-attempted pick should be the other one.

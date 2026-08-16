@@ -108,7 +108,7 @@ describe('GET /api/instance', () => {
   })
 
   it('says deployed on a deployed instance', async () => {
-    const { port } = await listen(deps({ mode: 'deployed' }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
     const res = await fetch(`http://127.0.0.1:${port}/api/instance`, { headers: { 'x-authentik-uid': 'ak-alice' } })
     expect(await res.json()).toEqual({ mode: 'deployed' })
   })
@@ -116,20 +116,20 @@ describe('GET /api/instance', () => {
   // It is behind the same gate as everything else under /api/. The mode is not
   // a secret, but an exception here would be a hole to remember forever.
   it('is gated like every other api route', async () => {
-    const { port } = await listen(deps({ mode: 'deployed' }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
     expect((await fetch(`http://127.0.0.1:${port}/api/instance`)).status).toBe(401)
   })
 })
 
 describe('deployed mode requires an identity', () => {
   it('refuses an api request carrying no identity', async () => {
-    const { port } = await listen(deps({ mode: 'deployed' }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
     const res = await startSession(port)
     expect(res.status).toBe(401)
   })
 
   it('serves a request Authentik has named', async () => {
-    const { port } = await listen(deps({ mode: 'deployed' }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
     const res = await startSession(port, { 'x-authentik-uid': 'ak-alice' })
     expect(res.status).toBe(201)
   })
@@ -137,7 +137,7 @@ describe('deployed mode requires an identity', () => {
   // A traversal in the header is a request with no usable identity, so it is
   // the same 401 — not the 500 that reaching `userDataDir`'s throw would give.
   it('refuses an identity that could not name a directory', async () => {
-    const { port } = await listen(deps({ mode: 'deployed' }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
     const res = await startSession(port, { 'x-authentik-uid': '../alice' })
     expect(res.status).toBe(401)
   })
@@ -145,13 +145,13 @@ describe('deployed mode requires an identity', () => {
 
 describe('one session at a time, per person', () => {
   it('does not let one person\'s drill lock everyone else out', async () => {
-    const { port } = await listen(deps({ mode: 'deployed' }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
     expect((await startSession(port, { 'x-authentik-uid': 'ak-alice' })).status).toBe(201)
     expect((await startSession(port, { 'x-authentik-uid': 'ak-bob' })).status).toBe(201)
   })
 
   it('still allows each person only one, and names theirs to recover', async () => {
-    const { port } = await listen(deps({ mode: 'deployed' }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
     await startSession(port, { 'x-authentik-uid': 'ak-alice' })
     await startSession(port, { 'x-authentik-uid': 'ak-bob' })
     const res = await startSession(port, { 'x-authentik-uid': 'ak-alice' })
@@ -169,13 +169,13 @@ describe('the coach track on a shared instance', () => {
   // the door, per coach.ts's own "a separate door, not the drill door with
   // the lock off".
   it('refuses the answer-key track to someone not on the allowlist', async () => {
-    const { port } = await listen(deps({ mode: 'deployed', coachAllowlist: new Set(['ak-owner']) }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true, coachAllowlist: new Set(['ak-owner']) }))
     const res = await startSession(port, { 'x-authentik-uid': 'ak-alice' }, { track: 'coach', problem: 'two-sum-sorted' })
     expect(res.status).toBe(403)
   })
 
   it('does not gate the owner out of his own instance', async () => {
-    const { port } = await listen(deps({ mode: 'deployed', coachAllowlist: new Set(['ak-owner']) }))
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true, coachAllowlist: new Set(['ak-owner']) }))
     const res = await startSession(port, { 'x-authentik-uid': 'ak-owner' }, { track: 'coach', problem: 'two-sum-sorted' })
     // A concrete status, not `not.toBe(403)`: that would also pass on a 400 or
     // a 500, so it would keep passing if the allowlist let nobody through.

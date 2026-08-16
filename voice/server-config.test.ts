@@ -107,3 +107,32 @@ describe('assertOllamaReachable', () => {
     expect(() => assertOllamaReachable({}, usesOllama)).not.toThrow()
   })
 })
+
+/**
+ * Per-user state is off by default, and a deployed instance is one person's
+ * until it is switched on.
+ *
+ * The identity machinery is kept, not deleted — `deriveUserId`, `userDataDir`,
+ * the coach allowlist and the gateway secret are all still here and still
+ * tested. This decides whether they are consulted. One instance per person is
+ * the current answer at this scale; `VOICE_MULTI_USER=1` is the other one.
+ */
+describe('serverConfig multiUser', () => {
+  it('is off unless asked for, even deployed', () => {
+    expect(serverConfig({}).multiUser).toBe(false)
+    expect(serverConfig({ VOICE_MODE: 'deployed' }).multiUser).toBe(false)
+  })
+
+  it('is on when VOICE_MULTI_USER says so', () => {
+    expect(serverConfig({ VOICE_MODE: 'deployed', VOICE_MULTI_USER: '1' }).multiUser).toBe(true)
+  })
+
+  /**
+   * Local mode has no identity to read — `userDataDir(root, null)` is the whole
+   * local guarantee. Turning per-user state on there would silently move every
+   * existing drill log into a subdirectory.
+   */
+  it('refuses to turn on for a local instance rather than moving its data', () => {
+    expect(() => serverConfig({ VOICE_MULTI_USER: '1' })).toThrow(/VOICE_MULTI_USER/)
+  })
+})

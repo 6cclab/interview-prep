@@ -97,6 +97,13 @@ export interface VoiceServerDeps {
    */
   coachAllowlist?: ReadonlySet<string>
   /**
+   * Whether to ask who is calling at all. Off by default — an instance is one
+   * person's, and isolation is one instance each. On, every identity check
+   * here is live again: `deriveUserId`, per-user directories, the coach
+   * allowlist, the gateway secret. See `serverConfig`.
+   */
+  multiUser?: boolean
+  /**
    * The interviewer transport for a session on `track`.
    *
    * Takes the track because the backend is chosen per track — see
@@ -724,6 +731,10 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   function mayCoach(track: Track, userId: string | null): boolean {
     if (track !== 'coach') return true
     if (deps.mode !== 'deployed') return true
+    // One person's instance, and the pairing track is their own choice about
+    // their own drilling — the same reasoning as local mode. The allowlist is
+    // about not handing an answer key to *other* people, and there are none.
+    if (deps.multiUser !== true) return true
     return userId !== null && deps.coachAllowlist?.has(userId) === true
   }
 
@@ -735,8 +746,15 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // Derived once, before any route runs, so no route can forget to ask and
     // read the wrong person's directory. `null` is the local instance, and in
     // local mode this never looks at a header at all.
-    const userId = deriveUserId(req, { mode: deps.mode ?? 'local', gatewaySecret: deps.gatewaySecret })
-    if (deps.mode === 'deployed' && userId === null && url.pathname.startsWith('/api/')) {
+    //
+    // Unless this instance serves one person, which is the default: then it
+    // never asks, `null` stands for that person, and their data is `local/` —
+    // the same directory a local instance uses. Isolation between people comes
+    // from running one instance each, not from identity handling in here.
+    const userId = deps.multiUser
+      ? deriveUserId(req, { mode: deps.mode ?? 'local', gatewaySecret: deps.gatewaySecret })
+      : null
+    if (deps.multiUser === true && userId === null && url.pathname.startsWith('/api/')) {
       // Fails closed. A deployed request with no usable identity is a broken
       // edge configuration, and the one thing that must never happen is
       // falling back to a default user — that hands a bare request somebody
@@ -2113,6 +2131,7 @@ function main(): void {
     mode: config.mode,
     gatewaySecret: config.gatewaySecret,
     coachAllowlist: config.coachAllowlist,
+    multiUser: config.multiUser,
   })
   // Locally still `127.0.0.1` only — TLS changes the scheme, never the reach.
   // A live microphone and a private story bank have no business on the

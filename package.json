@@ -23,7 +23,6 @@
     "build:web:demo": "VITE_DEMO=1 vite build --config voice/web/vite.config.ts --outDir ../dist-demo",
     "deploy:image": "docker build -f deploy/Dockerfile -t interview-prep:local .",
     "deploy:local": "tsx scripts/deploy-local.ts",
-    "deploy:edge": "tsx scripts/deploy-edge.ts",
     "dev:web": "vite --config voice/web/vite.config.ts",
     "dev:web:api": "tsx voice/http-server.ts",
     "mock:web": "pnpm run build:web && tsx voice/http-server.ts",

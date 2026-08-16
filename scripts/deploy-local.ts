@@ -1,24 +1,20 @@
 /**
- * The deployed build, running on this machine, in one command.
+ * The deployed build, running on this machine.
  *
- * There are two processes because there have to be: the container is a
- * deployed instance and refuses a request that carries no identity, and the
- * identity has to be stamped by something outside it — a server flag that
- * accepted an identity it was never given would be an auth bypass one
- * misconfiguration away from production. But that is an argument for two
- * processes, not for two commands and two ports to keep straight, so this
- * starts both and prints one URL.
+ * There used to be a proxy in front of this, standing in for Traefik and the
+ * Authentik outpost, because the container refused any request that carried no
+ * identity header. It does not ask any more — an instance is one person's — so
+ * there is one process, one port, and nothing to sign in as.
  *
  * For an ordinary drill, use `pnpm mock:web`. None of this applies there.
  */
-import { spawn, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { startEdge } from './deploy-edge'
 
 const NAME = 'interview-prep'
 const IMAGE = 'interview-prep:local'
-const UPSTREAM = Number(process.env.EDGE_UPSTREAM ?? 4199)
+const PORT = Number(process.env.PORT ?? 4199)
 
 function docker(args: string[]): { status: number | null; stdout: string; stderr: string } {
   const run = spawnSync('docker', args, { encoding: 'utf8' })
@@ -35,27 +31,24 @@ function main(): void {
   // cadence than the image. `models/` is untracked, so a git worktree has an
   // empty one unless it has been symlinked at the main checkout's copy.
   const models = join(process.cwd(), 'models')
-  const model = existsSync(models) && spawnSync('sh', ['-c', `ls ${models}/*.bin`]).status === 0
-  if (!model) {
+  if (!existsSync(models) || spawnSync('sh', ['-c', `ls ${models}/*.bin`]).status !== 0) {
     console.log(`No *.bin in ${models} — the UI will work and spoken turns will not.`)
   }
 
-  // A leftover from a previous run holds the port and would otherwise fail
-  // with a message about the port rather than about the container.
+  // A leftover from a previous run holds the port, and the failure would be
+  // about the port rather than about the container.
   docker(['rm', '-f', NAME])
 
   // No `--rm`. A container that refuses to start is exactly the one whose logs
   // are worth reading, and `--rm` deletes it before anything can — the failure
-  // becomes "No such container", which says nothing. It is removed on the way
-  // in and on the way out instead.
+  // becomes "No such container", which says nothing.
   const started = docker([
     'run', '-d', '--name', NAME,
-    '-p', `${UPSTREAM}:4173`,
+    '-p', `${PORT}:4173`,
     '-v', `${models}:/opt/whisper/models:ro`,
     '-e', `VOICE_BACKEND=${process.env.VOICE_BACKEND ?? 'ollama'}`,
     '-e', `OLLAMA_HOST=${process.env.OLLAMA_HOST ?? ''}`,
     '-e', `OLLAMA_API_KEY=${process.env.OLLAMA_API_KEY ?? ''}`,
-    '-e', `VOICE_GATEWAY_SECRET=${process.env.VOICE_GATEWAY_SECRET ?? ''}`,
     IMAGE,
   ])
   if (started.status !== 0) {
@@ -64,15 +57,17 @@ function main(): void {
   }
 
   // The container exits rather than starts on a bad OLLAMA_HOST or an unknown
-  // VOICE_MODE, and its own message says exactly which. Waiting for the edge to
-  // 502 instead would throw that message away.
+  // VOICE_MODE, and its own message says exactly which. Reporting a refused
+  // connection instead would throw that message away.
   setTimeout(() => {
     if (docker(['inspect', '-f', '{{.State.Running}}', NAME]).stdout.trim() !== 'true') {
       console.error('\nThe container exited. Its last words:\n')
-      console.error(docker(['logs', NAME]).stdout || docker(['logs', NAME]).stderr)
+      const logs = docker(['logs', NAME])
+      console.error(logs.stdout || logs.stderr)
       process.exit(1)
     }
-    startEdge()
+    console.log(`\n  Open http://127.0.0.1:${PORT}`)
+    console.log('  Ctrl-C stops it.')
   }, 1500)
 
   const stop = (): void => {
@@ -81,6 +76,8 @@ function main(): void {
   }
   process.on('SIGINT', stop)
   process.on('SIGTERM', stop)
+  // Nothing else holds the loop open now that the proxy is gone.
+  setInterval(() => {}, 1 << 30)
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main()

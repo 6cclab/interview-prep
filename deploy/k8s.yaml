@@ -1,16 +1,20 @@
 # A deployed drill instance, for a small known group.
 #
-# Every identity decision here is defence in depth, because the failure mode is
-# silent: a forged `X-authentik-uid` reads and writes someone else's drill log,
-# and nothing about the response would look wrong. Three independent things
-# have to hold, so that no single misconfiguration is enough on its own:
+# This instance belongs to one person. Authentik decides who may reach it; the
+# app does not ask who is calling, because there is only one answer. A second
+# person gets a second instance rather than a user id.
 #
-#   1. the Service is ClusterIP and a NetworkPolicy admits only Traefik,
-#   2. the middleware chain CLEARS the identity headers before the outpost
-#      repopulates them,
-#   3. the app itself checks a gateway secret the edge alone can set.
+# That removes the thing that used to need defending: there is no
+# `X-authentik-uid` to forge, so no gateway secret and no header-clearing
+# middleware whose ORDER is load-bearing. What remains is one door.
 #
-# (3) is what makes (1) and (2) survivable. `deriveUserId` fails closed.
+# WARNING, if `VOICE_MULTI_USER` is ever switched on: the NetworkPolicy below
+# does NOT work in this cluster. The CNI is flannel, which has no policy
+# controller, so the object is accepted and silently enforces nothing — anything
+# in the cluster can reach this Service directly, bypassing Traefik and
+# Authentik entirely. With one user that costs confidentiality of one person's
+# own data against in-cluster callers. With several it would mean forgeable
+# identity, and the gateway secret would be doing the whole job alone.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -22,13 +26,11 @@ data:
   # start a deployed instance pointed at 127.0.0.1, because ollama's own
   # default is loopback and inside a container that reaches nothing.
   ollamaHost: http://ollama-gateway.ollama-gateway.svc.cluster.local
-  # Empty means nobody, which is the safe default: the coach track serves
-  # `solutions/**` and `patterns.md`. Add the owner's Authentik uid here.
-  coachAllowlist: ""
 ---
-# Two secrets in opposite directions, deliberately not one:
-#   gatewaySecret  authenticates Traefik TO this server (`deriveUserId`)
-#   ollamaApiKey   authenticates this server TO the ollama gateway
+# One secret now. `gatewaySecret` went with the identity headers — it existed to
+# prove a request came through the edge, and nothing here reads a header any
+# more. It comes back with VOICE_MULTI_USER.
+#
 # The operator provisions a Secret named after this object from Infisical, the
 # same way every other service in the cluster gets its credentials.
 apiVersion: secrets.6cclab.dev/v1alpha1
@@ -37,8 +39,7 @@ metadata:
   name: interview-prep-secrets
 spec:
   # The Infisical project UUID. This project does not exist yet — create it and
-  # put the UUID here before applying. Expected keys: gatewaySecret,
-  # ollamaApiKey.
+  # put the UUID here before applying. Expected key: ollamaApiKey.
   projectId: REPLACE_WITH_INFISICAL_PROJECT_UUID
 ---
 apiVersion: v1
@@ -89,15 +90,16 @@ spec:
             - name: OLLAMA_HOST
               valueFrom:
                 configMapKeyRef: { name: interview-prep, key: ollamaHost }
-            # Only the owner may open the pairing track: `coachPaths` serves
-            # solutions/** and patterns.md by design, which is an answer key
-            # once the route has a URL other people can reach.
-            - name: VOICE_COACH_ALLOWLIST
-              valueFrom:
-                configMapKeyRef: { name: interview-prep, key: coachAllowlist }
-            - name: VOICE_GATEWAY_SECRET
-              valueFrom:
-                secretKeyRef: { name: interview-prep-secrets, key: gatewaySecret }
+            # No VOICE_MULTI_USER: this instance is one person's, and a second
+            # person gets a second instance. That is what keeps two people's
+            # drill logs apart — not identity handling inside the process.
+            #
+            # Switching it on turns every identity check back on at once
+            # (`deriveUserId`, per-user directories, the coach allowlist, the
+            # gateway secret), and then this needs VOICE_COACH_ALLOWLIST and
+            # VOICE_GATEWAY_SECRET back. The code and its tests are all still
+            # here; see `serverConfig`.
+            #
             # `ollama-gateway` rejects every route but /healthz without this.
             # Absent means unauthenticated by design (`ollamaHeaders`), so a
             # missing key is a 401 on the first turn rather than a boot error.
@@ -133,33 +135,11 @@ spec:
         - namespaceSelector:
             matchLabels: { kubernetes.io/metadata.name: traefik }
 ---
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: interview-prep-clear-identity
-spec:
-  headers:
-    customRequestHeaders:
-      # Emptied, not merely overwritten later. forwardAuth does not strip a
-      # client-supplied header of the same name before the outpost runs, so
-      # without this step a caller can present their own uid and have it
-      # survive. This middleware MUST come first in the chain.
-      X-authentik-uid: ""
-      X-authentik-username: ""
-      X-authentik-email: ""
-      X-authentik-groups: ""
----
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: interview-prep-gateway-secret
-spec:
-  headers:
-    customRequestHeaders:
-      # Set only here. The app compares it in constant time and refuses the
-      # request without it, so a broken chain fails closed rather than open.
-      X-Gateway-Secret: "REPLACE_FROM_SECRET"
----
+# The clear-identity and gateway-secret middlewares are gone with the headers
+# they existed to make trustworthy. Both come back with VOICE_MULTI_USER, and
+# the order matters when they do: clear, then authenticate, then stamp —
+# `forwardAuth` does not strip a client-supplied header of the same name, so a
+# chain that only sets lets a caller keep their own uid.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -170,10 +150,9 @@ spec:
     - match: Host(`drills.example.internal`)
       kind: Rule
       middlewares:
-        # Order is the security property: clear, then authenticate, then stamp.
-        - name: interview-prep-clear-identity
+        # One door. Authentik decides who reaches the instance; the instance
+        # does not ask which of them it is talking to.
         - name: authentik-forwardauth
-        - name: interview-prep-gateway-secret
       services:
         - name: interview-prep
           port: 80

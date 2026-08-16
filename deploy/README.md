@@ -8,23 +8,34 @@ Local instances are untouched by everything here: `VOICE_MODE` defaults to
 
 | | local | deployed |
 |---|---|---|
-| Identity | none, headers never read | Authentik uid, required, 401 otherwise |
-| State | `local/` | `local/users/<uid>/` |
-| Sessions | one, globally | one **per person** |
+| Identity | none, headers never read | none — Authentik guards the door, the app does not ask |
+| State | `local/` | `local/` — one instance, one person |
+| Sessions | one, globally | one, globally |
 | Tests | vitest, server-side | in the browser, verdict posted back |
-| Coach track | open — it is your own choice | allowlist only |
+| Coach track | open — it is your own choice | open — still your own instance |
 | TTS | speaks on this machine | see "Voice", below |
 
-## Before the first deploy
+## One instance, one person
 
-Move the existing single-user history into a per-user directory:
+The app does not ask who is calling. Authentik decides who may reach an
+instance; two people means two instances, each with its own volume. Isolation is
+one process each rather than identity handling inside one process — at this
+scale that is less code and less to get wrong, and the failure mode of a mistake
+is "my drill log is empty", not "I am reading yours".
+
+The per-user machinery is still here and still tested — `voice/identity.ts`,
+`voice/user-root.ts`, the coach allowlist, the gateway secret,
+`scripts/migrate-local-to-user.ts`. `VOICE_MULTI_USER=1` turns all of it back on
+at once, and then this needs `VOICE_COACH_ALLOWLIST`, `VOICE_GATEWAY_SECRET`,
+the two Traefik middlewares in `k8s.yaml`, and a run of:
 
 ```bash
 pnpm tsx scripts/migrate-local-to-user.ts <your-authentik-uid>
 ```
 
-Idempotent, and it leaves `local/certs/` alone — mkcert material belongs to the
-machine, not a person.
+It refuses to switch on for a *local* instance, which is already yours —
+turning it on there would move an existing drill log into a subdirectory
+silently.
 
 ## Running it on your own machine
 
@@ -33,17 +44,7 @@ machine, not a person.
 involved. Reach for the image only when the thing you want to test *is* the
 deployed build.
 
-The image bakes `VOICE_MODE=deployed`, so it refuses every `/api/` request
-without an Authentik uid — that is `deriveUserId` failing closed, and it is the
-whole point of the three layers below. Pointed a browser straight at it, you
-get a page that loads and every track showing **Unavailable**, because each
-problem list came back 401.
-
-`VOICE_MODE=local` on the container is not the way round it: local mode runs
-`checkSpeechEngine()`, there is no piper in the image, and it binds loopback
-inside its own namespace. It exits immediately, correctly.
-
-Put the edge in front instead — the same thing the cluster does:
+Then it is one container on one port with nothing to sign in as:
 
 ```bash
 export OLLAMA_HOST=https://ollama-gateway.apps.dev-01.6cclab.dev
@@ -54,14 +55,14 @@ pnpm deploy:image     # build, once
 pnpm deploy:local     # prints one URL — open that
 ```
 
-`deploy:local` starts the container and the edge together and cleans up on
-Ctrl-C. There are two processes because there have to be, but they are not two
-commands and two ports to keep straight.
+`deploy:local` cleans up on Ctrl-C, and prints the container's own last words
+if it refuses to start — a bad `OLLAMA_HOST` says so itself, and that message is
+worth more than a refused connection.
 
-It also says whether identity is being accepted, because both ways this goes
-wrong look like the same bare 401 from a browser: opening the container's own
-port instead of the edge's, or a `VOICE_GATEWAY_SECRET` set on the container
-but not exported in the shell that starts the edge.
+Note `VOICE_MODE=local` on the container still does not work: local mode runs
+`checkSpeechEngine()`, there is no piper in the image, and it binds loopback
+inside its own namespace. It exits immediately, correctly. The image is a
+deployed-mode image; `pnpm mock:web` is the local one.
 
 `models/` is bind-mounted at `/opt/whisper/models`, so a spoken turn works.
 `whisper-cli` itself is built into the image rather than mounted — it was a
@@ -69,15 +70,6 @@ PVC, which is fine in the cluster and made the image useless on a laptop, since
 a macOS `whisper-cli` cannot be bind-mounted into a linux container. `models/`
 is untracked, so a **git worktree has an empty one**: symlink the main
 checkout's copy, or spoken turns will not work and the run will say so.
-
-`scripts/deploy-edge.ts` reproduces the middleware chain in the order that
-matters: clear `x-authentik-*`, then set the uid, then stamp the gateway
-secret. `EDGE_UID` chooses who you are (default `ak-local`), which is also how
-you exercise per-user isolation — two uids, two `local/users/<uid>/`
-directories. It listens on 127.0.0.1 only, and it is a proxy rather than a
-server flag deliberately: an env var that let the server accept an identity it
-was never given would be an auth bypass one misconfiguration away from
-production.
 
 ## Configuration
 
@@ -89,34 +81,28 @@ Everything the container needs, and what happens when it is missing.
 | `VOICE_BACKEND` | manifest | refuses to start; a transport you did not choose is one you discover mid-drill |
 | `OLLAMA_HOST` | ConfigMap | refuses to start in deployed mode, because ollama's own default is loopback and a container's loopback is itself |
 | `OLLAMA_API_KEY` | Infisical | **silent** — absent means unauthenticated by design, so the gateway 401s on the first turn |
-| `VOICE_COACH_ALLOWLIST` | ConfigMap | nobody may open the coach track, which is the safe default |
-| `VOICE_GATEWAY_SECRET` | Infisical | every request is a 401, since `deriveUserId` fails closed |
+| `VOICE_MULTI_USER` | unset | one instance, one person — the default, and what the rest of this file assumes |
 
 `OLLAMA_API_KEY` is the one with no boot-time signal. It is deliberate —
 pointing `OLLAMA_HOST` at a bare ollama box must keep working, so absent has to
 mean unauthenticated rather than an error (`voice/ollama.ts`, `ollamaHeaders`).
-It also runs in the opposite direction to `VOICE_GATEWAY_SECRET`: that one
-authenticates Traefik **to** this server, this one authenticates this server
-**to** the ollama gateway. They are two different secrets and must not be
-merged.
+It lives in Infisical, provisioned by the `HomelabSecret` in `k8s.yaml` the same
+way every other service in the cluster gets its credentials. **The Infisical
+project does not exist yet** — create it, put its UUID in the `projectId` field,
+and add the key before applying.
 
-Both live in Infisical, provisioned by the `HomelabSecret` in `k8s.yaml` the
-same way every other service in the cluster gets its credentials. **The
-Infisical project does not exist yet** — create it, put its UUID in the
-`projectId` field, and add the two keys before applying.
+## The NetworkPolicy does not work
 
-## Identity, and why there are three layers
+Worth knowing before trusting the manifest: this cluster's CNI is **flannel**,
+which has no NetworkPolicy controller. The `NetworkPolicy` in `k8s.yaml` is
+accepted by the API server and enforces nothing, so anything in the cluster can
+reach the Service directly, bypassing Traefik and Authentik.
 
-A forged `X-authentik-uid` reads and writes someone else's drill log, and
-nothing about the response would look wrong. So no single control is trusted:
-
-1. **ClusterIP + NetworkPolicy** — only Traefik can reach the port.
-2. **Middleware order** — `clear-identity` → `forwardauth` → `gateway-secret`.
-   `forwardAuth` does *not* strip a client-supplied header of the same name
-   before the outpost repopulates it, so the clear step must come first. This
-   is the ordering bug that makes identity forgeable.
-3. **Gateway secret** — set only by the edge, compared in constant time.
-   `deriveUserId` returns null without it, and a null identity is a 401.
+With one user that costs confidentiality of your own data against in-cluster
+callers. It matters much more under `VOICE_MULTI_USER`: the gateway secret would
+then be the *only* thing making identity unforgeable, rather than the third of
+three layers the manifest used to claim. Fixing it properly means a
+policy-capable CNI, not a change in this repo.
 
 ## Voice: not finished, and the reason
 

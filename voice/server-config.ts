@@ -14,6 +14,17 @@ export interface ServerConfig {
   speaks: boolean
   coachAllowlist: ReadonlySet<string>
   gatewaySecret: string | undefined
+  /**
+   * Whether this instance serves more than one person.
+   *
+   * Off by default, including deployed: an instance is one candidate's until
+   * told otherwise, and isolation comes from running one per person rather than
+   * from identity handling inside the process. The identity machinery is all
+   * still here — `deriveUserId`, `userDataDir`, the coach allowlist, the
+   * gateway secret — and this is the switch that decides whether it is
+   * consulted, so turning it back on is one variable rather than a rewrite.
+   */
+  multiUser: boolean
 }
 
 /** Env values that mean "this is a deployed instance". */
@@ -65,6 +76,13 @@ export function serverConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig
     throw new Error(`VOICE_MODE="${env.VOICE_MODE}" is not a known mode. Use one of: local, deployed.`)
   }
   const mode = raw === 'deployed' ? 'deployed' : 'local'
+  const multiUser = (env.VOICE_MULTI_USER ?? '').trim() !== ''
+  // Local mode's whole guarantee is that `userDataDir(root, null)` is `local/`.
+  // Switching per-user state on there would move an existing drill log into a
+  // subdirectory the next time the server started, silently.
+  if (multiUser && mode !== 'deployed') {
+    throw new Error('VOICE_MULTI_USER only means something for a deployed instance. A local one is already yours.')
+  }
   const secret = (env.VOICE_GATEWAY_SECRET ?? '').trim()
   return {
     mode,
@@ -84,5 +102,6 @@ export function serverConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig
         .filter((entry) => entry !== ''),
     ),
     gatewaySecret: secret === '' ? undefined : secret,
+    multiUser,
   }
 }

@@ -136,3 +136,39 @@ describe('the device routes on a deployed instance', () => {
     expect((await fetch(`http://127.0.0.1:${port}/api/devices/config`)).status).toBe(200)
   })
 })
+
+/**
+ * One instance per person is the isolation, so the process does not ask who is
+ * calling. The identity machinery is dormant, not gone — `multiUser: true`
+ * restores every check, and its own tests still cover it.
+ */
+describe('a deployed instance that serves one person', () => {
+  it('answers an api request that carries no identity at all', async () => {
+    const { port } = await listen(deps({ mode: 'deployed' }))
+    const res = await fetch(`http://127.0.0.1:${port}/api/instance`)
+    expect(res.status).toBe(200)
+  })
+
+  // The single user's data is `local/`, exactly as a local instance's is —
+  // the same directory the migrate script would otherwise have moved.
+  it('writes where a local instance writes', async () => {
+    const { port } = await listen(deps({ mode: 'deployed' }))
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'mock' }),
+    })
+    expect(res.status).toBe(201)
+  })
+
+  // A header from a caller must not start meaning something again by accident.
+  it('ignores an identity a caller supplies', async () => {
+    const { port } = await listen(deps({ mode: 'deployed' }))
+    expect((await fetch(`http://127.0.0.1:${port}/api/instance`, { headers: AS_ALICE })).status).toBe(200)
+  })
+
+  it('still refuses an unidentified request when multi-user is switched on', async () => {
+    const { port } = await listen(deps({ mode: 'deployed', multiUser: true }))
+    expect((await fetch(`http://127.0.0.1:${port}/api/instance`)).status).toBe(401)
+  })
+})
