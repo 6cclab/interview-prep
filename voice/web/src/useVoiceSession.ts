@@ -32,6 +32,16 @@ export interface VoiceSession {
    */
   micFailureKind: 'denied' | 'nodevice' | null
   /**
+   * The microphone has been granted at least once this session.
+   *
+   * `acquireStream` runs when the session starts, so this is normally true
+   * before the opening question finishes — which is what lets the first turn
+   * arm itself as readily as the tenth. It stays false where permission was
+   * refused or the device is missing, and there `shouldAutoRecord` declines and
+   * the explicit press is the only way in.
+   */
+  micReady: boolean
+  /**
    * True after a 422 from `POST /turn` or `POST /turn/retry`. The server
    * (`voice/http-server.ts`) keeps the session alive on a transcription
    * failure and retains the audio for a retry — matching the handoff's
@@ -290,6 +300,7 @@ export function useVoiceSession(): VoiceSession {
   const [sessionConflict, setSessionConflict] = useState(false)
   const [micUnsupported] = useState(mediaDevicesUnsupported)
   const [micFailureKind, setMicFailureKind] = useState<'denied' | 'nodevice' | null>(null)
+  const [micReady, setMicReady] = useState(false)
   const [transcriptFailed, setTranscriptFailed] = useState(false)
   // Set alongside `sessionConflict` from the 409's body: what the stuck session
   // is, so the banner can name its start time and reopening has an id to use.
@@ -442,6 +453,10 @@ export function useVoiceSession(): VoiceSession {
       })
       clearTimeout(watchdog)
       mediaStreamRef.current = stream
+      // Recorded so the next turn can arm itself. Only after a real grant: a
+      // recording that starts on its own must never be what raises the
+      // permission prompt. See `shouldAutoRecord`.
+      setMicReady(true)
       // Labels are populated the moment permission is granted — refresh now
       // so the selector shows real names instead of staying empty until some
       // unrelated `devicechange` event happens to fire.
@@ -1076,6 +1091,7 @@ export function useVoiceSession(): VoiceSession {
     micUnsupported,
     sessionConflict,
     micFailureKind,
+    micReady,
     transcriptFailed,
     errorKind,
     dismissError,
