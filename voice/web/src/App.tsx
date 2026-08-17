@@ -137,6 +137,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     interimSentences,
     errorKind,
     micReady,
+    hasAnswered,
     dismissError,
     retryTranscription,
     abandonTurn,
@@ -273,17 +274,17 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     else if (phase === 'recording') onStopAndSubmit()
   }, [phase, start, record, onStopAndSubmit, routed, starting])
 
-  // The interviewer stops talking, and the microphone opens. Pressing "Start
-  // answer" first is a press a real interview does not ask for, and it was one
-  // per turn for the length of a drill.
+  // Between turns the microphone opens itself. The opening answer still takes a
+  // press — beginning is deliberate, continuing is not, which is how a real
+  // interview goes.
   //
-  // Only the start. Nothing here stops a recording — "Let silence sit. Do not
-  // fill it. Thinking time is the exercise" (see `record`) still holds, and a
-  // turn ends when Andre says it does. `shouldAutoRecord` owns the conditions;
-  // this only obeys them.
+  // Only the start of a turn. Nothing here stops a recording: "Let silence sit.
+  // Do not fill it. Thinking time is the exercise" (see `record`) still holds,
+  // and a turn ends when Andre says it does. `shouldAutoRecord` owns every
+  // condition; this only obeys them.
   useEffect(() => {
-    if (shouldAutoRecord({ phase, micReady, errorKind })) record()
-  }, [phase, micReady, errorKind, record])
+    if (shouldAutoRecord({ phase, micReady, errorKind, hasAnswered })) record()
+  }, [phase, micReady, errorKind, hasAnswered, record])
 
   // Space triggers the primary action from anywhere on the page, per the
   // handoff — suppressed when focus is on an interactive element (that
@@ -319,13 +320,13 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
       // this phase lasts a tick before `recording` announces itself, and
       // "press space to start your answer" would be both wrong and the first
       // of two sentences in a row.
-      else if (phase === 'ready' && prev === 'speaking' && !shouldAutoRecord({ phase, micReady, errorKind })) {
+      else if (phase === 'ready' && prev === 'speaking' && !shouldAutoRecord({ phase, micReady, errorKind, hasAnswered })) {
         setAnnouncement(ANNOUNCEMENTS.ready)
       }
       else if (phase === 'ended') setAnnouncement(ANNOUNCEMENTS.ended)
       prevPhaseRef.current = phase
     }
-  }, [phase, micReady, errorKind])
+  }, [phase, micReady, errorKind, hasAnswered])
 
   // Assertive live-region text: the error's title, per the handoff.
   const alertText = errorKind ? ERROR_COPY[errorKind].title : ''
