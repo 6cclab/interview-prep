@@ -29,6 +29,39 @@ export function derivePhase(mode: Mode, interviewerSpeaking: boolean, awaitingIn
   }
 }
 
+/**
+ * Whether to start recording without being asked.
+ *
+ * The interviewer stops talking and it is your turn: pressing "Start answer"
+ * before speaking is a press a real interview never asks for, once per turn for
+ * the length of a drill.
+ *
+ * This decides only whether to START. Nothing auto-stops: "Let silence sit. Do
+ * not fill it. Thinking time is the exercise" is a deliberate decision — see
+ * `record` in useVoiceSession.ts — and arming early leaves it untouched. A turn
+ * still ends only when the candidate says it does.
+ */
+export function shouldAutoRecord(state: {
+  phase: Phase
+  /**
+   * The microphone has been granted at least once this session.
+   *
+   * Normally true before the opening question finishes, because `acquireStream`
+   * runs when the session starts — so the first turn arms as readily as the
+   * tenth. Where permission was refused or there is no device it stays false,
+   * and then a recording must never be what raises the prompt: the explicit
+   * press is the only way in.
+   */
+  micReady: boolean
+  /**
+   * A banner is a decision — retry the transcription, or answer again from the
+   * top. Arming underneath it records over a question still being read.
+   */
+  errorKind: ErrorKind | null
+}): boolean {
+  return state.phase === 'ready' && state.micReady && state.errorKind === null
+}
+
 /** `s` -> `m:ss`, matching the handoff's `fmt`. */
 export function fmt(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds))
@@ -105,8 +138,13 @@ export function stuckBody(startedAt: string | null): string {
 // out verbatim (requesting, interviewer-speaking-started, ended).
 export const ANNOUNCEMENTS = {
   requesting: 'Waiting for microphone permission. Nothing is being recorded yet.',
-  recording: 'Recording your answer. Press space when you are finished. Nothing will stop the recording for you.',
+  // Reached on its own now, not only from a press — see `shouldAutoRecord`. The
+  // second half is the part that has not changed and is the part that matters.
+  recording:
+    'Recording your answer. Press space when you are finished. Nothing will stop the recording for you.',
   speaking: 'Interviewer speaking.',
+  // Announced only where the microphone did not arm itself — a refused
+  // permission, or a banner waiting on a decision.
   ready: 'Interviewer finished. Press space to start your answer.',
   ended: 'Session ended. Transcript saved.',
   turnSaved: (duration: string): string => `Answer saved, ${duration}. Interviewer is preparing a reply.`,

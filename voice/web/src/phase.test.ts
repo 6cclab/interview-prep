@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { derivePhase, fmt, wallClock, ANNOUNCEMENTS } from './phase'
+import { derivePhase, fmt, shouldAutoRecord, wallClock, ANNOUNCEMENTS } from './phase'
 import type { Mode, Phase } from './types'
 
 /**
@@ -128,5 +128,49 @@ describe('the session-start wait sits outside the phase model', () => {
     for (const mode of ['idle', 'ended'] as const) {
       expect(['idle', 'ended']).toContain(derivePhase(mode, false, false))
     }
+  })
+})
+
+/**
+ * The interviewer stops talking, and it is your turn. Pressing "Start answer"
+ * before speaking is a press a real interview does not ask for, and it is one
+ * per turn for the length of a drill.
+ *
+ * This only decides whether to START. Nothing here ever stops a recording:
+ * "Let silence sit. Do not fill it. Thinking time is the exercise" is a
+ * deliberate decision (see `record` in useVoiceSession.ts), and auto-arming
+ * leaves it exactly as it was — silence still never ends a turn.
+ */
+describe('shouldAutoRecord', () => {
+  const READY: Parameters<typeof shouldAutoRecord>[0] = { phase: 'ready', micReady: true, errorKind: null }
+
+  it('arms when the interviewer has finished and it is your turn', () => {
+    expect(shouldAutoRecord(READY)).toBe(true)
+  })
+
+  it.each(['idle', 'requesting', 'recording', 'transcribing', 'thinking', 'speaking', 'ended'] as Phase[])(
+    'stays out of the way in %s',
+    (phase) => {
+      expect(shouldAutoRecord({ ...READY, phase })).toBe(false)
+    },
+  )
+
+  /**
+   * A recording must never be the thing that raises a permission prompt. That
+   * belongs to a gesture the candidate made, so where the microphone was
+   * refused or is missing, the explicit press is the only way in.
+   */
+  it('declines while the microphone has never been granted', () => {
+    expect(shouldAutoRecord({ ...READY, micReady: false })).toBe(false)
+  })
+
+  /**
+   * An error banner is a decision — retry the transcription, or answer again
+   * from the top. Arming underneath it starts recording over a question the
+   * candidate has not finished reading.
+   */
+  it('waits while a banner is asking for a decision', () => {
+    expect(shouldAutoRecord({ ...READY, errorKind: 'transcript' })).toBe(false)
+    expect(shouldAutoRecord({ ...READY, errorKind: 'denied' })).toBe(false)
   })
 })

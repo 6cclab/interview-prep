@@ -17,7 +17,16 @@ import { CodingTools } from './components/CodingTools'
 import { DebugTools } from './components/DebugTools'
 import { routeDrill, routeHash, useRoute, type Route } from './route'
 import { useTheme } from './theme'
-import { derivePhase, fmt, wallClock, stuckBody, TIMED_BUDGET_MINUTES, ERROR_COPY, ANNOUNCEMENTS } from './phase'
+import {
+  derivePhase,
+  fmt,
+  shouldAutoRecord,
+  wallClock,
+  stuckBody,
+  TIMED_BUDGET_MINUTES,
+  ERROR_COPY,
+  ANNOUNCEMENTS,
+} from './phase'
 import type { DebugVerdict, DrillVerdict, ErrorKind } from './types'
 
 // Status title/detail for the dock's left-hand block. The `requesting`
@@ -127,6 +136,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     awaitingInterviewer,
     interimSentences,
     errorKind,
+    micReady,
     dismissError,
     retryTranscription,
     abandonTurn,
@@ -263,6 +273,18 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     else if (phase === 'recording') onStopAndSubmit()
   }, [phase, start, record, onStopAndSubmit, routed, starting])
 
+  // The interviewer stops talking, and the microphone opens. Pressing "Start
+  // answer" first is a press a real interview does not ask for, and it was one
+  // per turn for the length of a drill.
+  //
+  // Only the start. Nothing here stops a recording — "Let silence sit. Do not
+  // fill it. Thinking time is the exercise" (see `record`) still holds, and a
+  // turn ends when Andre says it does. `shouldAutoRecord` owns the conditions;
+  // this only obeys them.
+  useEffect(() => {
+    if (shouldAutoRecord({ phase, micReady, errorKind })) record()
+  }, [phase, micReady, errorKind, record])
+
   // Space triggers the primary action from anywhere on the page, per the
   // handoff — suppressed when focus is on an interactive element (that
   // element's own key handling applies, and there are no text inputs for
@@ -293,11 +315,17 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
         setAnnouncement(ANNOUNCEMENTS.turnSaved(fmt(pendingDurationRef.current ?? 0)))
       } else if (phase === 'thinking') setAnnouncement(ANNOUNCEMENTS.thinking)
       else if (phase === 'speaking') setAnnouncement(ANNOUNCEMENTS.speaking)
-      else if (phase === 'ready' && prev === 'speaking') setAnnouncement(ANNOUNCEMENTS.ready)
+      // Only when Andre actually has to do something. With the microphone armed
+      // this phase lasts a tick before `recording` announces itself, and
+      // "press space to start your answer" would be both wrong and the first
+      // of two sentences in a row.
+      else if (phase === 'ready' && prev === 'speaking' && !shouldAutoRecord({ phase, micReady, errorKind })) {
+        setAnnouncement(ANNOUNCEMENTS.ready)
+      }
       else if (phase === 'ended') setAnnouncement(ANNOUNCEMENTS.ended)
       prevPhaseRef.current = phase
     }
-  }, [phase])
+  }, [phase, micReady, errorKind])
 
   // Assertive live-region text: the error's title, per the handoff.
   const alertText = errorKind ? ERROR_COPY[errorKind].title : ''
