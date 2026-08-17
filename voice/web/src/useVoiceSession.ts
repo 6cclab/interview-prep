@@ -42,6 +42,15 @@ export interface VoiceSession {
    */
   micReady: boolean
   /**
+   * An answer has been accepted since this session was started or reopened.
+   *
+   * What separates the opening answer, which is a deliberate act, from every
+   * answer after it, which a real interview does not stop to ask about. Reset
+   * by `start`, `reopenStuckSession` and `endSession` — deliberately not
+   * derived from `entries`, which a reopen restores already full of answers.
+   */
+  hasAnswered: boolean
+  /**
    * True after a 422 from `POST /turn` or `POST /turn/retry`. The server
    * (`voice/http-server.ts`) keeps the session alive on a transcription
    * failure and retains the audio for a retry — matching the handoff's
@@ -301,6 +310,7 @@ export function useVoiceSession(): VoiceSession {
   const [micUnsupported] = useState(mediaDevicesUnsupported)
   const [micFailureKind, setMicFailureKind] = useState<'denied' | 'nodevice' | null>(null)
   const [micReady, setMicReady] = useState(false)
+  const [hasAnswered, setHasAnswered] = useState(false)
   const [transcriptFailed, setTranscriptFailed] = useState(false)
   // Set alongside `sessionConflict` from the 409's body: what the stuck session
   // is, so the banner can name its start time and reopening has an id to use.
@@ -405,6 +415,11 @@ export function useVoiceSession(): VoiceSession {
     eventSourceRef.current?.close()
     eventSourceRef.current = null
     setMode('ended')
+    // Every session begins the same way: the opening answer is a press. Set
+    // here rather than at one call site, because a session that ended by 404 —
+    // already saved on the server — has ended just as much as one that ended by
+    // event. See `shouldAutoRecord`.
+    setHasAnswered(false)
     // The countdown stops with the session. `drill` is deliberately kept, so
     // the Ended screen can still say which problem this was.
     setDeadlineAt(null)
@@ -550,6 +565,8 @@ export function useVoiceSession(): VoiceSession {
     setSessionConflict(false)
     setMicFailureKind(null)
     setTranscriptFailed(false)
+    // The opening answer of a new session is a press again.
+    setHasAnswered(false)
     // A new drill starts with no help taken and no test result. Carrying the previous session's
     // verdict over would show a green — or a failing test list — for code that
     // has since been reset back to the stub.
@@ -637,6 +654,9 @@ export function useVoiceSession(): VoiceSession {
     const stuck = stuckSession
     if (!stuck) return
     setStatus('Reopening that session…')
+    // Reopening is itself a deliberate act, and the entries coming back are
+    // full of answers already given. The first answer after it is a press.
+    setHasAnswered(false)
     void (async () => {
       const res = await fetch(`/api/session/${stuck.id}`)
       if (!res.ok) {
@@ -848,6 +868,11 @@ export function useVoiceSession(): VoiceSession {
       }
       setMode('listening-to-interviewer')
       setAwaitingInterviewer(true)
+      // The conversation is going now, so the next turn's microphone opens on
+      // its own — see `shouldAutoRecord`. Set on a turn the server accepted,
+      // not on one that was merely recorded: a 422 above leaves the same
+      // question standing, and answering it again is still an opening answer.
+      setHasAnswered(true)
       // Clears a prior turn's transcription error: recording again is one of
       // the ways out of that state (the primary action stays live under the
       // banner), so a success here has resolved it just as "Answer again" would.
@@ -1092,6 +1117,7 @@ export function useVoiceSession(): VoiceSession {
     sessionConflict,
     micFailureKind,
     micReady,
+    hasAnswered,
     transcriptFailed,
     errorKind,
     dismissError,

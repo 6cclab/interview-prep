@@ -142,10 +142,24 @@ describe('the session-start wait sits outside the phase model', () => {
  * leaves it exactly as it was — silence still never ends a turn.
  */
 describe('shouldAutoRecord', () => {
-  const READY: Parameters<typeof shouldAutoRecord>[0] = { phase: 'ready', micReady: true, errorKind: null }
+  const READY: Parameters<typeof shouldAutoRecord>[0] = {
+    phase: 'ready',
+    micReady: true,
+    errorKind: null,
+    hasAnswered: true,
+  }
 
-  it('arms when the interviewer has finished and it is your turn', () => {
+  it('arms between turns, once the conversation is already going', () => {
     expect(shouldAutoRecord(READY)).toBe(true)
+  })
+
+  /**
+   * Beginning is deliberate; continuing is not. A real interview starts when you
+   * decide to speak, and after that nobody asks permission between questions —
+   * so the opening answer keeps its press and every answer after it does not.
+   */
+  it('leaves the opening answer to a press', () => {
+    expect(shouldAutoRecord({ ...READY, hasAnswered: false })).toBe(false)
   })
 
   it.each(['idle', 'requesting', 'recording', 'transcribing', 'thinking', 'speaking', 'ended'] as Phase[])(

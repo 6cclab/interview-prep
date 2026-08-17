@@ -32,9 +32,10 @@ export function derivePhase(mode: Mode, interviewerSpeaking: boolean, awaitingIn
 /**
  * Whether to start recording without being asked.
  *
- * The interviewer stops talking and it is your turn: pressing "Start answer"
- * before speaking is a press a real interview never asks for, once per turn for
- * the length of a drill.
+ * Beginning is deliberate; continuing is not. A real interview starts when you
+ * decide to speak, and after that nobody asks permission between questions. So
+ * the opening answer keeps its press, and every answer after it arms itself —
+ * which is where the cost was: one press per turn for the length of a drill.
  *
  * This decides only whether to START. Nothing auto-stops: "Let silence sit. Do
  * not fill it. Thinking time is the exercise" is a deliberate decision — see
@@ -58,8 +59,18 @@ export function shouldAutoRecord(state: {
    * top. Arming underneath it records over a question still being read.
    */
   errorKind: ErrorKind | null
+  /**
+   * An answer has already been given since this session was started or
+   * reopened.
+   *
+   * Not derived from the transcript: reopening a stuck session restores entries
+   * that already contain answers, and arming off those would start recording
+   * the instant the screen came back — a surprise, and the reopen was itself a
+   * deliberate act that deserves a deliberate first answer.
+   */
+  hasAnswered: boolean
 }): boolean {
-  return state.phase === 'ready' && state.micReady && state.errorKind === null
+  return state.phase === 'ready' && state.micReady && state.errorKind === null && state.hasAnswered
 }
 
 /** `s` -> `m:ss`, matching the handoff's `fmt`. */
