@@ -7,14 +7,6 @@
 # That removes the thing that used to need defending: there is no
 # `X-authentik-uid` to forge, so no gateway secret and no header-clearing
 # middleware whose ORDER is load-bearing. What remains is one door.
-#
-# WARNING, if `VOICE_MULTI_USER` is ever switched on: the NetworkPolicy below
-# does NOT work in this cluster. The CNI is flannel, which has no policy
-# controller, so the object is accepted and silently enforces nothing — anything
-# in the cluster can reach this Service directly, bypassing Traefik and
-# Authentik entirely. With one user that costs confidentiality of one person's
-# own data against in-cluster callers. With several it would mean forgeable
-# identity, and the gateway secret would be doing the whole job alone.
 ---
 apiVersion: v1
 kind: ConfigMap

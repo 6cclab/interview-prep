@@ -91,19 +91,6 @@ way every other service in the cluster gets its credentials. **The Infisical
 project does not exist yet** — create it, put its UUID in the `projectId` field,
 and add the key before applying.
 
-## The NetworkPolicy does not work
-
-Worth knowing before trusting the manifest: this cluster's CNI is **flannel**,
-which has no NetworkPolicy controller. The `NetworkPolicy` in `k8s.yaml` is
-accepted by the API server and enforces nothing, so anything in the cluster can
-reach the Service directly, bypassing Traefik and Authentik.
-
-With one user that costs confidentiality of your own data against in-cluster
-callers. It matters much more under `VOICE_MULTI_USER`: the gateway secret would
-then be the *only* thing making identity unforgeable, rather than the third of
-three layers the manifest used to claim. Fixing it properly means a
-policy-capable CNI, not a change in this repo.
-
 ## Voice: not finished, and the reason
 
 `voice/speech.ts` spawns `say` or `piper | ffplay` **on the machine the server
