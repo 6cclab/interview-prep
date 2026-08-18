@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AnyVerdict, Drill, Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
+import { endOutcome } from './end-outcome'
 
 export interface VoiceSession {
   mode: Mode
@@ -375,6 +376,30 @@ export function useVoiceSession(): VoiceSession {
     mediaStreamRef.current = null
   }, [])
 
+  /**
+   * Everything that has to be true once a drill is over, minus the status line.
+   *
+   * Two paths reach it and they must not drift: the `ended` SSE event, which is
+   * the normal way out, and a `POST /end` that came back 404 — the session was
+   * already persisted and removed, so no event is coming. Before this, only the
+   * first path existed, and the second reported that there was nothing left to
+   * end while leaving the drill on screen.
+   *
+   * The caller sets `status`, because the two have different things to say.
+   */
+  const finishLocally = useCallback(() => {
+    setInterviewerSpeaking(false)
+    setAwaitingInterviewer(false)
+    setInterimSentences([])
+    eventSourceRef.current?.close()
+    eventSourceRef.current = null
+    setMode('ended')
+    // The countdown stops with the session. `drill` is deliberately kept, so
+    // the Ended screen can still say which problem this was.
+    setDeadlineAt(null)
+    releaseMicStream()
+  }, [releaseMicStream])
+
   // Requests the microphone, watching for the permission prompt hanging
   // indefinitely (the reported symptom): after `MIC_WATCHDOG_MS`, the status
   // line gets replaced with actionable text, but the original promise is
@@ -499,17 +524,9 @@ export function useVoiceSession(): VoiceSession {
     es.addEventListener('ended', (event) => {
       const { endedEarly } = JSON.parse((event as MessageEvent<string>).data) as { endedEarly: string | null }
       setStatus(endedEarly ? `Session ended early: ${endedEarly}` : 'Session ended.')
-      setInterviewerSpeaking(false)
-      setAwaitingInterviewer(false)
-      setInterimSentences([])
-      es.close()
-      setMode('ended')
-      // The countdown stops with the session. `drill` is deliberately kept, so
-      // the Ended screen can still say which problem this was.
-      setDeadlineAt(null)
-      releaseMicStream()
+      finishLocally()
     })
-  }, [releaseMicStream])
+  }, [releaseMicStream, finishLocally])
 
   const start = useCallback((requested?: Drill) => {
     // Defaults to the behavioural mock, so the primary action needs no argument
@@ -682,30 +699,38 @@ export function useVoiceSession(): VoiceSession {
     // returning at once. Say so, or the button reads as having done nothing.
     setStatus('Closing out — the interviewer is giving its verdict…')
     void (async () => {
+      let res: Response | null = null
       try {
-        const res = await fetch(`/api/session/${id}/end`, { method: 'POST' })
-        if (res.ok) return
-        // Anything but 200 means this press did not end anything, and the `ended`
-        // SSE event that flips `mode` is never coming. Both halves of the recovery
-        // matter: releasing the latch so the button works again, and saying what
-        // happened. Before this, the request's status was never read at all — the
-        // call was a bare `void fetch` — so a 404 (the session was already gone,
-        // usually reaped when its stream dropped) left the button silently dead
-        // for the rest of the drill. That is what "End session not working" was.
-        endingRef.current = false
-        const { error } = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { error: string }
-        setStatus(
-          res.status === 404
-            ? 'That session is no longer on the server — it was already saved. Nothing more to end.'
-            : `Could not end the session: ${error}`,
-        )
+        res = await fetch(`/api/session/${id}/end`, { method: 'POST' })
       } catch (error) {
-        endingRef.current = false
-        setStatus('Could not reach the drill server to end the session. Try again.')
         console.error('voice: POST /end failed', error)
       }
+      switch (endOutcome(res === null ? null : res.status)) {
+        case 'awaiting-server':
+          // The `ended` SSE event moves the screen, not this response.
+          return
+        case 'already-saved':
+          // The session is gone from the store, and `endAndPersist` removes it
+          // only after writing the transcript — so the drill is over and saved,
+          // and the event that would have said so is never coming. Reporting
+          // that and staying put is what left "End session" explaining itself
+          // politely forever. End here instead.
+          setStatus('That session was already saved on the server. Ending here.')
+          finishLocally()
+          return
+        case 'failed': {
+          // This press ended nothing, so nothing moves and the button comes back.
+          endingRef.current = false
+          if (res === null) {
+            setStatus('Could not reach the drill server to end the session. Try again.')
+            return
+          }
+          const { error } = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { error: string }
+          setStatus(`Could not end the session: ${error}`)
+        }
+      }
     })()
-  }, [])
+  }, [finishLocally])
 
   const record = useCallback(() => {
     setElapsedSeconds(0)
