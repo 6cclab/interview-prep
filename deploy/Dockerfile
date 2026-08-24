@@ -3,7 +3,8 @@
 # Deployed mode differs from local in what it does NOT need: no mkcert (a proxy
 # terminates TLS), no `open` (there is no desktop), and no server-side vitest —
 # the browser runs the suites. What it still needs is whisper for speech-to-text
-# and ffmpeg to transcode what the browser uploads.
+# and ffmpeg to transcode what the browser uploads, plus piper to synthesise the
+# interviewer's replies for the browser to play.
 #
 # It also now needs Postgres, which is not in this image and should not be: the
 # database holds every person's work and outlives any container. See
@@ -41,11 +42,12 @@ FROM node:24-slim AS runtime
 WORKDIR /app
 RUN corepack enable
 
-# ffmpeg transcodes the browser's webm before whisper sees it, and is also
-# ffplay's package — piper's player locally. Kept even though deployed mode
-# does not speak, because transcode.ts needs it on every turn.
+# ffmpeg transcodes the browser's webm before whisper sees it. `ffplay` comes
+# in the same package and is piper's player *locally*; nothing here plays
+# audio, so it is along for the ride rather than a requirement — see
+# `checkSynthEngine`, which deliberately does not ask for it.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+ && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/node_modules ./node_modules
@@ -71,6 +73,39 @@ COPY --from=whisper /build/bin/whisper-cli /usr/local/bin/whisper-cli
 # cluster mounts it from a PVC, a laptop bind-mounts `models/` from the repo.
 ENV WHISPER_BINARY=/usr/local/bin/whisper-cli \
     WHISPER_MODEL=/opt/whisper/models/ggml-large-v3-turbo.bin
+
+# piper, so the interviewer has a voice that is the same for everyone.
+#
+# The alternative is the browser's own `SpeechSynthesis`, which still works and
+# is still the fallback — but it is a lottery per browser and operating system,
+# and Chrome on Linux frequently has no local English voice at all. A binary
+# release rather than a build: piper is C++ with an onnxruntime dependency, and
+# compiling it here would add more to the build than the whole whisper stage.
+#
+# `TARGETARCH` is Docker's, set by buildx. Named explicitly because this repo is
+# developed on an arm64 Mac and deployed to x86_64, and a build that silently
+# fetched the wrong one would fail as "piper is not on PATH" — which reads as a
+# missing install rather than a wrong architecture.
+ARG PIPER_VERSION=2023.11.14-2
+ARG TARGETARCH
+RUN set -eux; \
+    case "$TARGETARCH" in \
+      amd64) piper_arch=x86_64 ;; \
+      arm64) piper_arch=aarch64 ;; \
+      *) echo "no piper release for TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/piper.tar.gz \
+      "https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}/piper_linux_${piper_arch}.tar.gz"; \
+    tar -xzf /tmp/piper.tar.gz -C /opt; \
+    rm /tmp/piper.tar.gz; \
+    ln -s /opt/piper/piper /usr/local/bin/piper; \
+    piper --help >/dev/null 2>&1 || true
+
+# The voice model is mounted, not baked, for the same reason whisper's is: tens
+# of megabytes on a different release cadence than this image. Unset or missing,
+# the server says so at startup and the browser uses its own voice instead — a
+# worse voice is a better outcome than refusing to serve a drill.
+ENV PIPER_VOICE=/opt/piper/voices/en_US-lessac-medium.onnx
 
 # Set at run time, never here. `DATABASE_URL`, `AUTH_SECRET` and `AUTH_BASE_URL`
 # are all required and none is defaulted — a secret baked into an image is the

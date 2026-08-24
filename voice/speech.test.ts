@@ -8,7 +8,7 @@ import {
   piperSpeaker,
   resolveEngine,
   sayArgs,
-  whisperArgs,
+  whisperArgs, wavHeader
 } from './speech'
 import { transcriptionPrompt } from './vocabulary'
 
@@ -286,5 +286,38 @@ describe('sayArgs and text that looks like a flag', () => {
     const args = sayArgs('-x', { voice: 'Ava', rate: 180, audioDevice: '75' })
     expect(args[args.length - 2]).toBe('--')
     expect(args[args.length - 1]).toBe('-x')
+  })
+})
+
+describe('wavHeader', () => {
+  const header = wavHeader(22050)
+
+  it('is the canonical 44-byte RIFF/WAVE header', () => {
+    expect(header).toHaveLength(44)
+    expect(header.subarray(0, 4).toString('ascii')).toBe('RIFF')
+    expect(header.subarray(8, 12).toString('ascii')).toBe('WAVE')
+    expect(header.subarray(12, 16).toString('ascii')).toBe('fmt ')
+    expect(header.subarray(36, 40).toString('ascii')).toBe('data')
+  })
+
+  it('describes piper’s output: 16-bit mono PCM at the given rate', () => {
+    expect(header.readUInt16LE(20)).toBe(1) // uncompressed PCM
+    expect(header.readUInt16LE(22)).toBe(1) // mono
+    expect(header.readUInt32LE(24)).toBe(22050)
+    expect(header.readUInt16LE(34)).toBe(16) // bits per sample
+    expect(header.readUInt32LE(28)).toBe(44100) // byte rate = 22050 * 1 * 2
+    expect(header.readUInt16LE(32)).toBe(2) // block align
+  })
+
+  // The sentence is streamed as piper produces it, so neither length is known
+  // when the header goes out. `0xffffffff` is what ffmpeg writes when muxing
+  // WAV to a pipe, and decoders read it as "until the stream ends".
+  it('leaves both size fields unknown, because the audio is still being made', () => {
+    expect(header.readUInt32LE(4)).toBe(0xffffffff)
+    expect(header.readUInt32LE(40)).toBe(0xffffffff)
+  })
+
+  it('defaults to piper’s own sample rate', () => {
+    expect(wavHeader().readUInt32LE(24)).toBe(22050)
   })
 })

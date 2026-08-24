@@ -62,6 +62,10 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       VOICE_NO_OPEN: '1'
+      # The piper voice model, mounted below. Unset it to fall back to the
+      # browser's own `SpeechSynthesis` — worse and inconsistent, but it works
+      # without a 60MB download.
+      PIPER_VOICE: ${PIPER_VOICE:-/opt/piper/voices/en_US-lessac-medium.onnx}
     ports:
       - '${PORT:-4173}:4173'
     volumes:
@@ -69,6 +73,13 @@ services:
       # to a couple of gigabytes and changes on a different cadence than the
       # image. Read-only, because nothing should ever write to it.
       - ../models:/opt/whisper/models:ro
+      # The piper voice, mounted for the same reason and read-only for the same
+      # reason. Get it with:
+      #   mkdir -p models/piper && cd models/piper && curl -fsSL -O \
+      #     https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx -O \
+      #     https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
+      # Absent, the server says so at startup and the browser uses its own voice.
+      - ../models/piper:/opt/piper/voices:ro
     restart: unless-stopped
 
 volumes:

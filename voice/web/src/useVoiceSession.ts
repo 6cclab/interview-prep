@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createBrowserVoice, platformSpeechEngine, type BrowserVoice } from './browserVoice'
+import { createStreamedVoice, platformClip, type StreamedVoice } from './streamedVoice'
 import type { AnyVerdict, Drill, Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
 import { endOutcome } from './end-outcome'
 
@@ -390,11 +391,17 @@ export function useVoiceSession(): VoiceSession {
   // it once per session and must not be torn down and rebuilt to see a change
   // — rebuilding the stream to change a voice would drop the session.
   const voiceRef = useRef<BrowserVoice>(createBrowserVoice(platformSpeechEngine()))
-  // Defaults to true — i.e. "assume the server is speaking" — so that in the
-  // window before `GET /api/devices/output` answers, the failure mode is a
+  // Server-synthesised audio, played here. Preferred over `voiceRef` when the
+  // server offers it, because it is the same voice for everyone.
+  const streamedRef = useRef<StreamedVoice>(createStreamedVoice(platformClip))
+  // Which of the three arrangements is producing the voice — see the `speech`
+  // field on `GET /api/devices/output`.
+  //
+  // Defaults to `'server'`, i.e. "assume something else is already speaking",
+  // so that in the window before that request answers the failure mode is a
   // sentence rendered silently rather than two voices at once. Local mode is
-  // also the case where the wrong guess is heard immediately.
-  const serverSpeaksRef = useRef(true)
+  // also the case where the wrong guess would be heard immediately.
+  const speechRef = useRef<'server' | 'stream' | 'browser'>('server')
 
   const clearElapsedTimer = useCallback(() => {
     if (elapsedTimerRef.current !== null) {
@@ -436,6 +443,7 @@ export function useVoiceSession(): VoiceSession {
     // server already saved the session — is precisely the case where no
     // `ended` event is ever coming.
     voiceRef.current.cancel()
+    streamedRef.current.cancel()
     eventSourceRef.current?.close()
     eventSourceRef.current = null
     setMode('ended')
@@ -546,7 +554,7 @@ export function useVoiceSession(): VoiceSession {
     es.addEventListener('open', clearFailures)
 
     es.addEventListener('sentence', (event) => {
-      const { text } = JSON.parse((event as MessageEvent<string>).data) as { text: string }
+      const { text, seq } = JSON.parse((event as MessageEvent<string>).data) as { text: string; seq?: number }
       setStatus('Interviewer speaking…')
       setInterviewerSpeaking(true)
       // The wait is over the moment the first sentence lands.
@@ -564,7 +572,11 @@ export function useVoiceSession(): VoiceSession {
       // speaks for itself. `serverSpeaks` comes from the server rather than
       // being inferred here, because guessing wrong gives either two
       // overlapping voices or silence, and neither announces itself.
-      if (!serverSpeaksRef.current) voiceRef.current.speak(text)
+      if (speechRef.current === 'stream' && seq !== undefined && sessionIdRef.current) {
+        streamedRef.current.speak(`/api/session/${sessionIdRef.current}/say/${seq}`)
+      } else if (speechRef.current === 'browser') {
+        voiceRef.current.speak(text)
+      }
     })
 
     // Renders only the `speaker`/`text`/`at` fields carried by the `entry`
@@ -801,6 +813,7 @@ export function useVoiceSession(): VoiceSession {
     // leaving the queued sentences playing puts the interviewer's voice into
     // the microphone that is about to be opened.
     voiceRef.current.cancel()
+    streamedRef.current.cancel()
 
     if (mediaDevicesUnsupported()) {
       setStatus(
@@ -1089,15 +1102,15 @@ export function useVoiceSession(): VoiceSession {
       try {
         const res = await fetch('/api/devices/output')
         if (!res.ok) return
-        const { devices, serverSpeaks } = (await res.json()) as {
+        const { devices, speech } = (await res.json()) as {
           devices: OutputDevice[]
-          serverSpeaks?: boolean
+          speech?: 'server' | 'stream' | 'browser'
         }
         setOutputDevices(devices)
-        // `?? true` covers an older server that does not send the field:
-        // every server that predates it speaks, so the old behaviour is the
+        // `?? 'server'` covers a server that does not send the field: every
+        // one that predates it speaks for itself, so the old behaviour is the
         // right default rather than a guess.
-        serverSpeaksRef.current = serverSpeaks ?? true
+        speechRef.current = speech ?? 'server'
       } catch {
         // No speaker list is not fatal — the server still speaks through
         // whatever the system default output is, and `serverSpeaksRef` stays
@@ -1111,9 +1124,11 @@ export function useVoiceSession(): VoiceSession {
   // the drill leaves the interviewer talking to an empty screen.
   useEffect(() => {
     const voice = voiceRef.current
+    const streamed = streamedRef.current
     return () => {
       voice.cancel()
       voice.dispose()
+      streamed.cancel()
     }
   }, [])
 
