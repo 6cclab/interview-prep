@@ -2005,6 +2005,19 @@ async function main(): Promise<void> {
   let work: VoiceServerDeps['work']
   if (mode === 'deployed') {
     try {
+      // The schema first, before anything queries. Idempotent — every statement
+      // in `schema.sql` is `if not exists` or `create or replace` — so this runs
+      // on every boot and does nothing on all but the first.
+      //
+      // Applying it here rather than leaving it to `pnpm ingest` is not the same
+      // decision as ingestion-on-boot, which stays explicit. A schema is what
+      // makes the database answerable at all; without it a fresh deployment
+      // crash-loops on `role "app_privileged" does not exist`, which is a true
+      // sentence that tells nobody what to do. Better Auth's own migrator is
+      // already called at startup a few lines below, and it would be strange for
+      // half the schema to arrive that way and half not.
+      const { applySchema } = await import('./db/pool')
+      await applySchema()
       const { dbProblems, loadProblemCache } = await import('./problems-db')
       const count = await loadProblemCache()
       installProblemSource(dbProblems)
@@ -2034,12 +2047,27 @@ async function main(): Promise<void> {
   }
   // Fail here, not on the interviewer's first sentence — several minutes into
   // a drill, after a model turn has already been paid for.
-  let speechBanner: string
-  try {
-    speechBanner = checkSpeechEngine()
-  } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err))
-    process.exit(1)
+  //
+  // Deployed mode skips the check because it does not speak, and the reason is
+  // not that TTS is hard to install. Server-side speech exists locally for a
+  // specific reason — `SpeechSynthesis` exposes no output-device API, so the
+  // browser cannot route audio to a chosen speaker — and that reasoning collapses
+  // the moment the server is somewhere else: the sentences would come out of a
+  // machine in a datacentre with nobody in front of it. Whisper is still needed,
+  // because the browser uploads audio for transcription; only the outbound half
+  // goes away.
+  //
+  // The consequence, said plainly because it is a real limitation: on a deployed
+  // instance the interviewer is read rather than heard. Giving the browser its
+  // own voice is the follow-up, and it is a client change rather than this one.
+  let speechBanner = 'Speech: transcription only — a deployed instance does not speak'
+  if (mode === 'local') {
+    try {
+      speechBanner = checkSpeechEngine()
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err))
+      process.exit(1)
+    }
   }
   const tls = readTlsMaterial(root)
   const server = createVoiceServer({
@@ -2047,14 +2075,26 @@ async function main(): Promise<void> {
     createTransport: (track) => streamForBackend(track, (line) => console.log(`${track}: ${line}`)),
     transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
     tls,
-    speaker: configuredSpeaker(root),
+    // Absent in deployed mode — see the speech note in `main` above.
+    speaker: mode === 'local' ? configuredSpeaker(root) : undefined,
     vague: VOICE_VAGUE,
     auth,
     work,
   })
-  // Still `127.0.0.1` only — TLS changes the scheme, never the reach. A live
-  // microphone and a private story bank have no business on the network.
-  server.listen(port, '127.0.0.1', () => {
+  // Local mode is still `127.0.0.1` only — TLS changes the scheme, never the
+  // reach. A live microphone and a private story bank have no business on the
+  // network, and that has not changed.
+  //
+  // Deployed mode has to bind every interface, because inside a container
+  // `127.0.0.1` is the container's own loopback and nothing outside it can
+  // connect — a published port maps to an address the process never listened on,
+  // and the failure is a connection refused with a perfectly healthy-looking
+  // server behind it. The isolation there is the container boundary and whatever
+  // terminates TLS in front of it, not the bind address; and unlike local mode
+  // there is now a 401 on every `/api/` route, so reachability is not the same
+  // thing as access.
+  const host = mode === 'local' ? '127.0.0.1' : '0.0.0.0'
+  server.listen(port, host, () => {
     const scheme = tls ? 'https' : 'http'
     // `127.0.0.1`, not `localhost`: the listen above binds IPv4 only, and
     // browsers resolve `localhost` to `::1` first — so a `localhost` URL

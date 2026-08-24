@@ -9,3 +9,7 @@ node_modules/
 # worktree here is a second, untracked copy of the whole repo inside the repo,
 # one `git add -A` away from being committed into itself.
 /.claude/worktrees/
+
+# Real credentials for a deployed instance. The example alongside it is the
+# thing that belongs in git.
+deploy/.env
