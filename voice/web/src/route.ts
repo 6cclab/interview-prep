@@ -23,7 +23,13 @@ export type Route =
    */
   | { view: 'mock'; competency?: string }
   | { view: 'design'; problem: string }
-  | { view: 'coding'; problem: string }
+  /**
+   * The coding drill. `editor` is where the answer is written — see
+   * `Drill['editor']` — and is a start-time choice made on the picker, not
+   * part of the URL: reopening a live session gets its editor back from the
+   * server's session state, not from a reparsed hash.
+   */
+  | { view: 'coding'; problem: string; editor?: 'browser' | 'own' }
   /**
    * Pairing on a coding problem. Reachable from the landing page only — a link
    * from the drill screen is the leak the hint ladder exists to prevent.
@@ -48,6 +54,12 @@ export function routeDrill(route: Route): Drill | null {
     // competency as the interviewer's choice, and a key present with no value is
     // one more shape for it to have to tolerate.
     return route.competency ? { track: 'mock', competency: route.competency } : { track: 'mock' }
+  }
+  if (route.view === 'coding') {
+    // Omitted rather than sent as undefined, same reason as `competency`
+    // above: the server treats an absent `editor` as the candidate's own
+    // editor, and a key present with no value is one more shape to tolerate.
+    return route.editor ? { track: 'coding', problem: route.problem, editor: route.editor } : { track: 'coding', problem: route.problem }
   }
   return { track: route.view, problem: route.problem }
 }

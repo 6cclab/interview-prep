@@ -616,7 +616,7 @@ export function useVoiceSession(): VoiceSession {
       }
       const started = (await res.json()) as { id: string } & Drill
       sessionIdRef.current = started.id
-      setDrill({ track: started.track, problem: started.problem, budgetMs: started.budgetMs })
+      setDrill({ track: started.track, problem: started.problem, budgetMs: started.budgetMs, editor: started.editor })
       setDeadlineAt(started.budgetMs === undefined ? null : Date.now() + started.budgetMs)
       setEntries([])
       setInterviewerSpeaking(false)
@@ -675,7 +675,7 @@ export function useVoiceSession(): VoiceSession {
         hintRung?: number
       } & Drill
       sessionIdRef.current = stuck.id
-      setDrill({ track: state.track, problem: state.problem, budgetMs: state.budgetMs })
+      setDrill({ track: state.track, problem: state.problem, budgetMs: state.budgetMs, editor: state.editor })
       // Resumed from the session's real start, not from now — reopening a timed
       // drill twenty minutes in must show twenty-five minutes left, not a fresh
       // forty-five. That is the whole difference between resuming and restarting.
