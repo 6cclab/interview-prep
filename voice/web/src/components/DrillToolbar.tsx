@@ -1,3 +1,4 @@
+import { Button } from 'brutalkit/button'
 /**
  * The toolbar under the editor: run the suite, spend a rung, read the cost.
  *
@@ -61,21 +62,26 @@ export function DrillToolbar({
 
   return (
     <div className="drill-toolbar">
-      <button type="button" className="drill-btn" onClick={onRun} disabled={!onRun || running}>
+      {/* `outline`, not `brand`: the design is explicit that nothing in the
+          toolbar competes with the dock's primary action. The mono/uppercase
+          treatment comes from `.drill-btn`, which is now a *modifier* on the
+          design system's button rather than a replacement for it. */}
+      <Button type="button" variant="outline" className="drill-btn" onClick={onRun} disabled={!onRun || running}>
         {running ? 'Running…' : runLabel}
-      </button>
+      </Button>
 
       {rationed && (
         <>
           <span className="drill-toolbar__divider" aria-hidden="true" />
-          <button
+          <Button
             type="button"
+            variant="ghost"
             className="drill-btn drill-btn--quiet"
             onClick={onHint}
             disabled={!onHint || hintPending || noRungsLeft}
           >
             {hintPending ? 'Asking…' : hintLabel(hintRung, hintsExhausted)}
-          </button>
+          </Button>
           <span className="drill-toolbar__spacer" />
           <span className="drill-ladder" aria-hidden="true">
             {Array.from({ length: MAX_RUNG }, (_, i) => (

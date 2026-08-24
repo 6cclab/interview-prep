@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button } from 'brutalkit/button'
 import type { CostMeasurement, DebugVerdict, DrillVerdict } from '../types'
 import { liveIndex, type StreamEntry } from '../stream'
 import { Markdown } from './Markdown'
@@ -369,10 +370,10 @@ export function SessionStream({
       </div>
 
       {!pinned && (
-        <button type="button" className="drill-back-to-live" onClick={backToLive}>
+        <Button type="button" variant="outline" size="sm" className="drill-back-to-live" onClick={backToLive}>
           <span />
           Back to live ↓
-        </button>
+        </Button>
       )}
     </div>
   )

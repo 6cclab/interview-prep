@@ -1004,22 +1004,21 @@ ol.md__list {
    the second door to the history screen, and someone who lands here already
    knowing they want to read rather than drill should not have to scroll past
    six tracks to find it. */
+/* `variant="link"` gives the affordance and the focus ring; this makes it the
+   mono metadata the design asks for rather than a sentence of UI prose. */
 .home__record {
   font-family: var(--font-mono);
   font-size: 12.5px;
   letter-spacing: 0.04em;
   color: var(--muted-foreground);
-  background: none;
-  border: none;
+  height: auto;
   padding: 0;
-  cursor: pointer;
   font-variant-numeric: tabular-nums;
   text-underline-offset: 3px;
 }
 
 .home__record:hover {
   color: var(--foreground);
-  text-decoration: underline;
 }
 
 /* The table. One 1px border around the whole block and 1px between rows, so six
@@ -1185,29 +1184,6 @@ ol.md__list {
   font-size: 13px;
   color: var(--muted-foreground);
   max-width: 68ch;
-}
-
-.home__editor-choice {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  border: none;
-}
-
-.home__editor-choice legend {
-  font-size: 13px;
-  font-weight: 600;
-  padding: 0 0 0.25rem;
-}
-
-.home__editor-choice label {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  font-size: 13px;
-  color: var(--muted-foreground);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1409,24 +1385,19 @@ ol.md__list {
 
 /* The expander. `+`/`−` rather than a chevron: it is the only control in the
    row and it must read as "there is more text here", not as navigation. */
+/* `size="icon-xs"` supplies the box, the centring and the focus ring; this only
+   sets the glyph, which has to be mono to sit on the row's baseline grid. */
 .history__toggle {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--muted-foreground);
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1;
-  cursor: pointer;
-  padding: 0;
+  color: var(--muted-foreground);
 }
 
-.history__toggle:hover {
+.history__toggle:hover:not(:disabled) {
   color: var(--foreground);
   border-color: var(--foreground);
+  transform: none;
 }
 
 /*
@@ -1580,15 +1551,7 @@ ol.md__list {
   background: color-mix(in oklab, var(--destructive) 13%, var(--background));
   border-color: var(--destructive); color: var(--foreground);
 }
-/* `line-height: 1` and a flat height so the control cannot outgrow the rail it
-   sits in — see the fixed height above. */
-.drill-rail button {
-  font: inherit; letter-spacing: inherit; text-transform: inherit;
-  line-height: 1; height: 21px;
-  background: transparent; color: inherit;
-  border: 1px solid currentColor; padding: 0 8px; cursor: pointer;
-  flex: none; white-space: nowrap;
-}
+
 
 /* --- body: problem | editor + stream --------------------------- */
 /* Scoped, and `flex-direction` stated rather than inherited.
@@ -1657,16 +1620,52 @@ ol.md__list {
   flex: none; display: flex; align-items: center; gap: 14px;
   padding: var(--gap-3) 18px; border-top: 1px solid var(--border);
 }
+/*
+ * The toolbar buttons are Brutalkit `Button`s; this is the drill screen's
+ * *typographic* modifier on top of them, not a reimplementation.
+ *
+ * Only what the design actually specifies differently is set here — the mono
+ * uppercase label, the 2px foreground border on the primary action, and the
+ * dashed disabled state. Everything else (focus ring, disabled semantics,
+ * hover, sizing) comes from the component, which is the point: those are the
+ * parts that were being hand-maintained and drifting.
+ */
 .drill-btn {
   font-family: var(--drill-mono); font-size: 11px; letter-spacing: 0.1em;
-  text-transform: uppercase; padding: 9px 15px; cursor: pointer;
-  background: var(--card); color: var(--foreground);
-  border: 2px solid var(--foreground);
+  text-transform: uppercase; height: auto; padding: 9px 15px;
+  border: 2px solid var(--foreground); background: var(--card);
 }
-.drill-btn--quiet { background: transparent; color: var(--muted-foreground); border: 1px solid var(--border); }
-.drill-btn:disabled { border-style: dashed; opacity: 0.5; cursor: default; }
-/* no hover lift on tool buttons — nothing moves during a drill */
-.drill-btn:hover { background: var(--accent); }
+.drill-btn--quiet {
+  background: transparent; color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+/* Dashed rather than merely faded: a rationed control that has run out is a
+   different state from one that is momentarily busy, and opacity alone reads
+   as the second. */
+.drill-btn:disabled { border-style: dashed; }
+/* No hover lift on any drill-screen button — nothing moves during a timed
+   rehearsal. Brutalkit puts lift on filled actions, so it is turned off here
+   rather than avoided by not using the component. */
+.drill-btn:hover:not(:disabled) { background: var(--accent); transform: none; }
+
+/*
+ * The rail's buttons inherit the rail's colour rather than carrying their own.
+ *
+ * `currentColor` is the whole trick: the rail recolours to warning or
+ * destructive depending on which banner it is showing, and the buttons have to
+ * follow it without either state hard-coding a second copy of that colour.
+ */
+.drill-rail-btn {
+  font: inherit; letter-spacing: inherit; text-transform: inherit;
+  line-height: 1; height: 21px; padding: 0 8px;
+  background: transparent; color: inherit;
+  border: 1px solid currentColor;
+  flex: none; white-space: nowrap;
+}
+.drill-rail-btn:hover:not(:disabled) {
+  background: color-mix(in oklab, currentColor 12%, transparent);
+  transform: none;
+}
 
 .drill-ladder { display: flex; gap: 3px; }
 /* An unspent rung must read as *quieter* than a spent one in both themes.

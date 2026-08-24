@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from 'brutalkit/button'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from 'brutalkit/select'
+import { RadioGroup, RadioGroupItem } from 'brutalkit/radio-group'
 import type { Route } from '../route'
 import type { HistoryPayload, ProblemTrack } from '../types'
 import { easiest, groupByTier } from '../tiers'
@@ -318,6 +319,63 @@ function TrackRow({ name, meta, blurb, list, offline, buttonLabel, primary, onSt
   )
 }
 
+/**
+ * Where the coding drill's answer gets written.
+ *
+ * A `RadioGroup` rather than two `Checkbox`es, though it lives in the same
+ * design-system family: the two modes are mutually exclusive, and a pair of
+ * checkboxes can be both-on or both-off — neither of which is a drill anyone can
+ * start. Radix enforces the exclusivity and the roving-focus keyboard behaviour
+ * that a hand-rolled pair of inputs does not have.
+ *
+ * Both options are named with their trade-off rather than just their location,
+ * because the choice is not a preference — the modes rehearse different things.
+ * See AGENTS.md, "Two editing modes".
+ */
+const EDITOR_OPTIONS = [
+  {
+    value: 'browser',
+    id: 'editor-browser',
+    label: 'Browser editor — an interview screen: highlighting and line numbers, no type checking',
+  },
+  { value: 'own', id: 'editor-own', label: 'My own editor — edit solution.ts yourself, with real types' },
+] as const
+
+function EditorChoice({ value, onChange }: { value: 'browser' | 'own'; onChange(next: 'browser' | 'own'): void }) {
+  return (
+    <fieldset className="mt-0.5 min-w-0 border-0 p-0">
+      <legend className="pb-1.5 text-[13px] font-semibold">Where are you writing this?</legend>
+      <RadioGroup value={value} onValueChange={(next) => onChange(next as 'browser' | 'own')}>
+        {EDITOR_OPTIONS.map((option) => (
+          // `htmlFor`/`id` rather than wrapping the control in the label: Radix
+          // renders the item as a button, and a button inside a label swallows
+          // the click that is meant to select it.
+          //
+          // `items-start` with a 3px nudge rather than `items-baseline` — the
+          // item is a 16px button with no text in it, so it has no baseline of
+          // its own and `baseline` dropped it to the bottom of a two-line label.
+          <div key={option.value} className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-[9px]">
+            <RadioGroupItem value={option.value} id={option.id} className="mt-[3px]" />
+            {/* Deliberately not Brutalkit's `Label`, which is
+                `text-xs uppercase tracking-wide` — it is built for a short field
+                name like "EMAIL", and it rendered this sentence of prose as
+                shouting uppercase. The control comes from the design system; the
+                sentence is a sentence. */}
+            <label
+              htmlFor={option.id}
+              className={`cursor-pointer text-[13px] leading-[19px] text-pretty ${
+                value === option.value ? 'text-foreground' : 'text-muted-foreground'
+              }`}
+            >
+              {option.label}
+            </label>
+          </div>
+        ))}
+      </RadioGroup>
+    </fieldset>
+  )
+}
+
 export function Home({ onChoose }: Props) {
   const design = useProblems('design')
   const coding = useProblems('coding')
@@ -346,10 +404,10 @@ export function Home({ onChoose }: Props) {
         <div className="home__head">
           <h1 className="home__title">What are we drilling?</h1>
           {record !== null && (
-            <button type="button" className="home__record" onClick={() => onChoose({ view: 'history' })}>
+            <Button variant="link" className="home__record" onClick={() => onChoose({ view: 'history' })}>
               {record.cold} of {record.attempts} solved cold
               {record.lastDrill !== null && ` · last drill ${record.lastDrill}`}
-            </button>
+            </Button>
           )}
         </div>
 
@@ -397,36 +455,7 @@ export function Home({ onChoose }: Props) {
             buttonLabel="Coding drill"
             primary
             onStart={(problem) => onChoose({ view: 'coding', problem, editor })}
-            extra={
-              /*
-                Both options are named with their trade-off rather than just their
-                location, because the choice is not a preference — the modes test
-                different things. See AGENTS.md, "Two editing modes".
-              */
-              <fieldset className="home__editor-choice">
-                <legend>Where are you writing this?</legend>
-                <label>
-                  <input
-                    type="radio"
-                    name="editor"
-                    value="browser"
-                    checked={editor === 'browser'}
-                    onChange={() => setEditor('browser')}
-                  />
-                  Browser editor — an interview screen: highlighting and line numbers, no type checking
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="editor"
-                    value="own"
-                    checked={editor === 'own'}
-                    onChange={() => setEditor('own')}
-                  />
-                  My own editor — edit solution.ts yourself, with real types
-                </label>
-              </fieldset>
-            }
+            extra={<EditorChoice value={editor} onChange={setEditor} />}
           />
 
           <TrackRow
