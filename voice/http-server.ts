@@ -78,6 +78,20 @@ export interface VoiceServerDeps {
    */
   createTransport(track: Track): StreamFn
   transcriber: Transcriber
+  /**
+   * Identity, in deployed mode only.
+   *
+   * Absent in a local run and in every test that does not care, which is nearly
+   * all of them — and that absence is the whole local story: no cookie, no
+   * database, no 401, nothing to set up. `main()` builds this under
+   * `VOICE_MODE=deployed` and passes it in, so `better-auth` is never even
+   * imported on the local path.
+   */
+  auth?: {
+    /** Serves `/api/auth/*`. Mounted above everything, see `handleRequest`. */
+    handle(req: IncomingMessage, res: ServerResponse): Promise<void>
+    resolveUserId(req: IncomingMessage): Promise<string | null>
+  }
   store?: SessionStore
   /** Milliseconds since the epoch, injectable so tests don't depend on wall time. */
   now?(): number
@@ -709,6 +723,38 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+
+    // ------------------------------------------------------------------
+    // Identity, first. Not for tidiness — for correctness.
+    //
+    // `readJsonBody` and the raw `for await (const chunk of req)` loop in
+    // `/turn` consume the request stream, and once it is consumed Better Auth
+    // cannot read it: the sign-in call would hang pending with no error
+    // anywhere. Mounting `/api/auth/*` above everything, including
+    // `serveStatic`, makes that safe by construction rather than by every
+    // future route remembering not to read a body too early.
+    // ------------------------------------------------------------------
+    if (deps.auth && url.pathname.startsWith('/api/auth/')) {
+      await deps.auth.handle(req, res)
+      return
+    }
+
+    // Resolved once, here, and read below as a closed-over variable. No route
+    // resolves it for itself, so no route can forget to. This is the substitute
+    // for middleware, and it matches how `onRequest` already works in this file:
+    // a named function called at one fixed point rather than a chain.
+    const userId = deps.auth ? await deps.auth.resolveUserId(req) : null
+
+    // Fail closed under `/api/`, not merely on the session routes. `/api/history`
+    // returning the wrong person's drill log is the same class of bug as a
+    // session leak and a much quieter one. Static assets stay open so the shell
+    // can load and sign in. In local mode `deps.auth` is absent, `userId` is
+    // always null, and this never fires.
+    if (deps.auth && userId === null && url.pathname.startsWith('/api/')) {
+      sendJson(res, 401, { error: 'unauthenticated' })
+      return
+    }
+    void userId
 
     if (req.method === 'GET' && serveStatic(distDir, url.pathname, res)) return
 
@@ -1895,14 +1941,26 @@ async function main(): Promise<void> {
   // where a README lives. Loading the cache here rather than lazily means an
   // unreachable database is a startup failure a deploy notices, not one failed
   // request at three in the morning.
+  let auth: VoiceServerDeps['auth']
   if (mode === 'deployed') {
     try {
       const { dbProblems, loadProblemCache } = await import('./problems-db')
       const count = await loadProblemCache()
       installProblemSource(dbProblems)
       console.log(`  Loaded ${count} coding problems from Postgres.`)
+      // Same dynamic-import reasoning: `better-auth` and its Kysely adapter are
+      // never resolved on the local path. Built here so a missing AUTH_SECRET
+      // stops the process with a sentence, rather than 401ing every request.
+      const { applyAuthSchema, authHandler, resolveUserId } = await import('./db/auth')
+      await applyAuthSchema()
+      const handler = authHandler()
+      auth = {
+        handle: async (req, res) => handler(req, res),
+        resolveUserId: (req) => resolveUserId(req),
+      }
+      console.log('  Auth: Better Auth, anonymous sessions enabled.')
     } catch (err) {
-      console.error('Could not load problems from Postgres:', err instanceof Error ? err.message : String(err))
+      console.error('Could not start in deployed mode:', err instanceof Error ? err.message : String(err))
       process.exit(1)
     }
   }
@@ -1923,6 +1981,7 @@ async function main(): Promise<void> {
     tls,
     speaker: configuredSpeaker(root),
     vague: VOICE_VAGUE,
+    auth,
   })
   // Still `127.0.0.1` only — TLS changes the scheme, never the reach. A live
   // microphone and a private story bank have no business on the network.
