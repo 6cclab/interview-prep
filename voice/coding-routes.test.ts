@@ -3,7 +3,7 @@ import type { Server } from 'node:http'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createVoiceServer, type VoiceServerDeps } from './http-server'
+import { createVoiceServer, parseDrill, type VoiceServerDeps } from './http-server'
 import { createSessionStore } from './session-store'
 import { appendCoached } from './coached'
 import { readSSE } from './test-helpers/sse'
@@ -145,6 +145,48 @@ describe('GET /api/problems?track=coding', () => {
     expect(body.difficulties['word-dictionary']).toBe('unrated')
     // Every listed problem carries a tier, so the client never has to guess.
     expect(Object.keys(body.difficulties).sort()).toEqual([...body.problems].sort())
+  })
+
+  /**
+   * Every track the session route accepts must also be listable.
+   *
+   * These are two halves of one contract and they were allowed to disagree:
+   * `parseDrill` accepted `assisted` while `/api/problems` did not, so the
+   * picker 400'd on the one track it could not list and the round was
+   * unreachable from the UI for as long as it had existed. Nothing failed
+   * loudly — the client rendered "this track is unavailable" and it read like a
+   * transient server problem rather than a track that had never worked.
+   *
+   * Driven off `parseDrill` itself rather than a second hand-written list, so
+   * adding a seventh track fails here until the picker learns about it.
+   */
+  it.each(['mock', 'design', 'coding', 'coach', 'debug', 'assisted'])(
+    'lists problems for %s, the same tracks a session accepts',
+    async (track) => {
+      expect(() => parseDrill({ track, problem: SLUG })).not.toThrow()
+      const { port } = await listen(baseDeps())
+      const res = await fetch(`http://127.0.0.1:${port}/api/problems?track=${track}`)
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { problems: string[] }
+      expect(Array.isArray(body.problems)).toBe(true)
+    }
+  )
+
+  /**
+   * The assisted round runs the coding problems with an agent — `context.ts`
+   * resolves it from `problems/<pattern>/<problem>/README.md` exactly like a
+   * coding drill. Serving any other list would offer slugs the session could
+   * not then resolve, which is a 400 one click later instead of zero.
+   */
+  it('serves the coding problem set to the assisted track', async () => {
+    const { port } = await listen(baseDeps())
+    const assisted = (await (await fetch(`http://127.0.0.1:${port}/api/problems?track=assisted`)).json()) as {
+      problems: string[]
+    }
+    const coding = (await (await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)).json()) as {
+      problems: string[]
+    }
+    expect(assisted.problems).toEqual(coding.problems)
   })
 
   // The design track has no difficulty field, and its payload must not grow one
