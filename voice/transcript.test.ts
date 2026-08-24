@@ -286,6 +286,20 @@ describe('formatSession records what conducted the session', () => {
   })
 })
 
+describe('formatSession records the editing mode', () => {
+  it('records the editing mode in the header when there was one', () => {
+    const out = formatSession([], new Date('2026-08-11T12:00:00Z'), 'cli / claude-sonnet-5', 'browser')
+    expect(out).toContain('Editor: browser')
+  })
+
+  // A transcript read days later has to say how it was produced; a design drill
+  // has no editing mode and must not grow an empty line claiming it does.
+  it('omits the line entirely when no mode applies', () => {
+    const out = formatSession([], new Date('2026-08-11T12:00:00Z'), 'cli / claude-sonnet-5')
+    expect(out).not.toContain('Editor:')
+  })
+})
+
 describe('appendDrillLog — the date is local, not UTC', () => {
   /**
    * Regression test for a real defect. `appendDrillLog` dated rows with
