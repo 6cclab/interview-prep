@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createBrowserVoice, platformSpeechEngine, type BrowserVoice } from './browserVoice'
 import type { AnyVerdict, Drill, Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
 import { endOutcome } from './end-outcome'
 
@@ -180,16 +181,22 @@ export interface VoiceSession {
    * change actually takes effect rather than waiting for the next `start()`.
    */
   selectInput(deviceId: string): void
-  /** Speakers, from the server's `GET /api/devices/output` (see `voice/devices.ts`). */
+  /**
+   * Speakers the *server* can see, from `GET /api/devices/output` (see
+   * `voice/devices.ts`). Empty when the server is not the thing speaking —
+   * deployed, the browser speaks for itself and there is no server-side
+   * output to choose between.
+   */
   outputDevices: OutputDevice[]
   /** The chosen speaker's id, or `null` for "system default". */
   selectedOutputId: string | null
   /**
-   * Selects a speaker the *server* should speak through — the browser has no
-   * API to route `SpeechSynthesis` to a chosen output device, so speech
-   * happens server-side (see `voice/http-server.ts`'s `deps.speaker`) and
+   * Selects a speaker the *server* should speak through. The browser has no
+   * API to route `SpeechSynthesis` to a chosen output device, so where the
+   * server speaks (locally — see `voice/http-server.ts`'s `deps.speaker`)
    * this only needs to persist the choice (`POST /api/devices/config`,
-   * `output` field); no local audio pipeline to restart.
+   * `output` field); no local audio pipeline to restart. Where the browser
+   * speaks instead, `outputDevices` is empty and there is nothing to select.
    */
   selectOutput(id: string): void
 }
@@ -378,6 +385,16 @@ export function useVoiceSession(): VoiceSession {
   // effect) so `selectInput`'s own immediate re-acquisition below never races
   // a stale read of its own selection.
   const selectedInputIdRef = useRef<string | null>(null)
+  // The browser's own voice, used only when the server is not speaking. A ref
+  // rather than state because the SSE listeners in `connectStream` close over
+  // it once per session and must not be torn down and rebuilt to see a change
+  // — rebuilding the stream to change a voice would drop the session.
+  const voiceRef = useRef<BrowserVoice>(createBrowserVoice(platformSpeechEngine()))
+  // Defaults to true — i.e. "assume the server is speaking" — so that in the
+  // window before `GET /api/devices/output` answers, the failure mode is a
+  // sentence rendered silently rather than two voices at once. Local mode is
+  // also the case where the wrong guess is heard immediately.
+  const serverSpeaksRef = useRef(true)
 
   const clearElapsedTimer = useCallback(() => {
     if (elapsedTimerRef.current !== null) {
@@ -412,6 +429,13 @@ export function useVoiceSession(): VoiceSession {
     setInterviewerSpeaking(false)
     setAwaitingInterviewer(false)
     setInterimSentences([])
+    // The queue can be several sentences deep, and without this the
+    // interviewer keeps talking over the Ended screen. It belongs here rather
+    // than on the `ended` event for the reason this function exists: ending
+    // has two exits, and the other one — a 404 from POST /end, meaning the
+    // server already saved the session — is precisely the case where no
+    // `ended` event is ever coming.
+    voiceRef.current.cancel()
     eventSourceRef.current?.close()
     eventSourceRef.current = null
     setMode('ended')
@@ -532,11 +556,15 @@ export function useVoiceSession(): VoiceSession {
       // `entries`: this text originates from the same `sentence` payload the
       // server already sends, nothing new is exposed.
       setInterimSentences((prev) => [...prev, text])
-      // Speech itself happens server-side now (`voice/http-server.ts`'s
-      // `deps.speaker`, via `saySpeaker`) — `SpeechSynthesis` has no API to
-      // route audio to a chosen output device, but the server is the same
-      // machine, so it speaks instead. The browser only renders the text;
-      // speaking it here too would double up two overlapping voices.
+      // Exactly one machine speaks each sentence. Locally it is the server
+      // (`voice/http-server.ts`'s `deps.speaker`, via `saySpeaker`), because
+      // `SpeechSynthesis` has no API to route audio to a chosen output device
+      // and the server is the same machine. Deployed there is no server-side
+      // speaker — it would be talking to an empty datacentre — so the browser
+      // speaks for itself. `serverSpeaks` comes from the server rather than
+      // being inferred here, because guessing wrong gives either two
+      // overlapping voices or silence, and neither announces itself.
+      if (!serverSpeaksRef.current) voiceRef.current.speak(text)
     })
 
     // Renders only the `speaker`/`text`/`at` fields carried by the `entry`
@@ -769,6 +797,10 @@ export function useVoiceSession(): VoiceSession {
 
   const record = useCallback(() => {
     setElapsedSeconds(0)
+    // Barge-in. The candidate pressing record means they are answering now;
+    // leaving the queued sentences playing puts the interviewer's voice into
+    // the microphone that is about to be opened.
+    voiceRef.current.cancel()
 
     if (mediaDevicesUnsupported()) {
       setStatus(
@@ -1057,13 +1089,32 @@ export function useVoiceSession(): VoiceSession {
       try {
         const res = await fetch('/api/devices/output')
         if (!res.ok) return
-        const { devices } = (await res.json()) as { devices: OutputDevice[] }
+        const { devices, serverSpeaks } = (await res.json()) as {
+          devices: OutputDevice[]
+          serverSpeaks?: boolean
+        }
         setOutputDevices(devices)
+        // `?? true` covers an older server that does not send the field:
+        // every server that predates it speaks, so the old behaviour is the
+        // right default rather than a guess.
+        serverSpeaksRef.current = serverSpeaks ?? true
       } catch {
         // No speaker list is not fatal — the server still speaks through
-        // whatever the system default output is.
+        // whatever the system default output is, and `serverSpeaksRef` stays
+        // at its "the server speaks" default rather than starting a second
+        // voice on the strength of a failed request.
       }
     })()
+  }, [])
+
+  // Speech outlives neither the component nor the tab. Without this, closing
+  // the drill leaves the interviewer talking to an empty screen.
+  useEffect(() => {
+    const voice = voiceRef.current
+    return () => {
+      voice.cancel()
+      voice.dispose()
+    }
   }, [])
 
   useEffect(() => {

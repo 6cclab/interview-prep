@@ -9,7 +9,7 @@ differences are the point rather than an accident of packaging.
 | Your work | Markdown in `local/` | Postgres, per person |
 | Identity | none | Better Auth, anonymous by default |
 | Grading | server-side vitest | the browser's Web Worker |
-| Speech | the server speaks | transcription only — see below |
+| Speech | the server speaks | the browser speaks, via `SpeechSynthesis` |
 | Bind | `127.0.0.1` | every interface, behind the container |
 
 `VOICE_MODE` selects, once, at startup. An unrecognised value is a throw naming
@@ -70,13 +70,22 @@ being inserted with nulls.
 
 ## Known limitations
 
-**The interviewer is read, not heard.** Server-side speech exists locally for a
-specific reason — `SpeechSynthesis` exposes no output-device API, so the browser
-cannot route audio to a chosen speaker — and that reasoning collapses when the
-server is elsewhere: the sentences would come out of a machine in a datacentre
-with nobody in front of it. Whisper is still needed and still runs, because the
-browser uploads audio to be transcribed; only the outbound half is gone. Giving
-the browser its own voice is the follow-up.
+**No speaker choice, and the voice is whatever the browser has.** Server-side
+speech exists locally for a specific reason — `SpeechSynthesis` exposes no
+output-device API, so the browser cannot route audio to a chosen speaker — and
+that reasoning collapses when the server is elsewhere: the sentences would come
+out of a machine in a datacentre with nobody in front of it. So deployed, the
+browser speaks (`voice/web/src/browserVoice.ts`) and the speaker picker is
+empty, because there is no longer a server-side speaker to pick. Which voice
+you get depends on the browser and the operating system; the app prefers a
+local English one and takes a remote one rather than staying silent. Whisper is
+still needed and still runs — the browser uploads audio to be transcribed.
+
+Exactly one of the two speaks each sentence, and which one is `serverSpeaks` in
+the `GET /api/devices/output` response, derived from whether a `deps.speaker`
+is actually installed rather than from `VOICE_MODE`. Inferring it client-side
+would fail as either two overlapping voices or silence, and neither announces
+itself.
 
 **One replica.** `SessionStore` is an in-memory `Map`, so a second pod would
 answer for sessions it has never heard of. Better Auth's own session lookup is
