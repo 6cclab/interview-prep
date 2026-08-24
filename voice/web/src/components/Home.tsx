@@ -1,25 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { Button } from 'brutalkit/button';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue
-} from 'brutalkit/select';
-import type { Route } from '../route';
-import type { ProblemTrack } from '../types';
-import { easiest, groupByTier } from '../tiers';
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle
-} from 'brutalkit/card';
+import { useEffect, useState, type ReactNode } from 'react'
+import { Button } from 'brutalkit/button'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from 'brutalkit/select'
+import type { Route } from '../route'
+import type { HistoryPayload, ProblemTrack } from '../types'
+import { easiest, groupByTier } from '../tiers'
 
 /**
  * The drill chooser.
@@ -34,10 +18,17 @@ import {
  * screen, where the primary action still does the starting. That keeps
  * `getUserMedia` on a real user gesture on the screen that needs it, and means a
  * reload cannot silently start an interview.
+ *
+ * **Six rows, not six cards** (handoff §4). The cards were equal-height by grid
+ * default while the blurbs are wildly unequal — the pairing blurb is four times
+ * the length of the behavioural one — so three cards carried ~200px of dead
+ * space and one overflowed. A row lets column 2 set its own height and keeps
+ * every track's *controls* on one horizontal line, which is what is actually
+ * being compared when you land here.
  */
 
 interface Props {
-  onChoose(route: Route): void;
+  onChoose(route: Route): void
 }
 
 /**
@@ -51,7 +42,7 @@ interface Props {
  * `route` means a server answered and the answer was unusable. Then only the
  * track whose list failed is a casualty.
  */
-type ListFailure = 'offline' | 'route' | null;
+type ListFailure = 'offline' | 'route' | null
 
 /**
  * The behavioural picker's "let the interviewer choose" entry, which is the
@@ -62,7 +53,7 @@ type ListFailure = 'offline' | 'route' | null;
  * carries it. The empty string is still what leaves this component: it is what
  * `onStart` treats as no competency, so the sentinel never reaches a route.
  */
-const INTERVIEWERS_CHOICE = 'interviewers-choice';
+const INTERVIEWERS_CHOICE = 'interviewers-choice'
 
 interface ProblemList {
   /**
@@ -72,20 +63,20 @@ interface ProblemList {
    * array, and the picker rendered the empty case — so a slow list said "None
    * found", which is a claim rather than a wait.
    */
-  loading: boolean;
-  problems: string[];
+  loading: boolean
+  problems: string[]
   /**
    * Slug to tier, for the tracks that report one. Empty for the design track,
    * which has no difficulty field, and empty for a coding server too old to send
    * one — in both cases the picker falls back to a flat list.
    */
-  difficulties: Record<string, string>;
+  difficulties: Record<string, string>
   /** Slug to display name. Only the behavioural track sends these — a competency's title is prose, not a slug. */
-  titles: Record<string, string>;
+  titles: Record<string, string>
   /** Slug to whether `local/stories.md` has a story for it. Behavioural only; a competency with none is the gap. */
-  hasStory: Record<string, boolean>;
-  selected: string;
-  failure: ListFailure;
+  hasStory: Record<string, boolean>
+  selected: string
+  failure: ListFailure
 }
 
 const EMPTY: ProblemList = {
@@ -95,10 +86,10 @@ const EMPTY: ProblemList = {
   titles: {},
   hasStory: {},
   selected: '',
-  failure: null
-};
+  failure: null,
+}
 
-const LOADING: ProblemList = { ...EMPTY, loading: true };
+const LOADING: ProblemList = { ...EMPTY, loading: true }
 
 /**
  * One track's problem list, fetched once.
@@ -109,38 +100,38 @@ const LOADING: ProblemList = { ...EMPTY, loading: true };
  * is perfectly fine.
  */
 function useProblems(track: ProblemTrack): ProblemList {
-  const [state, setState] = useState<ProblemList>(LOADING);
+  const [state, setState] = useState<ProblemList>(LOADING)
 
   useEffect(() => {
-    let live = true;
+    let live = true
     // Re-entered whenever `track` changes, so this resets rather than leaving the
     // previous track's list on screen under a new heading.
-    setState(LOADING);
+    setState(LOADING)
     void (async () => {
-      let res: Response;
+      let res: Response
       try {
-        res = await fetch(`/api/problems?track=${track}`);
+        res = await fetch(`/api/problems?track=${track}`)
       } catch (error) {
         // `fetch` rejects only when the request could not be made at all.
-        if (live) setState({ ...EMPTY, failure: 'offline' });
+        if (live) setState({ ...EMPTY, failure: 'offline' })
         // Logged, not swallowed: a silent catch here is what made diagnosing
         // this state a spelunking exercise instead of reading the console.
-        console.error(`voice: /api/problems?track=${track} unreachable`, error);
-        return;
+        console.error(`voice: /api/problems?track=${track} unreachable`, error)
+        return
       }
       try {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const body = (await res.json()) as {
-          problems: string[];
-          difficulties?: Record<string, string>;
-          titles?: Record<string, string>;
-          hasStory?: Record<string, boolean>;
-        };
-        const { problems } = body;
-        if (!live) return;
+          problems: string[]
+          difficulties?: Record<string, string>
+          titles?: Record<string, string>
+          hasStory?: Record<string, boolean>
+        }
+        const { problems } = body
+        if (!live) return
         // The easiest problem is the default where tiers are known, rather than
         // whichever slug happens to sort first alphabetically.
-        const difficulties = body.difficulties ?? {};
+        const difficulties = body.difficulties ?? {}
         setState({
           loading: false,
           problems,
@@ -152,85 +143,135 @@ function useProblems(track: ProblemTrack): ProblemList {
           // recognition the question bank opens by teaching. The other tracks
           // have no such default and pick their easiest.
           selected: track === 'mock' ? '' : easiest(problems, difficulties),
-          failure: null
-        });
+          failure: null,
+        })
       } catch (error) {
-        if (live) setState({ ...EMPTY, failure: 'route' });
-        console.error(
-          `voice: /api/problems?track=${track} returned something unusable`,
-          error
-        );
+        if (live) setState({ ...EMPTY, failure: 'route' })
+        console.error(`voice: /api/problems?track=${track} returned something unusable`, error)
       }
-    })();
+    })()
     return () => {
-      live = false;
-    };
-  }, [track]);
+      live = false
+    }
+  }, [track])
 
-  return state;
+  return state
 }
 
-interface TrackCardProps {
-  title: string;
-  blurb: string;
-  list: ProblemList;
-  offline: boolean;
-  buttonLabel: string;
-  onStart(problem: string): void;
+/**
+ * The one line of record on this screen: cold solves, and when you last drilled.
+ *
+ * Cold rather than total, for the reason `local/drill-log.md`'s own preamble
+ * gives and the history screen repeats — "a solve that took four hints is a
+ * different fact from a cold solve". A landing page that opened with a flattered
+ * number would be the first place that flattening happened.
+ *
+ * Failure is silent here, and only here: this is a decoration on a page whose
+ * job is starting a drill. The history screen says so loudly because there the
+ * log *is* the content.
+ */
+function useRecord(): { cold: number; attempts: number; lastDrill: string | null } | null {
+  const [record, setRecord] = useState<{ cold: number; attempts: number; lastDrill: string | null } | null>(null)
+
+  useEffect(() => {
+    let live = true
+    void (async () => {
+      try {
+        const res = await fetch('/api/history')
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const payload = (await res.json()) as HistoryPayload
+        if (!live || payload.summary.attempts === 0) return
+        // ISO dates, so lexical max is chronological max. Taking the last row
+        // would assume the log is append-ordered, which it is by convention but
+        // not by construction — rows get hand-edited.
+        const dates = payload.rows.map((row) => row.date).filter((date) => date !== '')
+        setRecord({
+          cold: payload.summary.cold,
+          attempts: payload.summary.attempts,
+          lastDrill: dates.length > 0 ? dates.reduce((a, b) => (a > b ? a : b)) : null,
+        })
+      } catch {
+        // Deliberately silent — see above.
+      }
+    })()
+    return () => {
+      live = false
+    }
+  }, [])
+
+  return record
+}
+
+interface TrackRowProps {
+  name: string
+  /** `45 min · timed` / `Untimed · not scored`. The commitment, before the prose. */
+  meta: string
+  blurb: string
+  list: ProblemList
+  offline: boolean
+  buttonLabel: string
+  /** Only the coding row is filled: it is the primary track and the page should say so once. */
+  primary?: boolean
+  onStart(problem: string): void
   /**
-   * Extra controls rendered below the problem row, before the failure note.
-   * Only the coding card uses this — the editing-mode picker — so it is
-   * optional rather than adding a track-specific prop to every other card.
+   * Extra controls rendered under the select, inside column 3. Only the coding
+   * row uses this — the editing-mode picker — so it is optional rather than
+   * adding a track-specific prop to every other row.
    */
-  extra?: ReactNode;
+  extra?: ReactNode
+  /**
+   * Render the select and button for a track whose choice is *optional*, where
+   * an empty selection is a real answer rather than "nothing picked yet".
+   */
+  optional?: boolean
+  children?: ReactNode
 }
 
-/** A track that is chosen along with a problem — design and coding both are. */
-function ProblemTrackCard({
-  title,
-  blurb,
-  list,
-  offline,
-  buttonLabel,
-  onStart,
-  extra
-}: TrackCardProps) {
-  const [selected, setSelected] = useState('');
+/**
+ * One track: what it is, what it costs you, what you are drilling, and go.
+ *
+ * The four columns are fixed at `210px 1fr 300px 200px` so that every row's
+ * select starts at the same x and every button ends at the same one. That
+ * alignment is the whole reason this is a table and not a list — the controls
+ * are what you are comparing, and ragged controls made the page read as six
+ * unrelated widgets.
+ */
+function TrackRow({ name, meta, blurb, list, offline, buttonLabel, primary, onStart, extra, optional, children }: TrackRowProps) {
+  const [selected, setSelected] = useState('')
   // The list arrives asynchronously, so the default cannot be an initial value.
-  const chosen = selected || list.selected;
-  const id = `home-problem-${title.replace(/\s+/g, '-').toLowerCase()}`;
-  const groups = groupByTier(list.problems, list.difficulties);
+  const chosen = selected || list.selected
+  const id = `home-problem-${name.replace(/\s+/g, '-').toLowerCase()}`
+  const groups = groupByTier(list.problems, list.difficulties)
+  // A server that answered badly. The offline case is covered by the banner
+  // above the table, and claiming one track is the casualty would be untrue.
+  const unavailable = list.failure === 'route'
 
   return (
-    <section className="home__card">
-      <h2 className="home__card-title">{title}</h2>
-      <p className="home__card-body">{blurb}</p>
-      <div className="home__row">
-        <label className="home__label" htmlFor={id}>
-          Problem
-        </label>
+    <div className="track-row" data-unavailable={unavailable ? '' : undefined}>
+      <div className="track-row__id">
+        <span className="track-row__name">{name}</span>
+        <span className="track-row__meta">{meta}</span>
+      </div>
+
+      <p className="track-row__blurb">{blurb}</p>
+
+      <div className="track-row__choose">
         <Select
-          value={chosen === '' ? undefined : chosen}
-          disabled={list.problems.length === 0}
-          onValueChange={setSelected}
+          value={optional ? (selected === '' ? INTERVIEWERS_CHOICE : selected) : chosen === '' ? undefined : chosen}
+          disabled={!optional && list.problems.length === 0}
+          onValueChange={(value) =>
+            optional ? setSelected(value === INTERVIEWERS_CHOICE ? '' : value) : setSelected(value)
+          }
         >
-          <SelectTrigger
-            id={id}
-            className="home__select"
-            aria-busy={list.loading}
-          >
-            <SelectValue
-              placeholder={
-                list.loading
-                  ? 'Loading…'
-                  : list.failure
-                    ? 'Unavailable'
-                    : 'None found'
-              }
-            />
+          <SelectTrigger id={id} className="track-row__select" aria-busy={list.loading} aria-label={`${name} problem`}>
+            <SelectValue placeholder={list.loading ? 'Loading…' : list.failure ? 'Unavailable' : 'None found'} />
           </SelectTrigger>
           <SelectContent>
-            {groups
+            {/* Always first and always available, including while the list loads
+                or after it fails: an unreachable competency list must not be able
+                to block the drill that does not need one. */}
+            {optional && <SelectItem value={INTERVIEWERS_CHOICE}>Interviewer&rsquo;s choice</SelectItem>}
+            {groups && !optional
               ? groups.map((group) => (
                   <SelectGroup key={group.label}>
                     <SelectLabel>{group.label}</SelectLabel>
@@ -243,138 +284,52 @@ function ProblemTrackCard({
                 ))
               : list.problems.map((problem) => (
                   <SelectItem key={problem} value={problem}>
-                    {/* A title when the track sends one — the debugging track sends
-                        the bug report's headline, which is what makes its picker
-                        readable. Design and coding send none, so they show slugs
-                        exactly as before. */}
+                    {/* A title when the track sends one — the debugging track
+                        sends the bug report's headline, which is what makes its
+                        picker readable. Design and coding send none, so they show
+                        slugs exactly as before. */}
                     {list.titles[problem] ?? problem}
+                    {optional && list.hasStory[problem] === false ? ' — no story yet' : ''}
                   </SelectItem>
                 ))}
           </SelectContent>
         </Select>
+
+        {extra}
+        {children}
+
+        {unavailable && (
+          <p className="track-row__unavailable">
+            The server could not list these — this track is unavailable. The others do not use this list.
+          </p>
+        )}
+      </div>
+
+      <div className="track-row__go">
         <Button
-          variant="brand"
-          disabled={offline || list.loading || chosen === ''}
-          onClick={() => onStart(chosen)}
+          variant={primary ? 'brand' : 'outline'}
+          disabled={offline || unavailable || list.loading || (!optional && chosen === '')}
+          onClick={() => onStart(optional ? selected : chosen)}
         >
           {list.loading ? 'Loading…' : buttonLabel}
         </Button>
       </div>
-      {extra}
-      {/* Only for a server that answered badly. The offline case is covered by
-          the banner above, and claiming the behavioural drill still works would
-          be untrue there. */}
-      {list.failure === 'route' && (
-        <p className="home__note">
-          The server could not list these problems, so this track is
-          unavailable. The others do not use this list and still work.
-        </p>
-      )}
-    </section>
-  );
-}
-
-/**
- * The behavioural card.
- *
- * Not a `ProblemTrackCard`, because the choice here is *optional* and that card's
- * button is disabled until something is selected. The default — and the entry at
- * the top of the list — is the interviewer choosing, since
- * `behavioral/questions.md` opens by teaching how to spot the competency behind
- * unfamiliar phrasing, and a screen that names it first has removed that.
- *
- * Picking one is still worth having: it is how you drill a competency you know is
- * weak, and the list marks which have no story in `local/stories.md` yet, which is
- * the gap worth attacking first.
- */
-function BehavioralCard({
-  list,
-  offline,
-  onStart
-}: {
-  list: ProblemList;
-  offline: boolean;
-  onStart(competency: string): void;
-}) {
-  const [selected, setSelected] = useState('');
-
-  return (
-    <section className="home__card">
-      <h2 className="home__card-title">Behavioral</h2>
-      <p className="home__card-body">
-        One question, cold, spoken aloud. No clock and no countdown — silence
-        does not end a turn, and thinking time is the exercise. Critiqued
-        against your own tone rules at the end.
-      </p>
-      <div className="home__row">
-        <label className="home__label" htmlFor="home-competency">
-          Competency
-        </label>
-        <Select
-          value={selected === '' ? INTERVIEWERS_CHOICE : selected}
-          onValueChange={(value) =>
-            setSelected(value === INTERVIEWERS_CHOICE ? '' : value)
-          }
-        >
-          <SelectTrigger
-            id="home-competency"
-            className="home__select"
-            aria-busy={list.loading}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {/* Always first and always available, including while the list loads or
-                after it fails: an unreachable competency list must not be able to
-                block the drill that does not need one. */}
-            <SelectItem value={INTERVIEWERS_CHOICE}>
-              Interviewer&rsquo;s choice
-            </SelectItem>
-            {list.problems.map((slug) => (
-              <SelectItem key={slug} value={slug}>
-                {list.titles[slug] ?? slug}
-                {list.hasStory[slug] === false ? ' — no story yet' : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          variant="brand"
-          disabled={offline}
-          onClick={() => onStart(selected)}
-        >
-          Behavioral drill
-        </Button>
-      </div>
-      {selected !== '' && (
-        <p className="home__note">
-          Staying on one competency. The interviewer will not say which — but
-          you know, so this is deliberate practice rather than a test of
-          spotting it.
-        </p>
-      )}
-      {list.failure === 'route' && (
-        <p className="home__note">
-          The server could not list the competencies, so only the
-          interviewer&rsquo;s choice is available. The drill itself is
-          unaffected.
-        </p>
-      )}
-    </section>
-  );
+    </div>
+  )
 }
 
 export function Home({ onChoose }: Props) {
-  const design = useProblems('design');
-  const coding = useProblems('coding');
-  const mock = useProblems('mock');
-  const coach = useProblems('coach');
-  const debug = useProblems('debug');
-  const assisted = useProblems('assisted');
+  const design = useProblems('design')
+  const coding = useProblems('coding')
+  const mock = useProblems('mock')
+  const coach = useProblems('coach')
+  const debug = useProblems('debug')
+  const assisted = useProblems('assisted')
+  const record = useRecord()
   // Where the coding drill's answer gets written — see AGENTS.md, "Two editing
   // modes". Defaults to the browser editor: it is the mode that most resembles
   // an actual interview screen, so it is what a first-time visitor sees.
-  const [editor, setEditor] = useState<'browser' | 'own'>('browser');
+  const [editor, setEditor] = useState<'browser' | 'own'>('browser')
 
   // Any list failing to reach the server means the server is not there.
   const offline =
@@ -383,146 +338,147 @@ export function Home({ onChoose }: Props) {
     mock.failure === 'offline' ||
     coach.failure === 'offline' ||
     debug.failure === 'offline' ||
-    assisted.failure === 'offline';
+    assisted.failure === 'offline'
 
   return (
     <main className="home">
       <div className="home__inner">
-        <h1 className="home__title">What are we drilling?</h1>
+        <div className="home__head">
+          <h1 className="home__title">What are we drilling?</h1>
+          {record !== null && (
+            <button type="button" className="home__record" onClick={() => onChoose({ view: 'history' })}>
+              {record.cold} of {record.attempts} solved cold
+              {record.lastDrill !== null && ` · last drill ${record.lastDrill}`}
+            </button>
+          )}
+        </div>
 
         {/* One banner for every track, because an unreachable server breaks all
             of them. Naming the command is the whole value of the message: the fix
             is always the same and it is not guessable from "unavailable". */}
         {offline && (
           <div className="home__offline" role="alert">
-            <strong className="home__offline-title">
-              The drill server is not responding.
-            </strong>
+            <strong className="home__offline-title">The drill server is not responding.</strong>
             <span>
-              Nothing can start until it is back — this is not specific to one
-              track. Run <code>pnpm mock:web</code> in the repo, then reload
-              this page.
+              Nothing can start until it is back — this is not specific to one track. Run <code>pnpm mock:web</code> in
+              the repo, then reload this page.
             </span>
           </div>
         )}
 
-        <BehavioralCard
-          list={mock}
-          offline={offline}
-          onStart={(competency) =>
-            onChoose(
-              competency ? { view: 'mock', competency } : { view: 'mock' }
-            )
-          }
-        />
+        <div className="home__tracks">
+          <TrackRow
+            name="Behavioral"
+            meta="Untimed · critiqued"
+            blurb="One question, cold, spoken aloud. No clock and no countdown — silence does not end a turn, and thinking time is the exercise. Critiqued against your own tone rules at the end."
+            list={mock}
+            offline={offline}
+            buttonLabel="Behavioral drill"
+            optional
+            onStart={(competency) => onChoose(competency ? { view: 'mock', competency } : { view: 'mock' })}
+          />
 
-        <ProblemTrackCard
-          title="System design"
-          blurb="Forty-five minutes, spoken, timed. The prompt stays on screen the whole way; the interviewer keeps the clock, warns you once near the end, and scores you against the rubric at time."
-          list={design}
-          offline={offline}
-          buttonLabel="Design drill"
-          onStart={(problem) => onChoose({ view: 'design', problem })}
-        />
+          <TrackRow
+            name="System design"
+            meta="45 min · timed"
+            blurb="Forty-five minutes, spoken, timed. The prompt stays on screen the whole way; the interviewer keeps the clock, warns you once near the end, and scores you against the rubric at time."
+            list={design}
+            offline={offline}
+            buttonLabel="Design drill"
+            onStart={(problem) => onChoose({ view: 'design', problem })}
+          />
 
-        <ProblemTrackCard
-          title="Coding"
-          blurb="Forty-five minutes, spoken, timed. Talk through it as you go, and press Run tests when you want the suite run. Hints are rationed; ask for one and you get exactly one rung."
-          list={coding}
-          offline={offline}
-          buttonLabel="Coding drill"
-          onStart={(problem) => onChoose({ view: 'coding', problem, editor })}
-          extra={
-            /*
-              Both options are named with their trade-off rather than just their
-              location, because the choice is not a preference — the modes test
-              different things. See AGENTS.md, "Two editing modes".
-            */
-            <fieldset className="home__editor-choice">
-              <legend>Where are you writing this?</legend>
-              <label>
-                <input
-                  type="radio"
-                  name="editor"
-                  value="browser"
-                  checked={editor === 'browser'}
-                  onChange={() => setEditor('browser')}
-                />
-                Browser editor — an interview screen: highlighting and line numbers, no type checking
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="editor"
-                  value="own"
-                  checked={editor === 'own'}
-                  onChange={() => setEditor('own')}
-                />
-                My own editor — edit solution.ts yourself, with real types
-              </label>
-            </fieldset>
-          }
-        />
+          <TrackRow
+            name="Coding"
+            meta="45 min · timed"
+            blurb="Forty-five minutes, spoken, timed. Talk through it as you go, and press Run tests when you want the suite run. Hints are rationed; ask for one and you get exactly one rung."
+            list={coding}
+            offline={offline}
+            buttonLabel="Coding drill"
+            primary
+            onStart={(problem) => onChoose({ view: 'coding', problem, editor })}
+            extra={
+              /*
+                Both options are named with their trade-off rather than just their
+                location, because the choice is not a preference — the modes test
+                different things. See AGENTS.md, "Two editing modes".
+              */
+              <fieldset className="home__editor-choice">
+                <legend>Where are you writing this?</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="editor"
+                    value="browser"
+                    checked={editor === 'browser'}
+                    onChange={() => setEditor('browser')}
+                  />
+                  Browser editor — an interview screen: highlighting and line numbers, no type checking
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="editor"
+                    value="own"
+                    checked={editor === 'own'}
+                    onChange={() => setEditor('own')}
+                  />
+                  My own editor — edit solution.ts yourself, with real types
+                </label>
+              </fieldset>
+            }
+          />
 
-        <ProblemTrackCard
-          title="Debugging"
-          blurb="Forty-five minutes, spoken, timed. A bug report for code you did not write — read it in your own editor, say what you think is happening before you change anything, and run both suites when you are ready. A fix that turns the reported symptom green while the second suite stays red is a symptom patch, and it is reported as one."
-          list={debug}
-          offline={offline}
-          buttonLabel="Debugging round"
-          onStart={(problem) => onChoose({ view: 'debug', problem })}
-        />
+          <TrackRow
+            name="Debugging"
+            // 45, matching DEBUG_BUDGET_MS server-side. The blurb has always said
+            // forty-five minutes; the client's timed check was what disagreed.
+            meta="45 min · timed"
+            blurb="Forty-five minutes, spoken, timed. A bug report for code you did not write — read it in your own editor, say what you think is happening before you change anything, and run both suites when you are ready. A fix that turns the reported symptom green while the second suite stays red is a symptom patch, and it is reported as one."
+            list={debug}
+            offline={offline}
+            buttonLabel="Debugging round"
+            onStart={(problem) => onChoose({ view: 'debug', problem })}
+          />
 
-        <ProblemTrackCard
-          title="AI-assisted coding"
-          // The one track where help is unlimited on purpose, so the blurb has to
-          // say what is being scored instead — otherwise it reads as the coding
-          // drill with the difficulty turned down, which is the opposite of true.
-          blurb="Sixty minutes, spoken, timed. Bring your own coding agent and use it — nothing is rationed here. You work in local/assisted/<problem>/, and the interviewer sees that directory every turn. What gets scored is whether you framed the problem before delegating it, said what you expected back before reading it, verified instead of accepting, and can defend the code when pushed. Expect spoken algorithmic questions while your tool is working."
-          list={assisted}
-          offline={offline}
-          buttonLabel="Assisted round"
-          onStart={(problem) => onChoose({ view: 'assisted', problem })}
-        />
+          <TrackRow
+            name="AI-assisted"
+            meta="60 min · timed"
+            // The one track where help is unlimited on purpose, so the blurb has to
+            // say what is being scored instead — otherwise it reads as the coding
+            // drill with the difficulty turned down, which is the opposite of true.
+            blurb="Sixty minutes, spoken, timed. Bring your own coding agent and use it — nothing is rationed here. You work in local/assisted/<problem>/, and the interviewer sees that directory every turn. What gets scored is whether you framed the problem before delegating it, said what you expected back before reading it, verified instead of accepting, and can defend the code when pushed. Expect spoken algorithmic questions while your tool is working."
+            list={assisted}
+            offline={offline}
+            buttonLabel="Assisted round"
+            onStart={(problem) => onChoose({ view: 'assisted', problem })}
+          />
 
-        {/* Landing page only, and deliberately below the drills. A coaching link
-            on the drill screen is exactly the leak the hint ladder exists to
-            prevent — starting one has to be a decision made before you begin,
-            not an escape hatch reachable while you are stuck. */}
-        <ProblemTrackCard
-          title="Pairing"
-          blurb="Not an interview. The coach has the worked solution and the pattern notes, can see your solution.ts as you type, and will answer straight — nothing is rationed and nothing is scored. Untimed. Use it after a drill, not instead of one."
-          list={coach}
-          offline={offline}
-          buttonLabel="Start pairing"
-          onStart={(problem) => onChoose({ view: 'coach', problem })}
-        />
+          {/* Last, and deliberately below the drills. A coaching link on the drill
+              screen is exactly the leak the hint ladder exists to prevent —
+              starting one has to be a decision made before you begin, not an
+              escape hatch reachable while you are stuck. */}
+          <TrackRow
+            name="Pairing"
+            meta="Untimed · not scored"
+            blurb="Not an interview. The coach has the worked solution and the pattern notes, can see your solution.ts as you type, and will answer straight — nothing is rationed and nothing is scored. Untimed. Use it after a drill, not instead of one."
+            list={coach}
+            offline={offline}
+            buttonLabel="Start pairing"
+            onStart={(problem) => onChoose({ view: 'coach', problem })}
+          />
+        </div>
 
-        {/* Not a track, so not a card: nothing starts here. Below the three
-            choices because the question this screen asks is "what are we
-            drilling", and looking at past results is the answer to a different
-            one. */}
-        <Card>
-          <CardHeader className="w-full">
-            <CardTitle>Past drills</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="home__note">
-              What you have attempted, whether it landed, and what help it took.
-            </span>
-          </CardContent>
-          <CardFooter>
-            <CardAction>
-              <Button
-                variant="outline"
-                onClick={() => onChoose({ view: 'history' })}
-              >
-                Past drills
-              </Button>
-            </CardAction>
-          </CardFooter>
-        </Card>
+        {/* Not a track, so not a row: nothing starts here. The record line at the
+            top is the other way in, for when you land already knowing you want to
+            look rather than drill. */}
+        <div className="home__foot">
+          <span className="home__note">What you have attempted, whether it landed, and what help it took.</span>
+          <Button variant="outline" onClick={() => onChoose({ view: 'history' })}>
+            Past drills
+          </Button>
+        </div>
       </div>
     </main>
-  );
+  )
 }

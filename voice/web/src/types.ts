@@ -39,6 +39,31 @@ export type Phase =
   | 'ended'
 
 /**
+ * Which of the three moments of a round the screen is in.
+ *
+ * A coarser reading of `Phase`, and deliberately coarser: `Phase` answers "what
+ * is the machine doing", which is what the dock copy and the primary control
+ * need, while this answers "where should the eye be", which is what the
+ * attention model needs. Eight phases mapped to three moments because the design
+ * shifts emphasis three times per turn and there is nothing to gain from
+ * shifting it eight.
+ *
+ * The moments are not symmetrical, and the asymmetry is the point — see
+ * `deriveMoment` for why the editor is never dimmed while the candidate talks.
+ */
+export type Moment = 'interviewer-speaking' | 'candidate-speaking' | 'writing'
+
+/**
+ * What the always-present status rail is showing.
+ *
+ * One slot rather than a list, because the rail is 28px of reserved layout and
+ * its whole purpose is that a banner *recolours* it instead of inserting a box.
+ * Two conditions at once stack it to 56px, which is the only vertical movement
+ * the drill screen ever makes.
+ */
+export type RailState = 'idle' | 'transcription-failed' | 'save-conflict'
+
+/**
  * The four first-class error banners from the handoff. Each maps to a real
  * failure path in useVoiceSession.ts — see `deriveErrorKind` (App.tsx) and
  * the comments on `micFailureKind`/`transcriptFailed` in useVoiceSession.ts.
