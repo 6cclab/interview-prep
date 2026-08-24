@@ -82,6 +82,22 @@ export interface StoredSession {
    * live count without the interviewer having to report one per turn.
    */
   hintRung: number
+  /**
+   * Every sentence the interviewer has said this session, in order, indexed by
+   * the `seq` carried on the `sentence` SSE event.
+   *
+   * Only populated where the browser fetches its own audio
+   * (`GET /api/session/:id/say/:seq`) — the route needs the text to synthesise,
+   * and the alternative is trusting the client to send back a string to be read
+   * aloud, which is an open TTS endpoint wearing a session id.
+   *
+   * Append-only and never trimmed: a sentence stays fetchable for as long as
+   * the session lives, so a browser that was mid-buffer when its stream
+   * reconnected can still finish playing what it had. The bound is a session's
+   * worth of sentences, which is the same order as the transcript already held
+   * in memory beside it.
+   */
+  spokenSentences: string[]
 }
 
 export interface SessionStore {
@@ -157,6 +173,7 @@ export function createSessionStore(
         scratchDir,
         lastActivity: now(),
         hintRung: 0,
+        spokenSentences: [],
       }
       sessions.set(stored.id, stored)
       return stored

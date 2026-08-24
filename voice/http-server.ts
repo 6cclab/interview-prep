@@ -49,10 +49,13 @@ import { createSession, finishSession, type FinishResult } from './session'
 import { createSessionStore, type Drill, type RetainedAudio, type SessionStore, type StoredSession } from './session-store'
 import {
   checkSpeechEngine,
+  checkSynthEngine,
+  piperSynthesizer,
   resolveSpeaker,
   whisperTranscriber,
   type SayOptions,
   type Speaker,
+  type Synthesizer,
   type Transcriber,
 } from './speech'
 import { openDisabled, openInBrowser, openPlan } from './open-browser'
@@ -151,6 +154,18 @@ export interface VoiceServerDeps {
    * the transcript — completely unaffected. `main()` wires the real one.
    */
   speaker?: Speaker
+  /**
+   * Turns a sentence into audio for the *browser* to play, rather than playing
+   * it here (see `GET /api/session/:id/say/:seq`).
+   *
+   * The other half of `speaker`, and never installed alongside it: exactly one
+   * machine speaks each sentence, and which one is decided once at startup and
+   * reported to the client so it cannot be guessed at. `speaker` is right when
+   * the server is the machine the candidate is sitting at; this is right when
+   * it is not, and the alternative — the browser's own `SpeechSynthesis` — is
+   * a voice lottery per browser and operating system.
+   */
+  synthesizer?: Synthesizer
   /** Injectable so tests never shell out to the real `say -a '?'`. */
   listOutputDevices?(): Promise<Device[]>
   /**
@@ -476,15 +491,38 @@ async function streamTurn(
    * the design track's CLI path wants — it has no SSE client to lose.
    */
   listening?: () => boolean,
+  /**
+   * Files the sentence so `GET /api/session/:id/say/:seq` can synthesise it,
+   * and returns the `seq` to put on the wire. Absent for the CLI path, which
+   * has no browser to fetch audio.
+   */
+  record?: (text: string) => number,
 ): Promise<void> {
   for await (const sentence of turn) {
-    if (res) writeSSE(res, 'sentence', { speaker: 'interviewer', text: sentence })
+    // Filed before the write, not after: the client may request the audio the
+    // instant the event lands, and a sentence the route cannot find is silence
+    // with no way to tell it apart from a synthesis failure.
+    const seq = record?.(sentence)
+    if (res) writeSSE(res, 'sentence', { speaker: 'interviewer', text: sentence, seq })
     // The sentence is already on the wire and already in the transcript; only
     // the audio is conditional. A reader who reconnects sees everything said
     // while they were gone — they just do not hear the part they missed, which
     // is the same deal a spoken interview gives you.
     if (listening === undefined || listening()) await speakSentence(speaker, sentence)
   }
+}
+
+/**
+ * Files each sentence against a session, for the audio route to find by index.
+ *
+ * Returns `undefined` — so `streamTurn` files nothing and the `seq` never
+ * reaches the wire — when no synthesiser is installed. A `seq` on an event
+ * whose audio route would 404 is worse than no `seq`: the client uses its
+ * absence to decide to speak the sentence itself.
+ */
+function sentenceRecorder(deps: VoiceServerDeps, stored: StoredSession): ((text: string) => number) | undefined {
+  if (!deps.synthesizer) return undefined
+  return (text: string): number => stored.spokenSentences.push(text) - 1
 }
 
 /**
@@ -812,34 +850,84 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     if (req.method === 'GET' && serveStatic(distDir, url.pathname, res)) return
 
     // Lists speaker/output devices for the client to render a selector, and
-    // says which of the two machines is doing the speaking.
+    // says which of three arrangements is producing the interviewer's voice.
     //
-    // `SpeechSynthesis` exposes no output-device API, so a browser cannot
-    // route audio to a chosen speaker. Locally that does not matter, because
-    // the server is the same machine — it speaks (see `deps.speaker` /
-    // `streamTurn`), which is why this list needs to exist server-side at all.
-    // Deployed there is no `deps.speaker`, and the browser speaks for itself.
+    // `'server'`   — the server synthesises and plays through its own speakers.
+    //                Right when it is the machine the candidate is sitting at,
+    //                and the only arrangement that can honour a chosen output
+    //                device, because `SpeechSynthesis` exposes no API for one.
+    // `'stream'`   — the server synthesises, the browser plays the bytes
+    //                (`GET /api/session/:id/say/:seq`). The same voice for
+    //                everyone, at the cost of a piper process per sentence.
+    // `'browser'`  — the browser synthesises and plays, with whatever voice it
+    //                happens to have. The fallback, and a lottery per browser
+    //                and operating system.
     //
-    // `serverSpeaks` is derived from the speaker actually installed rather
-    // than from `deps.mode`, so it cannot drift from the truth: if the two
-    // ever disagreed the candidate would hear either two overlapping voices
-    // or none, and neither failure announces itself.
+    // Derived from what is actually installed rather than from `deps.mode`, so
+    // it cannot drift from the truth: two of these running at once is two
+    // overlapping voices and none of them is silence, and neither failure
+    // announces itself.
     if (req.method === 'GET' && url.pathname === '/api/devices/output') {
-      const serverSpeaks = deps.speaker !== undefined
-      // With nothing speaking server-side there is no server-side speaker to
-      // choose, and enumerating output devices in a container asks the host
-      // about hardware it does not have.
-      if (!serverSpeaks) {
-        sendJson(res, 200, { devices: [], serverSpeaks })
+      const speech = deps.speaker ? 'server' : deps.synthesizer ? 'stream' : 'browser'
+      // Only the server playing its own audio gives anyone an output device to
+      // choose between. Otherwise, enumerating them asks a container about
+      // hardware it does not have, to populate a picker over audio nobody in
+      // that building can hear.
+      if (speech !== 'server') {
+        sendJson(res, 200, { devices: [], speech })
         return
       }
       try {
         const devices = await (deps.listOutputDevices ?? listOutputDevices)()
-        sendJson(res, 200, { devices, serverSpeaks })
+        sendJson(res, 200, { devices, speech })
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         sendJson(res, 500, { error: message })
       }
+      return
+    }
+
+    // One sentence of the interviewer, as audio, for a browser to play.
+    //
+    // Streamed as piper produces it rather than buffered: synthesis of a long
+    // sentence takes seconds, and waiting for all of it would put every one of
+    // those seconds into the silence before the first word.
+    //
+    // Takes a `seq` into what the interviewer has already said rather than the
+    // text to speak. A route that reads back whatever string it is handed is an
+    // open text-to-speech service wearing a session id — free CPU for anyone
+    // holding one, and a way to put words in the interviewer's mouth. The
+    // sentence must be one this session genuinely produced.
+    const sayMatch = /^\/api\/session\/([^/]+)\/say\/(\d+)$/.exec(url.pathname)
+    if (req.method === 'GET' && sayMatch) {
+      const stored = owned(sayMatch[1]!)
+      if (!stored) {
+        sendJson(res, 404, { error: 'no such session' })
+        return
+      }
+      const text = stored.spokenSentences[Number(sayMatch[2])]
+      if (text === undefined || !deps.synthesizer) {
+        sendJson(res, 404, { error: 'no such sentence' })
+        return
+      }
+      const { audio, cancel } = deps.synthesizer.synthesize(text)
+      res.writeHead(200, {
+        'content-type': 'audio/wav',
+        // The bytes are made on demand and the sentence is already in the
+        // transcript; a cache entry would only be a second copy to go stale.
+        'cache-control': 'no-store',
+      })
+      // The listener navigating away, or barging in, aborts the request. Piper
+      // must die with it — otherwise every abandoned sentence leaves a process
+      // synthesising audio that nothing will ever read.
+      res.on('close', cancel)
+      audio.on('error', (error: Error) => {
+        console.error(`say: ${error.message}`)
+        // The header is already sent, so there is no status left to change.
+        // A truncated body is what one missed sentence should cost.
+        res.destroy()
+      })
+      audio.pipe(res)
       return
     }
 
@@ -1396,7 +1484,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       if (!alreadyBegun) {
         void (async () => {
           const before = stored.session.entries().length
-          await streamTurn(res, stored.session.begin(), deps.speaker, () => hasListener(store, id))
+          await streamTurn(res, stored.session.begin(), deps.speaker, () => hasListener(store, id), sentenceRecorder(deps, stored))
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(res, 'entry', entry)
           }
@@ -1425,7 +1513,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // No live SSE connection is a normal state (a turn submitted between
         // reconnects, say), not a reason to stop draining the reply — the
         // session's entries/endedEarly state must still advance either way.
-        await streamTurn(stored.sseClient, iterable, deps.speaker, () => hasListener(store, id))
+        await streamTurn(stored.sseClient, iterable, deps.speaker, () => hasListener(store, id), sentenceRecorder(deps, stored))
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before + 1)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -1673,7 +1761,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       void (async () => {
         const before = stored.session.entries().length
         const hint = laddered === 'debug' ? debugHintCue(requested) : hintCue(requested)
-        await streamTurn(stored.sseClient, stored.session.interject(hint), deps.speaker, () => hasListener(store, id))
+        await streamTurn(stored.sseClient, stored.session.interject(hint), deps.speaker, () => hasListener(store, id), sentenceRecorder(deps, stored))
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -1766,7 +1854,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       sendJson(res, 200, verdict)
       void (async () => {
         const before = stored.session.entries().length
-        await streamTurn(stored.sseClient, stored.session.interject(cue), deps.speaker, () => hasListener(store, id))
+        await streamTurn(stored.sseClient, stored.session.interject(cue), deps.speaker, () => hasListener(store, id), sentenceRecorder(deps, stored))
         if (stored.sseClient) {
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(stored.sseClient, 'entry', entry)
@@ -1830,7 +1918,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         turnsInFlight.add(id)
         try {
           const before = stored.session.entries().length
-          await streamTurn(stored.sseClient, stored.session.interject(closingCue()), deps.speaker, () => hasListener(store, id))
+          await streamTurn(stored.sseClient, stored.session.interject(closingCue()), deps.speaker, () => hasListener(store, id), sentenceRecorder(deps, stored))
           if (stored.sseClient) {
             for (const entry of stored.session.entries().slice(before)) {
               writeSSE(stored.sseClient, 'entry', entry)
@@ -2061,28 +2149,48 @@ async function main(): Promise<void> {
       process.exit(1)
     }
   }
-  // Fail here, not on the interviewer's first sentence — several minutes into
-  // a drill, after a model turn has already been paid for.
+  // Who produces the interviewer's voice, decided once, here.
   //
-  // Deployed mode skips the check because it does not speak, and the reason is
-  // not that TTS is hard to install. Server-side speech exists locally for a
-  // specific reason — `SpeechSynthesis` exposes no output-device API, so the
-  // browser cannot route audio to a chosen speaker — and that reasoning collapses
-  // the moment the server is somewhere else: the sentences would come out of a
-  // machine in a datacentre with nobody in front of it. Whisper is still needed,
-  // because the browser uploads audio for transcription; only the outbound half
-  // goes away.
+  // Locally the server does: `SpeechSynthesis` exposes no output-device API, so
+  // a browser cannot route audio to the speaker the candidate picked, and the
+  // server is the same machine. That reasoning collapses the moment the server
+  // is somewhere else — the sentences would come out of a box in a datacentre
+  // with nobody in front of it — so deployed, the audio goes to the browser
+  // instead. Whisper is still needed either way, because the browser uploads
+  // audio for transcription; only the outbound half moves.
   //
-  // The consequence, said plainly because it is a real limitation: on a deployed
-  // instance the interviewer is read rather than heard. Giving the browser its
-  // own voice is the follow-up, and it is a client change rather than this one.
-  let speechBanner = 'Speech: transcription only — a deployed instance does not speak'
+  // Deployed prefers synthesising here and streaming the bytes over letting the
+  // browser's own `SpeechSynthesis` do it, because that is a voice lottery per
+  // browser and operating system — Chrome on Linux frequently has no local
+  // English voice at all. But it is a preference and not a requirement: a
+  // missing piper degrades to the browser's voice rather than to silence, and
+  // says so, because an image without a TTS binary is a worse reason to refuse
+  // to serve a drill than it is to read it in a robotic one.
+  //
+  // Failing here rather than on the first sentence matters for the local path:
+  // otherwise a missing binary surfaces several minutes into a drill, after a
+  // model turn has already been paid for.
+  let speechBanner = 'Speech: transcription only'
+  let synthesizer: Synthesizer | undefined
   if (mode === 'local') {
     try {
       speechBanner = checkSpeechEngine()
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err))
       process.exit(1)
+    }
+  } else {
+    try {
+      // From the environment, not `local/voice.json`: that file is per-machine
+      // playback config for the box someone is sitting at, and a deployed
+      // instance has no such box. The model is mounted like whisper's for the
+      // same reason — tens of megabytes, on a different release cadence than
+      // the image.
+      const voice = process.env.PIPER_VOICE?.trim()
+      speechBanner = `Speech: ${checkSynthEngine(voice)}`
+      synthesizer = piperSynthesizer(voice ? { voice } : {})
+    } catch (err) {
+      speechBanner = `Speech: the browser's own voice — ${err instanceof Error ? err.message : String(err)}`
     }
   }
   const tls = readTlsMaterial(root)
@@ -2091,8 +2199,10 @@ async function main(): Promise<void> {
     createTransport: (track) => streamForBackend(track, (line) => console.log(`${track}: ${line}`)),
     transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
     tls,
-    // Absent in deployed mode — see the speech note in `main` above.
+    // Exactly one of these two is ever set — see the speech note in `main`
+    // above. Both would be two voices; the client is told which it got.
     speaker: mode === 'local' ? configuredSpeaker(root) : undefined,
+    synthesizer,
     vague: VOICE_VAGUE,
     auth,
     work,

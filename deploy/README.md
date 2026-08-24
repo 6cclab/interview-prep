@@ -9,7 +9,7 @@ differences are the point rather than an accident of packaging.
 | Your work | Markdown in `local/` | Postgres, per person |
 | Identity | none | Better Auth, anonymous by default |
 | Grading | server-side vitest | the browser's Web Worker |
-| Speech | the server speaks | the browser speaks, via `SpeechSynthesis` |
+| Speech | the server speaks | the server synthesises, the browser plays |
 | Bind | `127.0.0.1` | every interface, behind the container |
 
 `VOICE_MODE` selects, once, at startup. An unrecognised value is a throw naming
@@ -54,6 +54,45 @@ scoped to it and Better Auth checks state-changing requests against it, so a
 mismatch shows up as sign-up failing with `MISSING_OR_NULL_ORIGIN` and nothing
 else being obviously wrong.
 
+## Who has the voice
+
+Three arrangements, one of them chosen at startup and reported to the client as
+`speech` on `GET /api/devices/output`:
+
+| | who synthesises | who plays | when |
+|---|---|---|---|
+| `server` | the server | the server's speakers | local |
+| `stream` | the server (piper) | the browser | deployed, with a voice model |
+| `browser` | the browser | the browser | deployed, without one |
+
+`stream` is preferred over `browser` because the browser's own
+`SpeechSynthesis` is a lottery per browser and operating system — Chrome on
+Linux frequently has no local English voice at all — and because the voice
+should not change depending on who is drilling. It is a preference and not a
+requirement: a missing piper or voice model degrades to `browser` and says so
+in the startup banner, because a robotic voice is a better outcome than
+refusing to serve a drill.
+
+The client is *told* which it got rather than inferring it from the mode. Two
+of these running at once is two overlapping voices, none of them is silence,
+and neither failure announces itself.
+
+The voice model is mounted, not baked — 60MB on a different release cadence
+than the image:
+
+```sh
+mkdir -p models/piper && cd models/piper
+curl -fsSL -O https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx \
+             -O https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
+```
+
+Point `PIPER_VOICE` at a different `.onnx` to change the voice; the matching
+`.onnx.json` must sit beside it. Unset it to force the browser's own voice.
+
+`GET /api/session/:id/say/:seq` takes an index into what the interviewer has
+already said, never the text to speak. A route that reads back whatever string
+it is handed is an open text-to-speech service wearing a session id.
+
 ## Bringing an existing `local/` record across
 
 Once, by hand, after `ingest`:
@@ -70,22 +109,18 @@ being inserted with nulls.
 
 ## Known limitations
 
-**No speaker choice, and the voice is whatever the browser has.** Server-side
-speech exists locally for a specific reason — `SpeechSynthesis` exposes no
-output-device API, so the browser cannot route audio to a chosen speaker — and
-that reasoning collapses when the server is elsewhere: the sentences would come
-out of a machine in a datacentre with nobody in front of it. So deployed, the
-browser speaks (`voice/web/src/browserVoice.ts`) and the speaker picker is
-empty, because there is no longer a server-side speaker to pick. Which voice
-you get depends on the browser and the operating system; the app prefers a
-local English one and takes a remote one rather than staying silent. Whisper is
-still needed and still runs — the browser uploads audio to be transcribed.
+**No speaker choice.** Server-side *playback* exists locally for a specific
+reason — `SpeechSynthesis` exposes no output-device API, so the browser cannot
+route audio to a chosen speaker — and that reasoning collapses when the server
+is elsewhere: the sentences would come out of a machine in a datacentre with
+nobody in front of it. So deployed, the speaker picker is empty. There is no
+server-side speaker to pick, and the browser plays through whatever the
+operating system has selected.
 
-Exactly one of the two speaks each sentence, and which one is `serverSpeaks` in
-the `GET /api/devices/output` response, derived from whether a `deps.speaker`
-is actually installed rather than from `VOICE_MODE`. Inferring it client-side
-would fail as either two overlapping voices or silence, and neither announces
-itself.
+**One piper process per sentence.** Synthesis is CPU on the same box that
+serves requests, and it scales with concurrent drills rather than with users.
+At a handful of people it is not close to a problem; it is the thing that
+breaks first.
 
 **One replica.** `SessionStore` is an in-memory `Map`, so a second pod would
 answer for sessions it has never heard of. Better Auth's own session lookup is

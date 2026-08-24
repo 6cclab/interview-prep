@@ -1,4 +1,7 @@
 import { execFile, execFileSync, spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { basename } from 'node:path'
+import { PassThrough, type Readable } from 'node:stream'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
@@ -244,6 +247,130 @@ export function ffplayArgs(): string[] {
     '-ac', '1',
     '-',
   ]
+}
+
+/**
+ * A sentence being turned into audio, for a listener who is somewhere else.
+ *
+ * `Speaker` and `Synthesizer` are the same engine pointed at two different
+ * places. A `Speaker` plays to the machine it runs on, which is right when
+ * that machine is the one with the candidate in front of it. A `Synthesizer`
+ * hands the bytes back instead, for the deployed case where the server is in
+ * a datacentre and the only speakers that matter are the browser's.
+ */
+export interface Synthesis {
+  /** WAV: a streaming header (see `wavHeader`) followed by piper's PCM. */
+  audio: Readable
+  /** Kills the synthesiser. Safe after it has already exited. */
+  cancel(): void
+}
+
+export interface Synthesizer {
+  synthesize(text: string): Synthesis
+}
+
+/**
+ * A WAV header for audio whose length is not known yet.
+ *
+ * Synthesis is streamed as piper produces it — waiting for the whole sentence
+ * before sending any of it would add the full synthesis time to the silence
+ * before the first word, which is the one cost this approach has over
+ * `SpeechSynthesis` and the one worth not paying twice.
+ *
+ * That means the two size fields cannot be filled in. `0xffffffff` is what
+ * ffmpeg itself writes when muxing WAV to a pipe, and every browser decoder
+ * reads it as "keep going until the stream ends".
+ */
+export function wavHeader(sampleRate: number = PIPER_SAMPLE_RATE): Buffer {
+  const header = Buffer.alloc(44)
+  const bitsPerSample = 16
+  const channels = 1
+  const byteRate = (sampleRate * channels * bitsPerSample) / 8
+
+  header.write('RIFF', 0, 'ascii')
+  header.writeUInt32LE(0xffffffff, 4) // RIFF chunk size — unknown
+  header.write('WAVE', 8, 'ascii')
+  header.write('fmt ', 12, 'ascii')
+  header.writeUInt32LE(16, 16) // PCM fmt chunk is 16 bytes
+  header.writeUInt16LE(1, 20) // 1 = uncompressed PCM
+  header.writeUInt16LE(channels, 22)
+  header.writeUInt32LE(sampleRate, 24)
+  header.writeUInt32LE(byteRate, 28)
+  header.writeUInt16LE((channels * bitsPerSample) / 8, 32) // block align
+  header.writeUInt16LE(bitsPerSample, 34)
+  header.write('data', 36, 'ascii')
+  header.writeUInt32LE(0xffffffff, 40) // data chunk size — unknown
+  return header
+}
+
+/**
+ * piper writing WAV to a stream instead of to a speaker.
+ *
+ * The subprocess is the same one `piperSpeaker` runs — `--output_raw` on
+ * stdout — which is why this could be added at all: the only thing that was
+ * ever local about server-side TTS was the `ffplay` on the other end of the
+ * pipe.
+ *
+ * Errors arrive as an `error` event on `audio` rather than a rejected promise,
+ * because the response has usually started by the time piper fails and there
+ * is no longer a status code to change. The route's job at that point is to
+ * destroy the response so the browser sees a truncated body and moves on,
+ * which is exactly what one missed sentence should cost.
+ */
+export function piperSynthesizer(opts: SayOptions = {}): Synthesizer {
+  return {
+    synthesize(text: string): Synthesis {
+      const piper = spawn('piper', piperArgs(opts), { stdio: ['pipe', 'pipe', 'pipe'] })
+      // `PassThrough` rather than handing back `piper.stdout` directly: the
+      // header has to go first, and prepending to a subprocess's own stdout is
+      // not something a caller should have to remember to do.
+      const audio = new PassThrough()
+      audio.write(wavHeader())
+
+      piper.on('error', (err) => {
+        audio.destroy(new Error(`failed to spawn "piper": ${err.message}`))
+      })
+      piper.stdout?.pipe(audio)
+      // piper is chatty on stderr even when it succeeds, so a non-zero exit is
+      // the only signal worth acting on. A killed process is a cancellation —
+      // the listener navigated away — and must not be reported as a failure.
+      piper.on('close', (code, signal) => {
+        if (signal === null && code !== 0 && code !== null) {
+          audio.destroy(new Error(`piper exited with code ${String(code)}`))
+        }
+      })
+      piper.stdin?.end(text)
+
+      return {
+        audio,
+        cancel(): void {
+          piper.kill()
+          audio.destroy()
+        },
+      }
+    },
+  }
+}
+
+/**
+ * Confirm piper can run, at startup, for a server that synthesises rather than
+ * speaks. Deliberately does not require `ffplay`: nothing is being played
+ * here, and demanding a player would make a deployed image carry a binary it
+ * would never run.
+ */
+export function checkSynthEngine(voice?: string, env: NodeJS.ProcessEnv = process.env): string {
+  try {
+    execFileSync('command', ['-v', 'piper'], { env, shell: true, stdio: 'ignore' })
+  } catch {
+    throw new Error('piper is not on PATH')
+  }
+  // Checked here rather than left to piper, which reports a missing model on
+  // stderr of a process whose stdout is already being streamed to a browser —
+  // i.e. as a sentence that plays as silence.
+  if (voice && !existsSync(voice)) {
+    throw new Error(`PIPER_VOICE="${voice}" does not exist`)
+  }
+  return voice ? `piper, ${basename(voice)}, streamed to the browser` : 'piper (default voice), streamed to the browser'
 }
 
 /**

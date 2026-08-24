@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
 import { createSessionStore } from './session-store'
 import { connect } from 'node:net'
+import { Readable } from 'node:stream'
 import { readSSE } from './test-helpers/sse'
 import { useCliBackend } from './test-helpers/backend-env'
 
@@ -1503,5 +1504,106 @@ describe('behavioural competency', () => {
     await stream.body?.getReader().read()
     expect(system).toContain('Conflict')
     expect(system).toMatch(/Do not announce the competency by name/)
+  })
+})
+
+describe('GET /api/session/:id/say/:seq', () => {
+  // A stand-in for piper: hands back a body that names the text it was asked
+  // to synthesise, so a test can assert *which* sentence reached the engine
+  // without spawning one.
+  function fakeSynthesizer() {
+    const asked: string[] = []
+    let cancelled = 0
+    return {
+      asked,
+      cancelled: () => cancelled,
+      synthesize: (text: string) => {
+        asked.push(text)
+        return { audio: Readable.from([Buffer.from(`AUDIO:${text}`)]), cancel: () => { cancelled += 1 } }
+      },
+    }
+  }
+
+  async function drilled(synth: VoiceServerDeps['synthesizer']) {
+    const { port } = await listen(baseDeps({ synthesizer: synth }))
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'mock' }),
+    })
+    const { id } = (await created.json()) as { id: string }
+    // The opening turn runs on the stream, which is what files the sentences.
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    const sentence = await readSSE(stream)
+    return { port, id, sentence }
+  }
+
+  it('serves the sentence the interviewer actually said, by sequence number', async () => {
+    const synth = fakeSynthesizer()
+    const { port, id } = await drilled(synth)
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/say/0`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('audio/wav')
+    expect(await res.text()).toBe('AUDIO:Ready when you are.')
+    expect(synth.asked).toEqual(['Ready when you are.'])
+  })
+
+  it('puts a seq on the sentence event so the client knows what to fetch', async () => {
+    const { sentence } = await drilled(fakeSynthesizer())
+    expect(sentence.event).toBe('sentence')
+    expect(sentence.data).toMatchObject({ text: 'Ready when you are.', seq: 0 })
+  })
+
+  // Without a synthesiser the route would 404, and a `seq` the client cannot
+  // use is worse than none: its absence is how the client decides to fall
+  // back to speaking the sentence itself.
+  it('omits seq entirely when the server has no synthesiser', async () => {
+    const { port } = await listen(baseDeps())
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'mock' }),
+    })
+    const { id } = (await created.json()) as { id: string }
+    const stream = await fetch(`http://127.0.0.1:${port}/api/session/${id}/stream`)
+    const sentence = await readSSE(stream)
+    expect(sentence.event).toBe('sentence')
+    expect(sentence.data).toEqual({ speaker: 'interviewer', text: 'Ready when you are.' })
+  })
+
+  // The route takes an index into what was said, never the text to say. A
+  // route that reads back whatever string it is handed is an open TTS service
+  // wearing a session id — and a way to put words in the interviewer's mouth.
+  it('404s a sequence number the session never produced', async () => {
+    const synth = fakeSynthesizer()
+    const { port, id } = await drilled(synth)
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/say/99`)
+    expect(res.status).toBe(404)
+    expect(synth.asked).toEqual([])
+  })
+
+  it('404s an unknown session rather than synthesising anything', async () => {
+    const synth = fakeSynthesizer()
+    const { port } = await drilled(synth)
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/nope/say/0`)
+    expect(res.status).toBe(404)
+    expect(synth.asked).toEqual([])
+  })
+
+  it('kills the synthesiser when the listener goes away mid-sentence', async () => {
+    let cancelled = 0
+    // Never ends on its own, so the only way this request finishes is the
+    // abort below — which is the barge-in and navigate-away path.
+    const stalled = new Readable({ read() {} })
+    const { port, id } = await drilled({
+      synthesize: () => ({ audio: stalled, cancel: () => { cancelled += 1 } }),
+    })
+    const abort = new AbortController()
+    const pending = fetch(`http://127.0.0.1:${port}/api/session/${id}/say/0`, { signal: abort.signal })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    abort.abort()
+    await pending.catch(() => {})
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(cancelled).toBeGreaterThan(0)
   })
 })
