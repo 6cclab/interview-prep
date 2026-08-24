@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DebugVerdict, DrillVerdict } from '../types'
+import type { CostMeasurement, DebugVerdict, DrillVerdict } from '../types'
 import { liveIndex, type StreamEntry } from '../stream'
 import { Markdown } from './Markdown'
 
@@ -77,6 +77,62 @@ export function passFooter(hintRung: number): string {
   return `Rung ${hintRung} of 4 · help taken`
 }
 
+/** Seconds to `41.2s` / `410ms` — the unit the number is actually legible in. */
+export function costLabel(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)}s`
+}
+
+/**
+ * How wide the two bars are, as percentages of the row.
+ *
+ * The budget bar is pinned short and the overrun is what grows, because the
+ * comparison being drawn is "how far past" rather than "how long". Capped so a
+ * 300x overrun does not render a bar three screens wide and lose the budget
+ * reference entirely — past the cap the *number* carries the magnitude and the
+ * bar just says "far".
+ */
+export function costWidths(measurement: CostMeasurement): { budget: number; actual: number } {
+  // 4%, not the handoff's literal 13px. Its numbers were measured on a board of
+  // one fixed width, and the ratio is what carries the meaning — 13px against
+  // 268px is the 20.6x of its own worked example. Sized so that example, and a
+  // real measured 8.3x (min-eating-speed's brute force: 41.4s against 5.00s),
+  // both draw proportionally instead of pinning to the cap. A budget bar wide
+  // enough to look substantial is a budget bar that caps at 7x.
+  const BUDGET_PCT = 4
+  const MAX_PCT = 100
+  const ratio = measurement.actualMs / measurement.budgetMs
+  return { budget: BUDGET_PCT, actual: Math.min(MAX_PCT, Math.max(BUDGET_PCT, BUDGET_PCT * ratio)) }
+}
+
+/**
+ * The two-bar measurement, and the reason the third verdict exists.
+ *
+ * Both numbers are real: every cost fixture times itself and asserts
+ * `expect(elapsed).toBeLessThan(budget)`, so a failure states the actual and the
+ * ceiling. Neither is estimated. The bars are the clearest possible statement
+ * that this is a *measurement* — a working answer, measured, and too expensive —
+ * rather than a failure, which is the whole point the design makes about not
+ * colouring this one red.
+ */
+function CostBars({ measurement }: { measurement: CostMeasurement }) {
+  const width = costWidths(measurement)
+  return (
+    <div className="drill-cost">
+      <div className="drill-cost-row">
+        <span>Budget</span>
+        <span className="drill-cost-bar" style={{ width: `${width.budget}%` }} />
+        <time>{costLabel(measurement.budgetMs)}</time>
+      </div>
+      <div className="drill-cost-row">
+        <span>Yours</span>
+        <span className="drill-cost-bar" data-actual="" style={{ width: `${width.actual}%` }} />
+        <time>{costLabel(measurement.actualMs)}</time>
+      </div>
+    </div>
+  )
+}
+
 function DrillVerdictEntry({ verdict, hintRung }: { verdict: DrillVerdict; hintRung: number }) {
   const kind = drillVerdictKind(verdict)
   return (
@@ -105,6 +161,7 @@ function DrillVerdictEntry({ verdict, hintRung }: { verdict: DrillVerdict; hintR
               that this is a measurement rather than an alarm, and the sentence
               doing that work has to come before the list of red-looking names. */}
           <p>Correctness passed. The cost did not — this is a working answer that is too expensive.</p>
+          {verdict.measurement !== undefined && <CostBars measurement={verdict.measurement} />}
           <pre>{verdict.failed.join('\n')}</pre>
           <footer>The answer stands · the cost does not</footer>
         </>

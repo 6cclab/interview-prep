@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   classifyFailures,
   failedTestsFromJson,
+  parseCostMeasurement,
   runDrillTests,
   verdictCue,
   type DrillVerdict,
@@ -323,5 +324,95 @@ describe('verdictCue', () => {
     const cue = verdictCue({ kind: 'correctness-red', failed: ['maxArea — correctness > x'] })
     expect(cue).toMatch(/wrong/i)
     expect(cue).toMatch(/keeps going/i)
+  })
+})
+
+/**
+ * The cost measurement: two real numbers, read off the assertion that failed.
+ *
+ * This is the data behind the over-budget verdict's two bars, and the reason
+ * that verdict can honestly call itself a measurement. The numbers are never
+ * derived or estimated — every cost fixture in `problems/` times itself with
+ * `performance.now()` and asserts `toBeLessThan(budget)`, so a failure states
+ * both the actual and the ceiling.
+ */
+describe('parseCostMeasurement', () => {
+  // Verbatim from a real vitest JSON report, captured rather than assumed.
+  const REAL = [
+    'AssertionError: expected 41203.482 to be less than 5000',
+    '    at /Users/someone/projects/interview-prep/problems/heap-top-k/kth-largest-stream/solution.test.ts:4:19',
+    '    at file:///…/node_modules/.pnpm/@vitest+runner@3.2.7/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11',
+  ].join('\n')
+
+  it('reads both numbers out of a real budget failure', () => {
+    expect(parseCostMeasurement([REAL])).toEqual({ actualMs: 41203.482, budgetMs: 5000 })
+  })
+
+  /**
+   * The message this is read out of begins with a stack trace whose first frame
+   * is the suite's absolute path — which contains `problems/<pattern>/`, i.e.
+   * the answer. Returning two numbers rather than the text is what makes that
+   * unreachable instead of dependent on a caller remembering to scrub it.
+   */
+  it('carries no text out of the message, so the pattern path cannot travel', () => {
+    const measurement = parseCostMeasurement([REAL])
+    expect(JSON.stringify(measurement)).not.toContain('heap-top-k')
+    expect(JSON.stringify(measurement)).not.toContain('problems/')
+    expect(Object.keys(measurement!).sort()).toEqual(['actualMs', 'budgetMs'])
+  })
+
+  it('is null for a failure that is not a budget assertion', () => {
+    expect(parseCostMeasurement(['AssertionError: expected 3 to be 4'])).toBeNull()
+    expect(parseCostMeasurement([])).toBeNull()
+    expect(parseCostMeasurement(undefined)).toBeNull()
+  })
+
+  it('refuses a zero or negative budget rather than dividing by it', () => {
+    expect(parseCostMeasurement(['expected 12 to be less than 0'])).toBeNull()
+  })
+})
+
+describe('classifyFailures with a measurement', () => {
+  const withCost = (suite: string, actualMs: number, budgetMs: number): FailedTest => ({
+    suite,
+    title: 'a case',
+    cost: { actualMs, budgetMs },
+  })
+
+  it('attaches the measurement to a cost-red', () => {
+    const verdict = classifyFailures([withCost('kth — scale', 41203, 5000)])
+    expect(verdict).toEqual({
+      kind: 'cost-red',
+      failed: ['kth — scale > a case'],
+      measurement: { actualMs: 41203, budgetMs: 5000 },
+    })
+  })
+
+  /**
+   * By ratio, not by absolute milliseconds. A 40s answer against a 5s budget is
+   * 8x; a 3s answer against a 100ms budget is 30x. The second is the more
+   * serious result even though it is the smaller number, and picking the larger
+   * number would report the milder overrun.
+   */
+  it('picks the worst overrun by ratio, not by absolute time', () => {
+    const verdict = classifyFailures([withCost('a — scale', 40_000, 5000), withCost('b — budget', 3000, 100)])
+    expect(verdict).toMatchObject({ measurement: { actualMs: 3000, budgetMs: 100 } })
+  })
+
+  it('still classifies a cost failure that carries no measurement', () => {
+    const verdict = classifyFailures([failing('kth — scale')])
+    expect(verdict.kind).toBe('cost-red')
+    expect(verdict).not.toHaveProperty('measurement')
+  })
+
+  /**
+   * The cardinal sin, restated at the data layer: a correctness failure is a
+   * wrong answer and has no budget to measure. Attaching one would invite the
+   * screen to draw cost bars on it and read as "right, but slow".
+   */
+  it('never attaches a measurement to a wrong answer', () => {
+    const verdict = classifyFailures([withCost('kth — correctness', 41203, 5000)])
+    expect(verdict.kind).toBe('correctness-red')
+    expect(verdict).not.toHaveProperty('measurement')
   })
 })

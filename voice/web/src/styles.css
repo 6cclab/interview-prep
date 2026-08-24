@@ -1377,6 +1377,14 @@ ol.md__list {
   color: var(--destructive);
 }
 
+/* The third verdict, and the reason it is `--foreground` rather than a colour:
+   a partly-finished attempt is not a pass and it is emphatically not a failure.
+   Red carries one meaning on this screen — the attempt did not land — and a
+   round where the optimal was named and half-written is not that. */
+.history__result[data-result='partial'] {
+  color: var(--foreground);
+}
+
 /*
  * Help taken, in its own column and ochre only when help was in fact taken.
  *
@@ -1789,6 +1797,25 @@ html:not(.dark) .drill-verdict[data-verdict="over-budget"] { background: color-m
 html:not(.dark) .drill-verdict[data-verdict="wrong"]       { background: color-mix(in oklab, var(--destructive) 7%, var(--card)); }
 html:not(.dark) .drill-rail[data-state="save-conflict"]    { background: color-mix(in oklab, var(--destructive) 10%, var(--background)); }
 html:not(.dark) .drill-rail[data-state="transcription-failed"] { background: color-mix(in oklab, var(--warning) 22%, var(--background)); }
+
+/* --- the cost measurement -------------------------------------
+   Budget against actual, on the over-budget verdict. Both numbers come off the
+   failing `toBeLessThan` assertion, so nothing here is estimated. The bars are
+   what make this read as a measurement rather than an alarm — the whole reason
+   this verdict is not red. Widths are inline, from `costWidths`. */
+.drill-cost { display: flex; flex-direction: column; gap: 5px; }
+.drill-cost-row { display: flex; align-items: center; gap: 10px; }
+.drill-cost-row > span:first-child {
+  width: 52px; flex: none;
+  font-family: var(--drill-mono); font-size: 10px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground);
+}
+.drill-cost-bar { height: 7px; flex: none; background: var(--foreground); }
+.drill-cost-bar[data-actual] { background: var(--brand); }
+.drill-cost-row > time {
+  font-family: var(--drill-mono); font-size: 11px; color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 
 /* --- hint entry in the stream --------------------------------- */
 .drill-entry[data-kind="hint"] .drill-verdict,

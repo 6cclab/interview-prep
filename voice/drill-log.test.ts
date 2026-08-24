@@ -49,6 +49,7 @@ describe('parseDrillLog', () => {
         problem: 'contains-duplicate',
         pattern: 'hashmap-counting',
         solved: true,
+        result: 'solved',
         hints: 1,
         elapsedMs: 252_000,
         note: 'Shipped early.',
@@ -82,6 +83,48 @@ describe('parseDrillLog', () => {
 
   it('counts yes case-insensitively', () => {
     expect(parseDrillLog(log('| 2026-08-09 | celebrity | elimination | Yes | 0 | 05:00 | n |'))[0]!.solved).toBe(true)
+  })
+
+  /**
+   * The Solved column has never been yes/no in practice — the real log carries a
+   * `partial` row — and the strict boolean had nowhere to put it, so the screen
+   * reported a half-finished round as one that went nowhere.
+   *
+   * The invariant that must survive: widening the *vocabulary* must not widen
+   * the *count*. `solved` stays false for a partial, because every figure the
+   * screen leads with is derived from it.
+   */
+  describe('the third result', () => {
+    const row = (solved: string) =>
+      parseDrillLog(log(`| 2026-08-09 | celebrity | elimination | ${solved} | 0 | 05:00 | n |`))[0]!
+
+    it.each(['partial', 'Partial', 'partly', 'PARTLY'])('reads %j as partial', (word) => {
+      expect(row(word).result).toBe('partial')
+    })
+
+    it('never counts a partial as solved', () => {
+      for (const word of ['partial', 'partly']) {
+        expect(row(word).solved).toBe(false)
+        expect(summarise([row(word)]).solved).toBe(0)
+        expect(summarise([row(word)]).cold).toBe(0)
+      }
+    })
+
+    it('counts a partial in its own figure', () => {
+      expect(summarise([row('partial')]).partial).toBe(1)
+      expect(summarise([row('yes')]).partial).toBe(0)
+      expect(summarise([row('no')]).partial).toBe(0)
+    })
+
+    it.each(['no', 'sort of', '', 'y', 'maybe'])('reads %j as unsolved, not partial', (word) => {
+      expect(row(word).result).toBe('unsolved')
+    })
+
+    it('agrees with the boolean everywhere the boolean has an opinion', () => {
+      expect(row('yes').result).toBe('solved')
+      expect(row('yes').solved).toBe(true)
+      expect(row('no').result).toBe('unsolved')
+    })
   })
 
   // One bad line must not blank the screen — this file is hand-edited, and
@@ -146,6 +189,7 @@ describe('round trip with appendDrillLog', () => {
         problem: 'contains-duplicate',
         pattern: 'hashmap-counting',
         solved: true,
+        result: 'solved',
         hints: 1,
         elapsedMs: 252_000,
         note: 'Split 0 from -0 | needed a nudge',
@@ -204,6 +248,6 @@ describe('summarise', () => {
   })
 
   it('is all zeroes for an empty history', () => {
-    expect(summarise([])).toEqual({ attempts: 0, solved: 0, cold: 0, problems: 0, medianSolvedMs: null })
+    expect(summarise([])).toEqual({ attempts: 0, solved: 0, partial: 0, cold: 0, problems: 0, medianSolvedMs: null })
   })
 })
