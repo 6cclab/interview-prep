@@ -809,12 +809,18 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // is what the only client sent before the coding track existed.
     if (req.method === 'GET' && url.pathname === '/api/problems') {
       const track = url.searchParams.get('track') ?? 'design'
+      // Kept in step with `parseDrill`'s list, which is the other half of this
+      // pair. `assisted` was added there and not here, so the picker 400'd on
+      // the one track it could not list and the round was unreachable from the
+      // UI for as long as it has existed. See the test that pins the two lists
+      // together.
       if (
         track !== 'design' &&
         track !== 'coding' &&
         track !== 'mock' &&
         track !== 'coach' &&
-        track !== 'debug'
+        track !== 'debug' &&
+        track !== 'assisted'
       ) {
         sendJson(res, 400, { error: `Unknown track: ${track}` })
         return
@@ -846,7 +852,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         })
         return
       }
-      if (track !== 'coding' && track !== 'coach') {
+      if (track !== 'coding' && track !== 'coach' && track !== 'assisted') {
         sendJson(res, 200, { problems: listDesignProblems(deps.root) })
         return
       }
@@ -857,7 +863,11 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // unchanged, and a client that ignores `difficulties` still gets a
       // complete, correct list.
       // `coach` shares the coding problem set — it is the same thirty problems,
-      // approached the other way round.
+      // approached the other way round. `assisted` shares it too: the same
+      // problems run with an agent, where what is scored is judgement rather
+      // than recall. `buildSystemPrompt` resolves it from `problems/<pattern>/`
+      // exactly like a coding drill (voice/context.ts), so serving any other
+      // list here would offer slugs the session could not then resolve.
       const coding = listCodingProblems(deps.root)
       sendJson(res, 200, {
         problems: coding.map((problem) => problem.slug),
