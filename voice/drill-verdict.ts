@@ -20,6 +20,49 @@ export interface FailedTest {
   suite: string
   /** The `it` name. */
   title: string
+  /** The two numbers a budget assertion failed on, when it was one. See `parseCostMeasurement`. */
+  cost?: CostMeasurement
+}
+
+/**
+ * What a blown budget actually measured: the wall-clock the solution took, and
+ * the ceiling it was asserted against.
+ *
+ * Both numbers are real and both come from the suite. Every cost fixture in
+ * `problems/` times itself with `performance.now()` and asserts
+ * `expect(elapsed).toBeLessThan(budget)`, so a failure states both — this is
+ * read back off the assertion rather than derived, invented, or estimated.
+ */
+export interface CostMeasurement {
+  actualMs: number
+  budgetMs: number
+}
+
+/**
+ * The two numbers out of a vitest budget failure, or null.
+ *
+ * Verified against a real report rather than assumed: the message is exactly
+ * `AssertionError: expected 41203.482 to be less than 5000`.
+ *
+ * **Only the numbers are taken, never the message.** The rest of that string is
+ * a stack trace whose first frame is the suite's absolute path — which contains
+ * `problems/<pattern>/`, i.e. the answer. Returning a parsed pair rather than
+ * the text is what makes the spoiler unreachable here instead of dependent on a
+ * caller remembering to run `stripPatternPaths` over it.
+ *
+ * A non-finite or non-positive budget is refused: it would divide to Infinity or
+ * NaN in the bar widths, and a bar of unknown length is worse than no bar.
+ */
+export function parseCostMeasurement(messages: string[] | undefined): CostMeasurement | null {
+  for (const message of messages ?? []) {
+    const found = /expected\s+([\d.]+)\s+to be less than\s+([\d.]+)/.exec(message)
+    if (found === null) continue
+    const actualMs = Number(found[1])
+    const budgetMs = Number(found[2])
+    if (!Number.isFinite(actualMs) || !Number.isFinite(budgetMs) || budgetMs <= 0) continue
+    return { actualMs, budgetMs }
+  }
+  return null
 }
 
 /** `<suite> > <title>` — the display form, built here so the delimiter is ours. */
@@ -32,8 +75,15 @@ export type DrillVerdict =
   | { kind: 'green' }
   /** At least one correctness test failed: the answer is wrong. */
   | { kind: 'correctness-red'; failed: string[] }
-  /** Correctness passed, a cost test did not: right answer, wrong cost. */
-  | { kind: 'cost-red'; failed: string[] }
+  /**
+   * Correctness passed, a cost test did not: right answer, wrong cost.
+   *
+   * `measurement` is the worst of the failing budgets — see `classifyFailures`.
+   * Optional because it is only present when the assertion was a `toBeLessThan`
+   * one; a cost fixture that fails some other way still classifies correctly and
+   * simply has no numbers to show.
+   */
+  | { kind: 'cost-red'; failed: string[]; measurement?: CostMeasurement }
   /** The suite could not be run at all — a compile error, a missing file. */
   | { kind: 'errored'; message: string }
 
@@ -52,12 +102,26 @@ export type DrillVerdict =
  */
 export function parseDrillVerdict(value: unknown): DrillVerdict | null {
   if (typeof value !== 'object' || value === null) return null
-  const { kind, failed, message } = value as Record<string, unknown>
+  const { kind, failed, message, measurement } = value as Record<string, unknown>
   if (kind === 'green') return { kind }
   if (kind === 'errored') return typeof message === 'string' ? { kind, message } : null
   if (kind !== 'correctness-red' && kind !== 'cost-red') return null
   if (!Array.isArray(failed) || !failed.every((f) => typeof f === 'string')) return null
-  return { kind, failed: failed as string[] }
+  if (kind === 'correctness-red') return { kind, failed: failed as string[] }
+  // The measurement is dropped rather than rejected when it is malformed: it is
+  // decoration on a verdict whose *kind* is the load-bearing part, and refusing
+  // the whole body would turn a cosmetic problem into a failed test run.
+  const checked = parseMeasurement(measurement)
+  return checked === null ? { kind, failed: failed as string[] } : { kind, failed: failed as string[], measurement: checked }
+}
+
+/** A `CostMeasurement` off the wire, or null. Same bounds as `parseCostMeasurement`. */
+function parseMeasurement(value: unknown): CostMeasurement | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { actualMs, budgetMs } = value as Record<string, unknown>
+  if (typeof actualMs !== 'number' || typeof budgetMs !== 'number') return null
+  if (!Number.isFinite(actualMs) || !Number.isFinite(budgetMs) || budgetMs <= 0) return null
+  return { actualMs, budgetMs }
 }
 
 // A suite whose name marks it as testing behaviour rather than cost.
@@ -77,7 +141,18 @@ export function classifyFailures(failed: FailedTest[]): DrillVerdict {
   if (correctness.length > 0) {
     return { kind: 'correctness-red', failed: correctness.map(failedTestName) }
   }
-  return { kind: 'cost-red', failed: failed.map(failedTestName) }
+  // The worst overrun, by ratio rather than by absolute milliseconds: a 40s
+  // answer against a 5s budget and a 3s answer against a 100ms one are 8x and
+  // 30x, and the second is the more serious result even though it is the
+  // smaller number. Deterministic, so two runs of the same failure agree.
+  const measured = failed.map((test) => test.cost).filter((cost) => cost !== undefined)
+  const measurement = measured.reduce<CostMeasurement | undefined>(
+    (worst, cost) => (worst === undefined || cost.actualMs / cost.budgetMs > worst.actualMs / worst.budgetMs ? cost : worst),
+    undefined
+  )
+  return measurement === undefined
+    ? { kind: 'cost-red', failed: failed.map(failedTestName) }
+    : { kind: 'cost-red', failed: failed.map(failedTestName), measurement }
 }
 
 /**
@@ -97,7 +172,13 @@ export function classifyFailures(failed: FailedTest[]): DrillVerdict {
 export function failedTestsFromJson(json: string): FailedTest[] {
   const parsed = JSON.parse(json) as {
     testResults?: {
-      assertionResults?: { status?: string; title?: string; ancestorTitles?: string[]; fullName?: string }[]
+      assertionResults?: {
+        status?: string
+        title?: string
+        ancestorTitles?: string[]
+        fullName?: string
+        failureMessages?: string[]
+      }[]
     }[]
   }
   const failed: FailedTest[] = []
@@ -106,7 +187,11 @@ export function failedTestsFromJson(json: string): FailedTest[] {
       if (assertion.status !== 'failed') continue
       const suite = (assertion.ancestorTitles ?? []).join(' > ')
       const title = assertion.title ?? assertion.fullName ?? '(unnamed test)'
-      failed.push({ suite, title })
+      // The message itself is still never kept — `parseCostMeasurement` returns
+      // two numbers or nothing, so the stack trace it was read out of (which
+      // begins with the suite's `problems/<pattern>/` path) cannot travel.
+      const cost = parseCostMeasurement(assertion.failureMessages)
+      failed.push(cost === null ? { suite, title } : { suite, title, cost })
     }
   }
   return failed

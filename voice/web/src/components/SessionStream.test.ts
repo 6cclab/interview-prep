@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { drillVerdictKind, debugVerdictKind, passFooter } from './SessionStream'
+import { drillVerdictKind, debugVerdictKind, passFooter, costLabel, costWidths } from './SessionStream'
 
 /**
  * The verdict mapping is the one piece of this screen that can teach the wrong
@@ -79,5 +79,59 @@ describe('passFooter', () => {
       expect(passFooter(rung)).not.toContain('Cold')
       expect(passFooter(rung)).toContain(`Rung ${rung} of 4`)
     }
+  })
+})
+
+/**
+ * The two bars. Both numbers are real; these pin how they are drawn.
+ */
+describe('costLabel', () => {
+  it('uses milliseconds below a second, where seconds would round to nothing', () => {
+    expect(costLabel(410)).toBe('410ms')
+    expect(costLabel(999)).toBe('999ms')
+  })
+
+  it('uses seconds above one, with enough precision to be worth reading', () => {
+    expect(costLabel(2000)).toBe('2.00s')
+    expect(costLabel(41203.482)).toBe('41.2s')
+  })
+})
+
+describe('costWidths', () => {
+  it('draws the overrun proportionally to how far past budget it is', () => {
+    const twice = costWidths({ actualMs: 4000, budgetMs: 2000 })
+    const fourTimes = costWidths({ actualMs: 8000, budgetMs: 2000 })
+    expect(fourTimes.actual).toBeGreaterThan(twice.actual)
+    expect(twice.actual).toBeGreaterThan(twice.budget)
+  })
+
+  /**
+   * A 300x overrun would otherwise render a bar three screens wide, losing the
+   * budget reference the comparison exists to make. Past the cap the number
+   * carries the magnitude.
+   */
+  it('caps a runaway overrun rather than drawing off the screen', () => {
+    const wild = costWidths({ actualMs: 600_000, budgetMs: 2000 })
+    expect(wild.actual).toBeLessThanOrEqual(100)
+  })
+
+  /**
+   * The cap must not bite on ordinary results, or every overrun draws the same
+   * full-width bar and the comparison says nothing. Both of these are real:
+   * 20.6x is the handoff's own worked example, and 8.3x is min-eating-speed's
+   * brute force measured end to end through `runDrillTests`.
+   */
+  it.each([
+    ['the handoff’s worked example, 20.6x', 41_200, 2000],
+    ['a measured brute force, 8.3x', 41_374, 5000],
+  ])('draws %s proportionally rather than capped', (_name, actualMs, budgetMs) => {
+    expect(costWidths({ actualMs, budgetMs }).actual).toBeLessThan(100)
+  })
+
+  it('never draws the overrun shorter than the budget it exceeded', () => {
+    // Only reachable from a hand-forged verdict, but a "Yours" bar drawn
+    // shorter than "Budget" would state the opposite of the verdict's own head.
+    const odd = costWidths({ actualMs: 1, budgetMs: 5000 })
+    expect(odd.actual).toBeGreaterThanOrEqual(odd.budget)
   })
 })

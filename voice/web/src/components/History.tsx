@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useEffect } from 'react'
 import { Button } from 'brutalkit/button'
-import type { HistoryPayload, HistoryRow } from '../types'
+import type { DrillResult, HistoryPayload, HistoryRow } from '../types'
 import { fmt } from '../phase'
 
 /**
@@ -63,9 +63,38 @@ export function firstSentence(note: string): string {
  * the same result as a cold one, and colouring them identically would undo the
  * distinction the rest of this screen is built around.
  */
-function tone(row: HistoryRow): 'cold' | 'helped' | 'unsolved' {
+function tone(row: HistoryRow): 'cold' | 'helped' | 'partial' | 'unsolved' {
+  // Checked before the boolean, because `solved` is false for a partial and
+  // would otherwise tone it identically to an attempt that went nowhere.
+  if (resultOf(row) === 'partial') return 'partial'
   if (!row.solved) return 'unsolved'
   return row.hints === 0 ? 'cold' : 'helped'
+}
+
+/**
+ * The result column's three states.
+ *
+ * Falls back to the boolean when the server does not send `result` — an older
+ * server has the same two states it always had, and inventing a third from a
+ * boolean is not possible.
+ *
+ * `Partial` is the design's third verdict, in the treatment the handoff
+ * specifies for it: `--foreground`, no red. The handoff's example wording was
+ * "Correct, over budget", which the log has no column for — its cost outcome is
+ * never written down. What the log *does* record is a partly-finished attempt,
+ * and that is the same shape of fact: not a pass, and emphatically not a
+ * failure. Naming it "Correct, over budget" would be claiming something the
+ * record never said.
+ */
+export function resultOf(row: HistoryRow): DrillResult {
+  if (row.result !== undefined) return row.result
+  return row.solved ? 'solved' : 'unsolved'
+}
+
+const RESULT_LABEL: Record<DrillResult, string> = {
+  solved: 'Solved',
+  partial: 'Partial',
+  unsolved: 'Not solved',
 }
 
 function useHistory(reveal: boolean): { payload: HistoryPayload | null; loading: boolean; failed: boolean } {
@@ -187,7 +216,15 @@ export function History({ onGoHome }: { onGoHome(): void }) {
             <div className="history__summary">
               <Stat label="Solved cold" value={summary.cold} of={`of ${summary.attempts}`} />
               <Stat label="Solved with help" value={summary.solved - summary.cold} />
-              <Stat label="Not solved" value={summary.attempts - summary.solved} />
+              {/* Partials come out of this figure rather than sitting silently
+                  inside it. `attempts - solved` counted the CrowdStrike round —
+                  optimal named at minute zero, half-written when time ran out —
+                  as an attempt that went nowhere. */}
+              <Stat
+                label="Not solved"
+                value={summary.attempts - summary.solved - (summary.partial ?? 0)}
+                of={summary.partial ? `· ${summary.partial} partial` : undefined}
+              />
               <Stat label="Problems seen" value={summary.problems} />
               <Stat
                 label="Median, when solved"
@@ -235,12 +272,11 @@ export function History({ onGoHome }: { onGoHome(): void }) {
                           {row.pattern ?? '—'}
                         </span>
                       )}
-                      {/* A mono verdict, not a colour swatch. `Correct, over
-                          budget` is in the design but not in the data: the log's
-                          Solved column is yes/no, so rendering a third verdict
-                          would mean inventing a record that was never written. */}
-                      <span role="cell" className="history__result" data-result={row.solved ? 'solved' : 'unsolved'}>
-                        {row.solved ? 'Solved' : 'Not solved'}
+                      {/* A mono verdict, not a colour swatch — a red pill reads
+                          as an alarm, and a drill you did not solve is a
+                          measurement. Three states; see `resultOf`. */}
+                      <span role="cell" className="history__result" data-result={resultOf(row)}>
+                        {RESULT_LABEL[resultOf(row)]}
                       </span>
                       {/* Ochre when help was in fact taken, muted when it was not.
                           A cold solve and a four-rung solve must never look alike.

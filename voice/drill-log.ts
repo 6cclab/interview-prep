@@ -16,10 +16,47 @@ import type { DrillLogRow } from './transcript'
  * silently; what can be is kept even if some fields are odd.
  */
 
+/**
+ * What the Solved column actually said, as three values rather than two.
+ *
+ * The column has never been yes/no in practice — `local/drill-log.md` carries a
+ * `partial` row (the 2026-08-19 CrowdStrike round: the optimal was named at
+ * minute zero and half-written when time ran out), and the parser's strict
+ * `=== 'yes'` test correctly refused to count it as a solve but then had nowhere
+ * to put it, so the screen reported it as **Not solved**. That is the same
+ * flattening the log's own preamble forbids, one column over: "a solve that took
+ * four hints is a different fact from a cold solve, and the log is useless if it
+ * flattens them."
+ *
+ * `partial` is deliberately its own value and not a shade of failure. Anything
+ * the file does not say explicitly is `unsolved` — the strictness is unchanged,
+ * only the vocabulary is wider.
+ */
+export type DrillResult = 'solved' | 'partial' | 'unsolved'
+
 /** A parsed row, plus the fields the screen derives rather than stores. */
 export interface HistoryRow extends Omit<DrillLogRow, 'startedAt'> {
   /** `YYYY-MM-DD`, exactly as written. Not a Date: the log has no time of day. */
   date: string
+  /**
+   * The three-valued reading of the Solved column.
+   *
+   * `solved` stays alongside it and stays exactly as strict — every count on the
+   * screen is derived from that boolean, and widening it would silently inflate
+   * the cold-solve figure the whole record is built around. This field is for
+   * *display*; `solved` is for arithmetic.
+   */
+  result: DrillResult
+}
+
+/** The words the log uses for a partly-finished attempt. Anything else is not one. */
+const PARTIAL = new Set(['partial', 'partly'])
+
+export function readResult(cell: string): DrillResult {
+  const word = cell.trim().toLowerCase()
+  if (word === 'yes') return 'solved'
+  if (PARTIAL.has(word)) return 'partial'
+  return 'unsolved'
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/
@@ -85,8 +122,10 @@ export function parseDrillLog(markdown: string): HistoryRow[] {
       problem: problem!,
       pattern: SLUG.test(pattern!) ? pattern! : '',
       // Strict, matching `splitDrillLog`: only an explicit yes is a solve, so a
-      // hand-written "partly" never counts as one.
+      // hand-written "partly" never counts as one. `result` below keeps the
+      // distinction this boolean has to throw away — see `DrillResult`.
       solved: solved!.toLowerCase() === 'yes',
+      result: readResult(solved!),
       hints: Number.isInteger(rung) && rung >= 0 && rung <= 4 ? rung : 0,
       elapsedMs: elapsedMs ?? 0,
       // Rejoined rather than taking cells[6]: an unescaped pipe typed by hand
@@ -111,6 +150,15 @@ export function readDrillLog(root: string): HistoryRow[] {
 export interface HistorySummary {
   attempts: number
   solved: number
+  /**
+   * Rows the log marks `partial`.
+   *
+   * Its own figure rather than folded into the not-solved count, which is where
+   * it silently sat: `attempts - solved` counted a round where the optimal was
+   * named and half-written as an attempt that went nowhere. Never added to
+   * `solved` — a partial is not a solve — so every existing figure is unchanged.
+   */
+  partial: number
   /** Solved at rung 0 — the only figure that means the recall was actually there. */
   cold: number
   /** Distinct problems attempted, which is coverage rather than fluency. */
@@ -138,6 +186,7 @@ export function summarise(rows: HistoryRow[]): HistorySummary {
   return {
     attempts: rows.length,
     solved: solvedRows.length,
+    partial: rows.filter((row) => row.result === 'partial').length,
     cold: rows.filter((row) => row.solved && row.hints === 0).length,
     problems: new Set(rows.map((row) => row.problem)).size,
     medianSolvedMs:

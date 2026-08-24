@@ -14,7 +14,9 @@ export {
   classifyFailures,
   failedTestName,
   failedTestsFromJson,
+  parseCostMeasurement,
   verdictCue,
+  type CostMeasurement,
   type DrillVerdict,
   type FailedTest,
 } from './drill-verdict'
@@ -96,7 +98,9 @@ export async function runDrillTests(opts: DrillTestOptions): Promise<DrillVerdic
   }
 
   try {
+    // Names are scrubbed; `cost` is two numbers and carries no text to scrub.
     const failed = failedTestsFromJson(report).map((test) => ({
+      ...test,
       suite: stripPatternPaths(test.suite),
       title: stripPatternPaths(test.title),
     }))
