@@ -18,6 +18,7 @@
     "domains": "tsx scripts/domains-cli.ts",
     "exercises": "tsx scripts/check-exercises.ts",
     "ingest": "tsx scripts/ingest.ts",
+    "migrate-local": "tsx scripts/migrate-local.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p voice/web/tsconfig.json",
     "mock:voice": "tsx voice/cli.ts mock",
     "build:web": "vite build --config voice/web/vite.config.ts",
