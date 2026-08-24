@@ -9,7 +9,7 @@ import { readCandidateName, renderCandidate } from './candidate'
  * reads its files through `voice/coach.ts`, which explains why that is a separate
  * door rather than an exemption inside this one.
  */
-export type Track = 'mock' | 'design' | 'coding' | 'coach' | 'debug'
+export type Track = 'mock' | 'design' | 'coding' | 'coach' | 'debug' | 'assisted'
 
 /**
  * Paths the interviewer must never see. `prompts/rules/no-spoilers.md` states
@@ -86,6 +86,23 @@ export function allowedPaths(track: Track, problem?: string, pattern?: string): 
     // an approach once already. No `meta.yaml` either; it names the pattern in a
     // field, and the pattern reaches the prompt deliberately and once, below.
     return ['prompts/drill.md', `problems/${pattern}/${problem}/README.md`]
+  }
+  if (track === 'assisted') {
+    if (!pattern) throw new Error('An assisted drill needs its resolved pattern.')
+    if (!PROBLEM_SLUG.test(pattern)) {
+      throw new Error(`Invalid pattern name: ${pattern}`)
+    }
+    // The same two files the coding track gets, and for the same reasons: no
+    // `solution.test.ts`, because the suite is the objective standard and its
+    // fixture comments have leaked an approach once already; no `meta.yaml`,
+    // because it names the pattern in a field.
+    //
+    // Deliberately NOT his working directory. This allowlist is read once, at
+    // prompt-build time, before he has written anything — so it cannot carry a
+    // file that does not exist yet. The working directory reaches the
+    // interviewer per turn instead, through `assistedCue` (voice/assisted.ts),
+    // which is the same route the coach track uses for the same reason.
+    return ['prompts/assisted.md', `problems/${pattern}/${problem}/README.md`]
   }
   if (track === 'debug') {
     // The bug report and the command file, and deliberately nothing else.
@@ -344,7 +361,7 @@ export function buildSystemPrompt(
     sections.push(`<pattern>${pattern}</pattern>`)
   }
 
-  if (track === 'design' || track === 'coding') {
+  if (track === 'design' || track === 'coding' || track === 'assisted') {
     voiceMode.push(
       '',
       'You are holding the clock, so you are responsible for how it is spent. If',
@@ -432,6 +449,85 @@ export function buildSystemPrompt(
     )
 
     if (vague) voiceMode.push('', ...CLARIFY_FIRST)
+  }
+
+  if (track === 'assisted') {
+    voiceMode.push(
+      '',
+      'You have no clock, no terminal and no files. What is done for you instead:',
+      '',
+      'The problem statement: he can already see it on screen. Do not read it out.',
+      'Open by asking him to tell you what the problem is asking for, in his own',
+      'words, before he opens his tool.',
+      '',
+      'The timer: the clock runs on screen, and each turn you are given is preceded',
+      'by a time check. Treat it as instruction to you, not as something he said —',
+      'never read it aloud.',
+      '',
+      'His working directory: each turn you are also given its current contents as a',
+      'bracketed note. It is state, not speech. Do not read it aloud or quote it at',
+      'length, and do not narrate every change — react to it only where it bears on',
+      'what he just said, or where it contradicts what he just told you it does.',
+      'That last case is the one worth catching.',
+      '',
+      'Running the tests: he runs them in his own terminal, and there is no Run',
+      'tests button on this track — his work is in a directory the browser does not',
+      'reach. So no verdict is delivered to you. You find out whether the suite',
+      'passed by asking him, and what he says is a claim rather than a result. That',
+      'is deliberate: on this track "I ran it and it passed" is exactly the sentence',
+      'worth probing, and you cannot probe a number you were handed.',
+      '',
+      'THERE IS NO HINT LADDER ON THIS TRACK, and this is the one thing that makes it',
+      'different from every other coding drill in this repo. He has a coding agent',
+      'open and unlimited help from it, so rationing your own help rations nothing.',
+      'Answer what he asks. Do not make him pay for a question, do not count rungs,',
+      'and never refuse something on the grounds that it would give too much away.',
+      '',
+      'What you are scoring instead is judgement, and it is entirely observable from',
+      'what he says and what appears in the directory:',
+      '',
+      'one, did he frame the problem before delegating it — the shape of the input,',
+      'the constraint that decides the approach, an edge case, and a complexity',
+      'target, said before the tool was asked for anything.',
+      'two, did he say what he expected back BEFORE reading what came back.',
+      'three, did he verify rather than accept — ran it, tested it, traced an edge',
+      'case by hand. Reading the code and pronouncing it correct is not verifying.',
+      'four, can he explain what the code does, and defend it when pushed.',
+      '',
+      'Probe those. Good questions are: what are you going to ask it for; what do you',
+      'expect it to come back with; how will you know if it is wrong; what does that',
+      'line do; why that data structure and not the obvious one; what happens on an',
+      'empty input. Ask them at the moment they bite, not as a checklist at the end.',
+      '',
+      'Push back at least once on something that IS correct, and see whether he',
+      'defends it or folds. A candidate who abandons right answers under mild',
+      'pressure is the specific failure this format produces, and you will not find',
+      'it by only challenging his mistakes.',
+      '',
+      'If he goes quiet, he is reading or the tool is generating. Do not fill the',
+      'pause. But if he pastes a prompt in and narrates nothing at all for two turns',
+      'running, say so once, plainly, because in the real round that silence is the',
+      'whole signal and it will be read as having nothing to say.',
+      '',
+      'Some of the round is spoken algorithmic questions with no code at all —',
+      'complexity, data-structure choice, how an approach degrades. Ask two or three',
+      'of those, and ask them while his tool is working rather than in a block at the',
+      'end. He cannot delegate an answer he has to say out loud, which is exactly why',
+      'they are on this track.',
+      '',
+      'The drill log: you cannot write it directly, but it does get written. Say your',
+      'verdict out loud as your closing turn — whether the problem was solved, and',
+      'the one thing that actually went wrong — and then end that final turn with',
+      'this block, exactly as shown:',
+      '',
+      '```drill-log',
+      'solved: yes or no',
+      'note: one line on his judgement, not on whether the code compiled',
+      '```',
+      '',
+      'It is stripped before your words reach him — do not speak it, name it, or',
+      'introduce it.',
+    )
   }
 
   if (track === 'debug') {
@@ -658,6 +754,20 @@ export const DESIGN_BUDGET_MS = 45 * 60 * 1000
  * for the same reason design's is.
  */
 export const CODING_BUDGET_MS = 45 * 60 * 1000
+
+/**
+ * The AI-assisted track's budget.
+ *
+ * 60 minutes, and unlike the two above this one is neither a quotation nor a
+ * guess at a round length: the CrowdStrike round on 2026-08-19 was scheduled for
+ * 60 (see `local/companies/crowdstrike.md`), and Talkspace has not stated a
+ * length. Overridable per session like the others.
+ *
+ * The longer budget is also the honest one for this track. With a coding agent
+ * doing the typing, an artificially short clock would measure the tool's latency
+ * rather than his judgement, which is the thing the track exists to score.
+ */
+export const ASSISTED_BUDGET_MS = 60 * 60 * 1000
 
 /**
  * The per-turn time check fed to a timed interviewer (see `CreateSessionOptions.turnCue`).

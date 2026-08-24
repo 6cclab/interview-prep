@@ -11,6 +11,7 @@ import {
   closingCue,
   hintCue,
   timeCue,
+  ASSISTED_BUDGET_MS,
   CODING_BUDGET_MS,
   DEBUG_BUDGET_MS,
   DEBUG_HINT_RUNGS,
@@ -26,6 +27,7 @@ import { findCompetency, listCompetencies } from './competencies'
 import { findExercise, listExercises } from './exercises'
 import { runDebugTests, debugVerdictCue, type DebugVerdict } from './debug-tests'
 import { buildCoachPrompt, codeCue, readWorkingFile } from './coach'
+import { assistedCue, readAssistedDir, seedAssistedDir } from './assisted'
 import { appendCoached, isoDate, readCoachedProblems } from './coached'
 import { runDrillTests, verdictCue } from './drill-tests'
 import { createInterviewer, type StreamFn } from './interviewer'
@@ -173,7 +175,14 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
  */
 export function parseDrill(body: Record<string, unknown> | null): Drill {
   const track = body?.track ?? 'mock'
-  if (track !== 'mock' && track !== 'design' && track !== 'coding' && track !== 'coach' && track !== 'debug') {
+  if (
+    track !== 'mock' &&
+    track !== 'design' &&
+    track !== 'coding' &&
+    track !== 'coach' &&
+    track !== 'debug' &&
+    track !== 'assisted'
+  ) {
     throw new Error(`Unknown track: ${String(track)}`)
   }
   if (track === 'mock') {
@@ -207,7 +216,13 @@ export function parseDrill(body: Record<string, unknown> | null): Drill {
   // against and a nonsense value would quietly make the timing meaningless.
   const raw = body?.budgetMinutes
   let budgetMs =
-    track === 'coding' ? CODING_BUDGET_MS : track === 'debug' ? DEBUG_BUDGET_MS : DESIGN_BUDGET_MS
+    track === 'coding'
+      ? CODING_BUDGET_MS
+      : track === 'debug'
+        ? DEBUG_BUDGET_MS
+        : track === 'assisted'
+          ? ASSISTED_BUDGET_MS
+          : DESIGN_BUDGET_MS
   if (raw !== undefined) {
     if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 5 || raw > 180) {
       throw new Error('budgetMinutes must be a number between 5 and 180.')
@@ -813,7 +828,13 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     if (req.method === 'GET' && problemMatch) {
       const problem = decodeURIComponent(problemMatch[1]!)
       const track = url.searchParams.get('track') ?? 'design'
-      if (track !== 'design' && track !== 'coding' && track !== 'coach' && track !== 'debug') {
+      if (
+        track !== 'design' &&
+        track !== 'coding' &&
+        track !== 'coach' &&
+        track !== 'debug' &&
+        track !== 'assisted'
+      ) {
         sendJson(res, 400, { error: `Unknown track: ${track}` })
         return
       }
@@ -838,7 +859,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
           return
         }
         relPath = `debugging/${found.name}/README.md`
-      } else if (track === 'coding' || track === 'coach') {
+      } else if (track === 'coding' || track === 'coach' || track === 'assisted') {
         // Resolved off disk rather than built from the slug, because only the
         // resolver knows the pattern directory — and the response deliberately
         // carries the slug back, never the path it was found at.
@@ -924,9 +945,15 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // shipped to the browser. `POST .../tests` re-resolves it instead —
         // a directory scan, which costs nothing next to running a test suite.
         const pattern =
-          drill.track === 'coding' || drill.track === 'coach'
+          drill.track === 'coding' || drill.track === 'coach' || drill.track === 'assisted'
             ? codingPattern(deps.root, drill.problem!)
             : undefined
+        if (drill.track === 'assisted') {
+          // Created before the prompt is built so a failure here is a 400 with no
+          // session, the same as an unknown slug. Non-destructive on his work —
+          // see `seedAssistedDir`.
+          seedAssistedDir(deps.root, { slug: drill.problem!, pattern: pattern! })
+        }
         if (drill.track === 'coach') {
           // A separate builder, not a branch of `buildSystemPrompt`: that
           // function goes through `allowedPaths` and `assertNoSpoilers`, both of
@@ -974,12 +1001,24 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // makes it pairing rather than another interview, and it is re-read per
         // turn rather than captured once because the whole point is that he is
         // editing it while they talk.
+        //
+        // The assisted track needs BOTH, which is why the slot now composes
+        // rather than choosing. It is timed like a drill and watches the working
+        // directory like a pairing session, because what it scores — did he
+        // verify what the agent handed him — is only visible by comparing what
+        // he says against what is actually on disk.
         turnCue:
           drill.track === 'coach'
             ? () => codeCue(readWorkingFile(deps.root, { slug: drill.problem!, pattern: codingPattern(deps.root, drill.problem!) }))
-            : drill.budgetMs === undefined
-              ? undefined
-              : () => timeCue(entryClock(), drill.budgetMs),
+            : drill.track === 'assisted'
+              ? () =>
+                  [
+                    timeCue(entryClock(), drill.budgetMs),
+                    assistedCue(readAssistedDir(deps.root, drill.problem!)),
+                  ].join('\n\n')
+              : drill.budgetMs === undefined
+                ? undefined
+                : () => timeCue(entryClock(), drill.budgetMs),
       })
       const scratchDir = mkdtempSync(join(tmpdir(), 'voice-web-'))
       const stored = store.create(session, interviewer, new Date(), scratchDir, drill)

@@ -23,7 +23,7 @@ import {
   shouldAutoRecord,
   wallClock,
   stuckBody,
-  TIMED_BUDGET_MINUTES,
+  timedBudgetMinutes,
   ERROR_COPY,
   ANNOUNCEMENTS,
 } from './phase'
@@ -100,6 +100,9 @@ const HEADER = {
   // "Debugging round", not "Debugging interview": the thing being rehearsed is
   // the "here is some code, something is wrong with it" round.
   debug: { title: 'Debugging round', kicker: 'Root cause, not symptom' },
+  // The kicker names what is actually scored, because "AI-assisted" on its own
+  // reads as the easy mode and it is the opposite of one.
+  assisted: { title: 'AI-assisted round', kicker: 'Judgement, not recall' },
   // Neither `home` nor `history` reaches DrillScreen, but the record is keyed by
   // the full Route view so a new view cannot be added without deciding what the
   // header says. Adding `history` to Route is what made the compiler ask.
@@ -116,6 +119,7 @@ const PARTNER = {
   coding: 'Interviewer',
   coach: 'Coach',
   debug: 'Interviewer',
+  assisted: 'Interviewer',
   home: 'Interviewer',
   history: 'Interviewer',
 } as const
@@ -174,7 +178,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   const [deviceSettingsOpen, setDeviceSettingsOpen] = useState(false)
 
   const phase = derivePhase(mode, interviewerSpeaking, awaitingInterviewer)
-  const timed = route.view === 'design' || route.view === 'coding'
+  const timed = route.view === 'design' || route.view === 'coding' || route.view === 'assisted'
   // Narrowing once, so the header and the pane do not each re-derive it.
   const problem = 'problem' in route ? route.problem : ''
   // Whether this track has a problem statement to show — the same two tracks that
@@ -182,7 +186,11 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   // Coaching shows the problem for the same reason the drills do — you cannot
   // pair on a question that has scrolled away.
   const hasPane =
-    route.view === 'design' || route.view === 'coding' || route.view === 'coach' || route.view === 'debug'
+    route.view === 'design' ||
+    route.view === 'coding' ||
+    route.view === 'coach' ||
+    route.view === 'debug' ||
+    route.view === 'assisted'
   // A session exists to act on. Withheld before and after, because a live button
   // that 404s is worse than a disabled one.
   const live = phase !== 'idle' && phase !== 'ended'
@@ -476,7 +484,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
           sessionSeconds={sessionSeconds}
           remainingSeconds={remainingSeconds}
           // Only before the countdown exists, and only on a timed track.
-          budgetMinutes={timed && remainingSeconds === null ? TIMED_BUDGET_MINUTES : null}
+          budgetMinutes={timed && remainingSeconds === null ? timedBudgetMinutes(route.view) : null}
           // From the route, not the live drill: the header must name the track
           // before a session exists, not just once one is running.
           title={HEADER[route.view].title}

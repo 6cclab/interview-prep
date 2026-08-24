@@ -98,6 +98,7 @@ describe('backendSummary', () => {
       design: 'cli',
       coding: 'cli',
       coach: 'cli',
+      assisted: 'cli',
     })
   })
 

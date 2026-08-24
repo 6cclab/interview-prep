@@ -53,6 +53,13 @@ const TRACK_VAR: Record<Track, string> = {
   // in the loop to contradict it. Its own knob, so putting the drills on a local
   // model does not silently move the teaching there too.
   coach: 'VOICE_BACKEND_COACH',
+  // Its own knob for the same reason coaching has one, from the other direction:
+  // this track has no hint ladder and no worked solution to check itself
+  // against, so the interviewer's judgement is the entire instrument. A weaker
+  // model here does not produce an obviously bad drill, it produces a lenient
+  // one — and a lenient assisted round is indistinguishable from a good
+  // performance, which is the worst failure available.
+  assisted: 'VOICE_BACKEND_ASSISTED',
   // Debugging is like coding on the two counts that matter for a weaker model:
   // it has a spoiler to leak and a fenced drill-log trailer to emit. Its own knob
   // all the same, so the arrangement stays "one variable per track" rather than
@@ -140,6 +147,7 @@ export function backendSummary(env: NodeJS.ProcessEnv = process.env): Record<Tra
     coding: chooseBackend('coding', env),
     coach: chooseBackend('coach', env),
     debug: chooseBackend('debug', env),
+    assisted: chooseBackend('assisted', env),
   }
 }
 

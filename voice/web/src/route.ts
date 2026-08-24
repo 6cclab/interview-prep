@@ -31,6 +31,12 @@ export type Route =
   | { view: 'coach'; problem: string }
   /** A debugging exercise. `problem` is the exercise name under `debugging/`. */
   | { view: 'debug'; problem: string }
+  /**
+   * A coding round run with an AI coding agent, which is the format Talkspace
+   * asked for. Same problem set as `coding`; a different thing is scored, and
+   * there is no hint ladder. See `prompts/assisted.md`.
+   */
+  | { view: 'assisted'; problem: string }
   /** Past drills. Not a drill screen — it is read between them. */
   | { view: 'history' }
 
@@ -65,7 +71,7 @@ export function parseRoute(hash: string): Route {
   if (path === '' || path === 'home') return { view: 'home' }
   if (path === 'mock') return { view: 'mock' }
   if (path === 'history') return { view: 'history' }
-  const withProblem = /^(design|coding|coach|debug|mock)\/([^/]+)$/.exec(path)
+  const withProblem = /^(design|coding|coach|debug|assisted|mock)\/([^/]+)$/.exec(path)
   if (withProblem) {
     let slug: string
     try {
@@ -75,7 +81,7 @@ export function parseRoute(hash: string): Route {
       return { view: 'home' }
     }
     if (PROBLEM_SLUG.test(slug)) {
-      const view = withProblem[1] as 'design' | 'coding' | 'coach' | 'debug' | 'mock'
+      const view = withProblem[1] as 'design' | 'coding' | 'coach' | 'debug' | 'assisted' | 'mock'
       return view === 'mock' ? { view: 'mock', competency: slug } : { view, problem: slug }
     }
     // A segment that is not a slug falls through to `home` below, the same as a
