@@ -811,15 +811,31 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
 
     if (req.method === 'GET' && serveStatic(distDir, url.pathname, res)) return
 
-    // Lists speaker/output devices for the client to render a selector.
-    // `SpeechSynthesis` exposes no output-device API, so the browser cannot
-    // route audio to a chosen speaker on its own — the server speaks instead
-    // (see `deps.speaker`/`streamTurn`), which is why this list needs to
-    // exist server-side at all.
+    // Lists speaker/output devices for the client to render a selector, and
+    // says which of the two machines is doing the speaking.
+    //
+    // `SpeechSynthesis` exposes no output-device API, so a browser cannot
+    // route audio to a chosen speaker. Locally that does not matter, because
+    // the server is the same machine — it speaks (see `deps.speaker` /
+    // `streamTurn`), which is why this list needs to exist server-side at all.
+    // Deployed there is no `deps.speaker`, and the browser speaks for itself.
+    //
+    // `serverSpeaks` is derived from the speaker actually installed rather
+    // than from `deps.mode`, so it cannot drift from the truth: if the two
+    // ever disagreed the candidate would hear either two overlapping voices
+    // or none, and neither failure announces itself.
     if (req.method === 'GET' && url.pathname === '/api/devices/output') {
+      const serverSpeaks = deps.speaker !== undefined
+      // With nothing speaking server-side there is no server-side speaker to
+      // choose, and enumerating output devices in a container asks the host
+      // about hardware it does not have.
+      if (!serverSpeaks) {
+        sendJson(res, 200, { devices: [], serverSpeaks })
+        return
+      }
       try {
         const devices = await (deps.listOutputDevices ?? listOutputDevices)()
-        sendJson(res, 200, { devices })
+        sendJson(res, 200, { devices, serverSpeaks })
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         sendJson(res, 500, { error: message })

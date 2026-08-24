@@ -212,11 +212,39 @@ describe('device routes', () => {
       createTransport: () => async function* () {},
       transcriber: { transcribe: async () => ({ text: '' }) },
       listOutputDevices: async () => [{ id: '75', name: 'MacBook Pro Speakers' }],
+      // The list only means anything when the server is the thing speaking,
+      // so the route asks for a speaker before it asks the host about hardware.
+      speaker: { speak: async () => {} },
     })
     const { port } = await listen()
     const res = await fetch(`http://127.0.0.1:${port}/api/devices/output`)
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ devices: [{ id: '75', name: 'MacBook Pro Speakers' }] })
+    expect(await res.json()).toEqual({
+      devices: [{ id: '75', name: 'MacBook Pro Speakers' }],
+      serverSpeaks: true,
+    })
+  })
+
+  // Deployed, `deps.speaker` is undefined and the browser speaks for itself
+  // (see `voice/web/src/browserVoice.ts`). Enumerating output devices then
+  // asks a container about hardware it does not have, and offering a speaker
+  // picker would offer a choice over audio nobody is in the room to hear.
+  it('GET /api/devices/output reports serverSpeaks false and no devices when nothing speaks server-side', async () => {
+    let listed = false
+    server = createVoiceServer({
+      root,
+      createTransport: () => async function* () {},
+      transcriber: { transcribe: async () => ({ text: '' }) },
+      listOutputDevices: async () => {
+        listed = true
+        return [{ id: '75', name: 'MacBook Pro Speakers' }]
+      },
+    })
+    const { port } = await listen()
+    const res = await fetch(`http://127.0.0.1:${port}/api/devices/output`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ devices: [], serverSpeaks: false })
+    expect(listed).toBe(false)
   })
 
   it('GET /api/devices/output surfaces a lister failure as a 500 rather than crashing the server', async () => {
@@ -227,6 +255,7 @@ describe('device routes', () => {
       listOutputDevices: async () => {
         throw new Error('say -a ? failed')
       },
+      speaker: { speak: async () => {} },
     })
     const { port } = await listen()
     const res = await fetch(`http://127.0.0.1:${port}/api/devices/output`)
