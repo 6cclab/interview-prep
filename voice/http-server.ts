@@ -23,6 +23,7 @@ import {
   type Track,
 } from './context'
 import {
+  codingDocument,
   findCodingProblem,
   installProblemSource,
   listCodingProblems,
@@ -30,6 +31,7 @@ import {
   resolveMode,
   type VoiceMode,
 } from './problems'
+import { buildExercise } from './coding-exercise'
 import { readSolution, writeSolution, versionOf } from './solution-file'
 import { findCompetency, listCompetencies } from './competencies'
 import { findExercise, listExercises } from './exercises'
@@ -781,6 +783,29 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // POST-only and the only mechanism guaranteed to still deliver a request
     // once the page has started tearing down. The write path below does not
     // otherwise distinguish the two methods.
+    // Everything the browser needs to grade a suite client-side: the stub, the
+    // suite, and the `test-utils` modules that suite imports. No path, no
+    // directory listing, and no `solution.ts` — `buildExercise` asks the problem
+    // source for kinds, and there is no kind that names the worked answer.
+    //
+    // The client has called this since the runner landed; the server never
+    // answered it, so every browser run failed on a 404 before it started.
+    const exerciseRoute = /^\/api\/coding\/([^/]+)\/exercise$/.exec(url.pathname)
+    if (req.method === 'GET' && exerciseRoute) {
+      const slug = exerciseRoute[1]!
+      if (!PROBLEM_SLUG.test(slug)) {
+        sendJson(res, 400, { error: 'Invalid problem name.' })
+        return
+      }
+      const exercise = buildExercise(deps.root, slug)
+      if (exercise === null) {
+        sendJson(res, 404, { error: 'Unknown problem.' })
+        return
+      }
+      sendJson(res, 200, exercise)
+      return
+    }
+
     const solutionRoute = /^\/api\/coding\/([^/]+)\/solution$/.exec(url.pathname)
     if (solutionRoute && (req.method === 'GET' || req.method === 'PUT' || req.method === 'POST')) {
       const slug = solutionRoute[1]!
@@ -962,7 +987,13 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         sendJson(res, 400, { error: `Invalid problem name: ${problem}` })
         return
       }
-      let relPath: string
+      // Coding-family tracks answer out of the problem source, which may be
+      // Postgres; the design and debugging trees have no ingester and are read
+      // off disk in both modes. Kept as two variables rather than one because
+      // collapsing them would mean building a path for the coding case, which
+      // is the thing the source exists to stop.
+      let prompt: string | null = null
+      let relPath: string | null = null
       // Coaching serves the same README as a coding drill and nothing more. The
       // spoilers a coach may read reach the model through `coachPaths`, never
       // through a route the browser can call — putting the worked solution on
@@ -988,7 +1019,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
           notFound(res)
           return
         }
-        relPath = `${problemDir(found)}/README.md`
+        prompt = codingDocument(deps.root, found, 'readme')
 
         // Clarify-first: the statement is withheld ON THE WIRE, and reaching it
         // is a second, explicit request. Hiding it in the client instead would
@@ -1008,13 +1039,16 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       } else {
         relPath = `system-design/${problem}/README.md`
       }
-      assertNoSpoilers([relPath])
-      const full = join(deps.root, relPath)
-      if (!existsSync(full)) {
+      if (relPath !== null) {
+        assertNoSpoilers([relPath])
+        const full = join(deps.root, relPath)
+        prompt = existsSync(full) ? readFileSync(full, 'utf8') : null
+      }
+      if (prompt === null) {
         notFound(res)
         return
       }
-      sendJson(res, 200, { problem, prompt: readFileSync(full, 'utf8') })
+      sendJson(res, 200, { problem, prompt })
       return
     }
 

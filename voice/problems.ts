@@ -74,7 +74,23 @@ export type ProblemLocation = Pick<CodingProblem, 'slug' | 'pattern'>
 export interface ProblemSource {
   list(root: string): CodingProblem[]
   find(root: string, slug: string): CodingProblem | null
+  document(root: string, problem: ProblemLocation, kind: DocumentKind): string | null
 }
+
+/**
+ * The three files of a coding problem that are ever served to a browser.
+ *
+ * `solution` is deliberately absent from this union and not merely unlisted:
+ * there is no value of `DocumentKind` that names it, so a route cannot ask for
+ * it by getting a string wrong. Reaching the worked answer takes a different
+ * function through a different door — see `coachPaths`.
+ *
+ * `test` is on the list because the browser test runner needs the suite in
+ * order to grade anything client-side. That is new exposure and it is known:
+ * four suites currently name their own pattern directory in a comment, which is
+ * what the comment-stripping step exists for.
+ */
+export type DocumentKind = 'readme' | 'stub' | 'test'
 
 /** Which store this process talks to. Chosen once, at startup. */
 export type VoiceMode = 'local' | 'deployed'
@@ -107,12 +123,17 @@ export function resolveMode(env: NodeJS.ProcessEnv = process.env): VoiceMode {
  * should fail on the first request with a sentence naming the reason, not serve
  * whatever `problems/` happens to be in the image.
  */
+const NOT_INSTALLED = 'VOICE_MODE=deployed serves problems from Postgres, which startup has not installed.'
+
 const notInstalled: ProblemSource = {
   list() {
-    throw new Error('VOICE_MODE=deployed serves problems from Postgres, which startup has not installed.')
+    throw new Error(NOT_INSTALLED)
   },
   find() {
-    throw new Error('VOICE_MODE=deployed serves problems from Postgres, which startup has not installed.')
+    throw new Error(NOT_INSTALLED)
+  },
+  document() {
+    throw new Error(NOT_INSTALLED)
   },
 }
 
@@ -174,6 +195,20 @@ export function listCodingProblems(root: string): CodingProblem[] {
 /** The problem with this slug, or `null` if there is none. */
 export function findCodingProblem(root: string, slug: string): CodingProblem | null {
   return problemSource().find(root, slug)
+}
+
+/**
+ * One of a coding problem's three servable files, or `null` when it has none.
+ *
+ * Behind the seam for the same reason the list is: a deployed instance has no
+ * `problems/` tree it should be reading. It may well have one — the container
+ * image carries the repo — and that is exactly the problem. The database is the
+ * serving copy that `pnpm ingest` controls, and a route reading the image's disk
+ * instead would quietly serve whatever commit was baked in rather than what was
+ * ingested, with nothing anywhere saying the two had diverged.
+ */
+export function codingDocument(root: string, problem: ProblemLocation, kind: DocumentKind): string | null {
+  return problemSource().document(root, problem, kind)
 }
 
 /**

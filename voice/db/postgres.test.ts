@@ -607,6 +607,9 @@ suite('voice/db against a real Postgres', () => {
         const dir = join(root, 'problems', pattern, slug)
         mkdirSync(dir, { recursive: true })
         writeFileSync(join(dir, 'README.md'), `# ${slug}\n`)
+        writeFileSync(join(dir, 'stub.ts'), 'export function f() {} // THE STUB\n')
+        writeFileSync(join(dir, 'solution.test.ts'), "it('x', () => {}) // THE SUITE\n")
+        writeFileSync(join(dir, 'solution.ts'), 'export function f() { return 1 } // THE ANSWER\n')
         writeFileSync(join(dir, 'meta.yaml'), `pattern: ${pattern}\ndifficulty: ${difficulty}\n`)
       }
       return root
@@ -658,6 +661,38 @@ suite('voice/db against a real Postgres', () => {
      * client has no styling for. Same rule the filesystem source applies to a
      * malformed `meta.yaml`.
      */
+    it('serves the README, the stub and the suite, and has no name for the solution', async () => {
+      await ingest(seed())
+      await loadProblemCache()
+      const problem = { slug: 'valid-palindrome', pattern: 'two-pointers' }
+      expect(dbProblems.document('', problem, 'readme')).toContain('# valid-palindrome')
+      expect(dbProblems.document('', problem, 'stub')).toContain('THE STUB')
+      expect(dbProblems.document('', problem, 'test')).toContain('THE SUITE')
+      // There is no `DocumentKind` that names the worked answer, so this is a
+      // type error rather than a runtime `null` — and the cache genuinely does
+      // not hold it, which is what the cast proves.
+      expect(dbProblems.document('', problem, 'solution' as never)).toBeNull()
+    })
+
+    /**
+     * The deployed half of `voice/api-spoiler-gate.test.ts`.
+     *
+     * Risk #1 of the plan: the grants cannot catch a caller that legitimately
+     * holds `pattern` and forwards it. The boot loader is exactly such a caller.
+     * So this asserts over what the cache actually holds — every document it
+     * would hand a browser — rather than over which kinds it meant to load.
+     */
+    it('caches no document containing the pattern', async () => {
+      await ingest(seed())
+      await loadProblemCache()
+      for (const problem of dbProblems.list('')) {
+        for (const kind of ['readme', 'stub', 'test'] as const) {
+          const content = dbProblems.document('', problem, kind)
+          expect(`${problem.slug}/${kind}: ${content ?? ''}`).not.toContain(problem.pattern)
+        }
+      }
+    })
+
     it('falls back to unrated for a difficulty it does not know', async () => {
       await ingest(seed())
       await withPrivileged((client) => client.query("update problem set difficulty = 'spicy'"))

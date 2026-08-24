@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { findCodingProblem, problemDir } from './problems'
+import { codingDocument, findCodingProblem } from './problems'
 
 /**
  * Everything a browser needs to run a coding drill's suite client-side, for
@@ -53,9 +53,13 @@ function testUtilsImports(test: string): string[] {
 export function buildExercise(root: string, slug: string): Exercise | null {
   const problem = findCodingProblem(root, slug)
   if (problem === null) return null
-  const dir = join(root, problemDir(problem))
-  const stub = readFileSync(join(dir, 'stub.ts'), 'utf8')
-  const test = readFileSync(join(dir, 'solution.test.ts'), 'utf8')
+  // Through the seam, so a deployed instance serves the copy `pnpm ingest`
+  // wrote rather than whatever commit the container image happens to carry.
+  // `codingDocument` has no `solution` kind to ask for, which is what now makes
+  // "reads stub.ts, never solution.ts" unstateable rather than merely stated.
+  const stub = codingDocument(root, problem, 'stub')
+  const test = codingDocument(root, problem, 'test')
+  if (stub === null || test === null) return null
   const utils: Record<string, string> = {}
   for (const specifier of testUtilsImports(test)) {
     const name = specifier.slice(specifier.lastIndexOf('/') + 1)
@@ -63,6 +67,12 @@ export function buildExercise(root: string, slug: string): Exercise | null {
     // is `[a-z]+`, so `name` is never a path segment that could escape
     // `test-utils/` — there is nothing here for a hostile suite to exploit,
     // and every suite in the repo is authored, not client-supplied, anyway.
+    //
+    // Read from disk in both modes, deliberately, and not ingested. These are
+    // shared library modules rather than problem content: they name no pattern,
+    // hold no answer, and are identical for all forty-odd problems. Putting a
+    // copy of each beside every problem row would be a second source of truth
+    // for code that ships in the image regardless.
     utils[specifier] = readFileSync(join(root, 'test-utils', `${name}.ts`), 'utf8')
   }
   return { stub, test, utils }
