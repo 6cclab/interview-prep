@@ -58,6 +58,11 @@ services:
       # mid-drill. See voice/backend.ts.
       VOICE_BACKEND: ${VOICE_BACKEND:?set VOICE_BACKEND in deploy/.env}
       OLLAMA_HOST: ${OLLAMA_HOST:-}
+      # Absent means unauthenticated by design — pointing OLLAMA_HOST at a
+      # gateway that wants a bearer token without one is a 401 on the first
+      # model turn, not a startup error. See voice/ollama.ts.
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
