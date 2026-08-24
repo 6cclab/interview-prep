@@ -3,7 +3,21 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
+import { classifyFailures, failedTestsFromJson, type DrillVerdict } from './drill-verdict'
 import { stripPatternPaths, type ProblemLocation, problemDir } from './problems'
+
+// Re-exported so every existing `from './drill-tests'` import keeps resolving
+// unchanged — this file used to define these itself. The definitions now live
+// in drill-verdict.ts, which imports no `node:*` module, so a browser client
+// can pull in the verdict logic alone without dragging child_process along.
+export {
+  classifyFailures,
+  failedTestName,
+  failedTestsFromJson,
+  verdictCue,
+  type DrillVerdict,
+  type FailedTest,
+} from './drill-verdict'
 
 const run = promisify(execFile)
 
@@ -21,81 +35,6 @@ const run = promisify(execFile)
  * `— access budget` / `— randomised trials` for cost. That convention is the
  * contract; `classifyFailures` is where it is encoded, and its test pins it.
  */
-
-/** One failing test, split the way vitest's report actually splits it. */
-export interface FailedTest {
-  /** The enclosing `describe` names, outermost first, joined with ` > `. */
-  suite: string
-  /** The `it` name. */
-  title: string
-}
-
-/** `<suite> > <title>` — the display form, built here so the delimiter is ours. */
-export function failedTestName(test: FailedTest): string {
-  return `${test.suite} > ${test.title}`
-}
-
-export type DrillVerdict =
-  /** Everything passed. */
-  | { kind: 'green' }
-  /** At least one correctness test failed: the answer is wrong. */
-  | { kind: 'correctness-red'; failed: string[] }
-  /** Correctness passed, a cost test did not: right answer, wrong cost. */
-  | { kind: 'cost-red'; failed: string[] }
-  /** The suite could not be run at all — a compile error, a missing file. */
-  | { kind: 'errored'; message: string }
-
-// A suite whose name marks it as testing behaviour rather than cost.
-const CORRECTNESS = /—\s*correctness\b/i
-
-/**
- * Which kind of red, from the failing tests' *suite* names.
- *
- * Matched against `suite` only, never the test title: the convention lives on the
- * `describe`, so a test whose own name mentions correctness must not flip a cost
- * failure into a correctness one — that would report a working brute force as a
- * wrong answer, the exact inversion `drill.md` warns about.
- */
-export function classifyFailures(failed: FailedTest[]): DrillVerdict {
-  if (failed.length === 0) return { kind: 'green' }
-  const correctness = failed.filter((test) => CORRECTNESS.test(test.suite))
-  if (correctness.length > 0) {
-    return { kind: 'correctness-red', failed: correctness.map(failedTestName) }
-  }
-  return { kind: 'cost-red', failed: failed.map(failedTestName) }
-}
-
-/**
- * Vitest's JSON reporter, reduced to the failing tests' suite and title.
- *
- * Reads `ancestorTitles` and `title`, **not** `fullName`. `fullName` is the two
- * joined by a plain space (verified against a real report: `"maxArea —
- * correctness finds the canonical container"`), so there is no delimiter in it to
- * split on and no way to recover which part was the suite. Classification hangs
- * entirely on getting the suite, so it reads the structured fields.
- *
- * Only names are taken — never a failure message or diff. A budget assertion's
- * message states the actual call count, which is a measurement of his own
- * solution and harmless, but a scale fixture's diff can be a hundred thousand
- * numbers, and `drill.md` says to show the failing test names and nothing more.
- */
-export function failedTestsFromJson(json: string): FailedTest[] {
-  const parsed = JSON.parse(json) as {
-    testResults?: {
-      assertionResults?: { status?: string; title?: string; ancestorTitles?: string[]; fullName?: string }[]
-    }[]
-  }
-  const failed: FailedTest[] = []
-  for (const file of parsed.testResults ?? []) {
-    for (const assertion of file.assertionResults ?? []) {
-      if (assertion.status !== 'failed') continue
-      const suite = (assertion.ancestorTitles ?? []).join(' > ')
-      const title = assertion.title ?? assertion.fullName ?? '(unnamed test)'
-      failed.push({ suite, title })
-    }
-  }
-  return failed
-}
 
 export interface DrillTestOptions {
   root: string
@@ -175,26 +114,4 @@ export async function runDrillTests(opts: DrillTestOptions): Promise<DrillVerdic
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-/**
- * The bracketed note fed to the interviewer after a test run.
- *
- * Same shape and same reason as the design track's time check: it arrives in the
- * `user` slot where everything else is Andre speaking, so it is marked as an
- * aside, and `drill.md` supplies the behaviour — this only supplies the outcome.
- * It states the *meaning* of a cost-red rather than just the fact, because that
- * distinction is the one drill.md says must be made explicitly every time.
- */
-export function verdictCue(verdict: DrillVerdict): string {
-  if (verdict.kind === 'green') {
-    return '[Test result, for you only: everything passed. Ask for his time and space complexity before you confirm he is done.]'
-  }
-  if (verdict.kind === 'correctness-red') {
-    return `[Test result, for you only: correctness tests failed — ${verdict.failed.join('; ')}. The answer is wrong. Name the failing tests and nothing more; he keeps going.]`
-  }
-  if (verdict.kind === 'cost-red') {
-    return `[Test result, for you only: correctness passed, cost failed — ${verdict.failed.join('; ')}. His answer is right and too expensive: a working brute force. Say exactly that, and do not describe it as a failed attempt.]`
-  }
-  return `[Test result, for you only: the suite could not be run. ${verdict.message}]`
 }
