@@ -38,7 +38,9 @@ import { findExercise, listExercises } from './exercises'
 import { runDebugTests, debugVerdictCue, type DebugVerdict } from './debug-tests'
 import { buildCoachPrompt, codeCue, readWorkingFile } from './coach'
 import { assistedCue, readAssistedDir, seedAssistedDir } from './assisted'
-import { appendCoached, isoDate, readCoachedProblems } from './coached'
+import { isoDate } from './coached'
+import { fsWorkStore } from './work-store-fs'
+import type { WorkStore } from './work-store'
 import { runDrillTests, verdictCue } from './drill-tests'
 import { createInterviewer, type StreamFn } from './interviewer'
 import { backendSummary, describeBackend, modelFor, streamForBackend, transportLabel } from './backend'
@@ -92,6 +94,18 @@ export interface VoiceServerDeps {
     handle(req: IncomingMessage, res: ServerResponse): Promise<void>
     resolveUserId(req: IncomingMessage): Promise<string | null>
   }
+  /**
+   * Where a finished drill's record goes, for this person.
+   *
+   * A factory rather than a value, because in deployed mode the store is scoped
+   * to a user: every query it runs sets `app.user_id`, and row-level security
+   * makes that the actual guarantee rather than a convention. Local mode ignores
+   * the argument and writes the same `local/` Markdown it always has.
+   *
+   * Defaults to the filesystem store, so the several dozen tests that construct
+   * a server without one keep the behaviour they were written against.
+   */
+  work?(userId: string | null): WorkStore
   store?: SessionStore
   /** Milliseconds since the epoch, injectable so tests don't depend on wall time. */
   now?(): number
@@ -474,6 +488,16 @@ async function streamTurn(
 }
 
 /**
+ * The record store for one person, defaulting to the filesystem.
+ *
+ * The default is what keeps a local run — and every test that never heard of a
+ * work store — writing exactly the Markdown it did before.
+ */
+function workFor(deps: VoiceServerDeps, userId: string | null): WorkStore {
+  return (deps.work ?? (() => fsWorkStore(deps.root)))(userId)
+}
+
+/**
  * The `finishSession` options for a stored session, built once so every exit path
  * writes the same thing.
  *
@@ -485,6 +509,7 @@ async function streamTurn(
 function finishOptions(deps: VoiceServerDeps, stored: StoredSession, elapsedMs: number) {
   return {
     root: deps.root,
+    work: workFor(deps, stored.userId),
     transport: (deps.transportLabel ?? transportLabel)(stored.drill.track),
     // The session's own drill, not a hardcoded 'mock' — a design session's
     // transcript belongs under local/designs/<problem>-live-..., and naming it
@@ -534,20 +559,24 @@ function finishOptions(deps: VoiceServerDeps, stored: StoredSession, elapsedMs: 
  * Two `try` blocks rather than one: a speaker that fails to stop must not cost
  * the transcript, which is the only artifact a finished drill leaves behind.
  */
-export function teardownDisconnectedClient(
+export async function teardownDisconnectedClient(
   deps: VoiceServerDeps,
   store: SessionStore,
   entryClocks: Map<string, () => number>,
   closing: Set<string>,
   id: string,
-): void {
+): Promise<void> {
   try {
     deps.speaker?.stop?.()
   } catch (error) {
     console.error(`teardown: could not stop the speaker: ${errorMessage(error)}`)
   }
   try {
-    endAndPersist(deps, store, entryClocks, closing, id)
+    // Awaited, so a rejected write is caught here rather than escaping as an
+    // unhandled rejection. Persistence became asynchronous when the deployed
+    // store arrived, and a bare call would have turned every failed write in
+    // this path into the process-level crash this function exists to prevent.
+    await endAndPersist(deps, store, entryClocks, closing, id)
   } catch (error) {
     console.error(`teardown: could not end session ${id}: ${errorMessage(error)}`)
   }
@@ -568,7 +597,7 @@ export function teardownDisconnectedClient(
  * Returns null when the session is gone or already ending, so a route can answer
  * 404 or 409 rather than reporting a second success for one session.
  */
-function endAndPersist(
+async function endAndPersist(
   deps: VoiceServerDeps,
   store: SessionStore,
   entryClocks: Map<string, () => number>,
@@ -580,13 +609,16 @@ function endAndPersist(
    * the model's own thinking time into the drill's logged duration.
    */
   elapsedOverride?: number,
-): FinishResult | null {
+): Promise<FinishResult | null> {
   const stored = store.get(id)
   if (!stored) return null
   if (closing.has(id)) return null
+  // Latched before the first `await`, which is what keeps this non-re-entrant now
+  // that persistence is asynchronous. Two callers arriving during the same tick
+  // still see the latch, because nothing yields between the check and the set.
   closing.add(id)
   const elapsedMs = elapsedOverride ?? entryClocks.get(id)?.() ?? 0
-  const result = finishSession(stored.session, stored.interviewer, finishOptions(deps, stored, elapsedMs))
+  const result = await finishSession(stored.session, stored.interviewer, finishOptions(deps, stored, elapsedMs))
   // A coaching session records that it happened, and nothing else — no verdict,
   // no rung, no solved flag, because none of those were measured. See
   // voice/coached.ts for why this is not a drill-log row.
@@ -598,7 +630,7 @@ function endAndPersist(
     // scratch-directory cleanup down with it. An unresolvable pattern is
     // recorded as `unknown`, which is true.
     const found = findCodingProblem(deps.root, stored.drill.problem)
-    appendCoached(deps.root, {
+    await workFor(deps, stored.userId).appendCoached({
       date: isoDate(stored.startedAt),
       problem: stored.drill.problem,
       pattern: found?.pattern ?? 'unknown',
@@ -673,7 +705,12 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
   const idleMs = deps.idleMs ?? 5 * 60_000
   const sweep = setInterval(() => {
     for (const stored of store.reapIdle(idleClock(), idleMs)) {
-      endAndPersist(deps, store, entryClocks, closing, stored.id)
+      // No caller to hand an error to — this is a timer. A reap that fails to
+      // write must say so and leave the server up; it must not become an
+      // unhandled rejection on a tick nobody is watching.
+      endAndPersist(deps, store, entryClocks, closing, stored.id).catch((error: unknown) => {
+        console.error(`reap: could not end session ${stored.id}: ${errorMessage(error)}`)
+      })
     }
   }, Math.min(idleMs, 30_000))
   sweep.unref()
@@ -830,7 +867,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // recovery path, and it must not report success for a session whose own
       // /end is mid-closing-turn — the client would then start a new session
       // while the old one is still writing.
-      const ended = endAndPersist(deps, store, entryClocks, closing, id) !== null
+      const ended = (await endAndPersist(deps, store, entryClocks, closing, id)) !== null
       sendJson(res, ended ? 200 : 409, ended ? { ended } : { ended, error: 'that session is already ending' })
       return
     }
@@ -1008,16 +1045,19 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // field it was handed.
     if (req.method === 'GET' && url.pathname === '/api/history') {
       const withPatterns = url.searchParams.get('patterns') === '1'
-      const rows = readDrillLog(deps.root)
+      // Through the store, so a deployed instance reads this person's rows and
+      // only this person's — enforced by row-level security rather than by the
+      // query below remembering a `where`.
+      const { rows, summary, coached } = await workFor(deps, userId).readHistory()
       sendJson(res, 200, {
-        summary: summarise(rows),
+        summary,
         rows: rows.map(({ pattern, ...row }) => (withPatterns ? { ...row, pattern } : row)),
         // Which problems have been paired on. Sent unconditionally, unlike the
         // pattern: a coaching session is something he chose and sat through, so
         // there is nothing to spoil by saying it happened. It is here because a
         // cold solve of a problem he was walked through is a weaker fact than a
         // cold solve of one he was not, and the screen leads with the cold count.
-        coached: readCoachedProblems(deps.root),
+        coached,
       })
       return
     }
@@ -1329,7 +1369,11 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // And cut the sentence already in the speaker's mouth. Nothing else can:
         // `say` is a server-side subprocess, so the page closing does not touch
         // it, and a sentence takes seconds to read out.
-        teardownDisconnectedClient(deps, store, entryClocks, closing, id)
+        // Not awaited, and it cannot be: this is a `'close'` listener, which is
+        // synchronous and has nowhere to put a promise. `teardownDisconnectedClient`
+        // is written to swallow and report everything for exactly that reason, so
+        // there is no rejection here to escape.
+        void teardownDisconnectedClient(deps, store, entryClocks, closing, id)
       })
 
       const alreadyBegun = stored.session.entries().length > 0
@@ -1340,7 +1384,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
           for (const entry of stored.session.entries().slice(before)) {
             writeSSE(res, 'entry', entry)
           }
-          if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, closing, id)
+          if (stored.session.endedEarly()) await endAndPersist(deps, store, entryClocks, closing, id)
         })().catch((error: unknown) => {
           console.error('voice session opening turn failed:', error)
         })
@@ -1371,7 +1415,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
             writeSSE(stored.sseClient, 'entry', entry)
           }
         }
-        if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, closing, id)
+        if (stored.session.endedEarly()) await endAndPersist(deps, store, entryClocks, closing, id)
       })()
         .catch((error: unknown) => {
           console.error('voice session turn failed:', error)
@@ -1619,7 +1663,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
             writeSSE(stored.sseClient, 'entry', entry)
           }
         }
-        if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, closing, id)
+        if (stored.session.endedEarly()) await endAndPersist(deps, store, entryClocks, closing, id)
       })()
         .catch((error: unknown) => {
           console.error('voice session hint failed:', error)
@@ -1712,7 +1756,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
             writeSSE(stored.sseClient, 'entry', entry)
           }
         }
-        if (stored.session.endedEarly()) endAndPersist(deps, store, entryClocks, closing, id)
+        if (stored.session.endedEarly()) await endAndPersist(deps, store, entryClocks, closing, id)
       })()
         .catch((error: unknown) => {
           console.error('voice session test reaction failed:', error)
@@ -1788,7 +1832,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // `closing` is already held, so this releases it rather than re-taking it:
       // one persist path for every exit, including this one.
       closing.delete(id)
-      const result = endAndPersist(deps, store, entryClocks, closing, id, elapsedMs)
+      const result = await endAndPersist(deps, store, entryClocks, closing, id, elapsedMs)
       if (!result) {
         // Only reachable if something removed the session mid-closing-turn.
         notFound(res)
@@ -1958,6 +2002,7 @@ async function main(): Promise<void> {
   // unreachable database is a startup failure a deploy notices, not one failed
   // request at three in the morning.
   let auth: VoiceServerDeps['auth']
+  let work: VoiceServerDeps['work']
   if (mode === 'deployed') {
     try {
       const { dbProblems, loadProblemCache } = await import('./problems-db')
@@ -1974,7 +2019,14 @@ async function main(): Promise<void> {
         handle: async (req, res) => handler(req, res),
         resolveUserId: (req) => resolveUserId(req),
       }
+      // Per person, so every query the store runs sets `app.user_id` and
+      // row-level security does the isolating. There is no shared `local/`
+      // Markdown on a deployed instance — appending everyone's drills to one
+      // file is not a smaller version of the right answer.
+      const { dbWorkStore } = await import('./work-store-db')
+      work = (userId) => dbWorkStore(userId)
       console.log('  Auth: Better Auth, anonymous sessions enabled.')
+      console.log('  Record: Postgres, per person — local/ is not written.')
     } catch (err) {
       console.error('Could not start in deployed mode:', err instanceof Error ? err.message : String(err))
       process.exit(1)
@@ -1998,6 +2050,7 @@ async function main(): Promise<void> {
     speaker: configuredSpeaker(root),
     vague: VOICE_VAGUE,
     auth,
+    work,
   })
   // Still `127.0.0.1` only — TLS changes the scheme, never the reach. A live
   // microphone and a private story bank have no business on the network.

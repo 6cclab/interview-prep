@@ -3,16 +3,8 @@ import { displayText, hasCodeBlock } from './reply-code'
 import type { Recorder } from './audio'
 import type { Speaker, Transcriber } from './speech'
 import type { Track } from './context'
-import {
-  appendDrillLog,
-  appendStoryLog,
-  formatSession,
-  sessionPath,
-  splitDrillLog,
-  splitTrailer,
-  writeSession,
-  type Entry,
-} from './transcript'
+import type { WorkStore } from './work-store'
+import { formatSession, sessionPath, splitDrillLog, splitTrailer, type Entry } from './transcript'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -162,6 +154,11 @@ export function createSession(opts: CreateSessionOptions): Session {
  */
 export interface FinishOptions {
   root: string
+  /**
+   * Where the record goes. Local mode's Markdown in `local/`, or one person's
+   * rows in Postgres — see `work-store.ts`.
+   */
+  work: WorkStore
   track: Track
   problem?: string
   startedAt: Date
@@ -184,6 +181,12 @@ export interface FinishOptions {
 }
 
 export interface FinishResult {
+  /**
+   * Where the transcript ended up: a repository-relative path in local mode, a
+   * row reference like `transcript #41` when there is no file. Named `relPath`
+   * still because it is what the client shows and renaming it would ripple into
+   * the SSE `ended` event and its four consumers for no gain.
+   */
   relPath: string
   storyLogWritten: boolean
   /**
@@ -194,20 +197,33 @@ export interface FinishResult {
   drillLogWritten: boolean
 }
 
-export function finishSession(session: Session, interviewer: Interviewer, opts: FinishOptions): FinishResult {
-  // The path written may differ from the one asked for — `writeSession` will not
-  // overwrite an existing transcript — so report back what it actually used.
-  const relPath = writeSession(
-    opts.root,
-    sessionPath(opts.track, opts.startedAt, opts.problem),
-    formatSession(session.entries(), opts.startedAt, opts.transport, opts.editor),
-  )
+/**
+ * Write everything a finished session produced.
+ *
+ * Asynchronous because the deployed store is — see `work-store.ts`. The order is
+ * load-bearing and unchanged: the transcript first, then the logs. The
+ * transcript is the artifact a drill exists to leave behind, and a failure to
+ * write a `drill-log` row costs the `/status` signal for one drill and nothing
+ * else. Doing it the other way round would risk the reverse.
+ */
+export async function finishSession(
+  session: Session,
+  interviewer: Interviewer,
+  opts: FinishOptions,
+): Promise<FinishResult> {
+  // The location written may differ from the one asked for — `writeSession` will
+  // not overwrite an existing transcript — so report back what it actually used.
+  const { location: relPath } = await opts.work.saveTranscript({
+    preferredPath: sessionPath(opts.track, opts.startedAt, opts.problem),
+    body: formatSession(session.entries(), opts.startedAt, opts.transport, opts.editor),
+    track: opts.track,
+  })
 
   let storyLogWritten = false
   if (opts.track === 'mock') {
     const { log } = splitTrailer(interviewer.lastRaw())
     if (log) {
-      appendStoryLog(opts.root, log)
+      await opts.work.appendStoryLog(log)
       storyLogWritten = true
     }
   }
@@ -221,7 +237,7 @@ export function finishSession(session: Session, interviewer: Interviewer, opts: 
     // come from `opts.drill`, which the server counted.
     const { log } = splitDrillLog(interviewer.lastRaw())
     if (log) {
-      appendDrillLog(opts.root, {
+      await opts.work.appendDrillLog({
         startedAt: opts.startedAt,
         problem: opts.problem,
         pattern: opts.drill.pattern,

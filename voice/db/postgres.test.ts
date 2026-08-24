@@ -16,6 +16,7 @@ import {
 import { collectProblems, ingest } from './ingest'
 import { dbProblems, loadProblemCache, resetProblemCache } from '../problems-db'
 import { VENDOR_TABLES, applyAuthSchema, authConfig, getAuth, linkAnonymousWork, resetAuth } from './auth'
+import { dbWorkStore } from '../work-store-db'
 
 /**
  * Everything in `voice/db`, against a real Postgres.
@@ -918,6 +919,144 @@ suite('voice/db against a real Postgres', () => {
         return rows[0]?.is_anonymous
       })
       expect(flag).toBe(true)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+
+  describe('the record, per person', () => {
+    beforeEach(async () => {
+      await ingest(seedTree())
+      await loadProblemCache()
+    })
+
+    const trees: string[] = []
+    function seedTree(): string {
+      const root = mkdtempSync(join(tmpdir(), 'voice-work-'))
+      trees.push(root)
+      const dir = join(root, 'problems', 'two-pointers', 'valid-palindrome')
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'README.md'), '# valid-palindrome\n')
+      writeFileSync(join(dir, 'meta.yaml'), 'pattern: two-pointers\ndifficulty: warmup\n')
+      return root
+    }
+
+    afterAll(() => {
+      for (const root of trees.splice(0)) rmSync(root, { recursive: true, force: true })
+    })
+
+    const row = (over: Partial<Parameters<ReturnType<typeof dbWorkStore>['appendDrillLog']>[0]> = {}) => ({
+      startedAt: new Date('2026-08-20T10:00:00.000Z'),
+      problem: 'valid-palindrome',
+      pattern: 'two-pointers',
+      solved: true,
+      hints: 0,
+      elapsedMs: 12 * 60_000,
+      note: 'clean',
+      ...over,
+    })
+
+    it('writes a drill, a transcript, a story and a pairing, and reads them back', async () => {
+      const ada = dbWorkStore('ada')
+      const saved = await ada.saveTranscript({
+        preferredPath: 'local/coding/valid-palindrome-live.md',
+        body: '# transcript body',
+        track: 'coding',
+      })
+      expect(saved.location).toMatch(/^transcript #\d+$/)
+      await ada.appendDrillLog(row())
+      await ada.appendStoryLog({ competency: 'Conflict', story: 'the migration', worked: 'owned it', fix: 'sooner' })
+      await ada.appendCoached({ date: '2026-08-21', problem: 'valid-palindrome', pattern: 'two-pointers', minutes: 30 })
+
+      const history = await ada.readHistory()
+      expect(history.rows).toHaveLength(1)
+      expect(history.rows[0]).toMatchObject({
+        problem: 'valid-palindrome',
+        solved: true,
+        result: 'solved',
+        hints: 0,
+        elapsedMs: 12 * 60_000,
+        note: 'clean',
+      })
+      expect(history.summary).toMatchObject({ attempts: 1, solved: 1, cold: 1, problems: 1 })
+      expect(history.coached).toEqual(['valid-palindrome'])
+    })
+
+    /**
+     * The reason this seam exists. One `local/drill-log.md` shared between
+     * several people is not a smaller version of the right answer.
+     */
+    it('shows one person nothing of another’s', async () => {
+      await dbWorkStore('ada').appendDrillLog(row({ note: 'ada was here' }))
+      await dbWorkStore('grace').appendDrillLog(row({ note: 'grace was here', solved: false }))
+
+      const ada = await dbWorkStore('ada').readHistory()
+      const grace = await dbWorkStore('grace').readHistory()
+      expect(ada.rows.map((r) => r.note)).toEqual(['ada was here'])
+      expect(grace.rows.map((r) => r.note)).toEqual(['grace was here'])
+      expect(ada.summary.solved).toBe(1)
+      expect(grace.summary.solved).toBe(0)
+    })
+
+    /**
+     * `solved` stays strict and `result` carries the three-valued reading — the
+     * same split the Markdown reader makes, because every count on the screen is
+     * derived from the boolean and widening it would inflate the cold-solve
+     * figure the whole record is built around.
+     */
+    it('keeps partial out of the solved arithmetic', async () => {
+      const ada = dbWorkStore('ada')
+      await ada.appendDrillLog(row({ solved: true }))
+      await ada.appendDrillLog(row({ solved: false }))
+      await withRuntime('ada', (client) =>
+        client.query("update drill_log set solved = 'partial' where solved = 'unsolved'"),
+      )
+      const history = await ada.readHistory()
+      expect(history.summary).toMatchObject({ attempts: 2, solved: 1, partial: 1 })
+      expect(history.rows.map((r) => r.result).sort()).toEqual(['partial', 'solved'])
+    })
+
+    /** The pattern is never in a history row. It lives behind the privileged door. */
+    it('never carries a pattern out of the database', async () => {
+      await dbWorkStore('ada').appendDrillLog(row())
+      const history = await dbWorkStore('ada').readHistory()
+      expect(JSON.stringify(history)).not.toContain('two-pointers')
+    })
+
+    /**
+     * A drill of a problem that has since been retired keeps its numbers and
+     * loses its name, rather than disappearing. `/status` reads those numbers.
+     */
+    it('keeps a drill whose problem has been retired', async () => {
+      await dbWorkStore('ada').appendDrillLog(row())
+      await withPrivileged((client) => client.query('update problem set retired_at = now()'))
+      const history = await dbWorkStore('ada').readHistory()
+      expect(history.rows).toHaveLength(1)
+      expect(history.rows[0]!.elapsedMs).toBe(12 * 60_000)
+    })
+
+    it('writes a debugging drill under its own track', async () => {
+      await dbWorkStore('ada').appendDrillLog(row({ pattern: 'debugging', problem: 'account-switcher' }))
+      const tracks = await withRuntime('ada', async (client) => {
+        const { rows } = await client.query<{ track: string; problem_id: string | null }>(
+          'select track, problem_id from drill_log',
+        )
+        return rows
+      })
+      // No `problem_id`: debugging exercises are not ingested, so the slug does
+      // not resolve. The row is still worth keeping — see the column's
+      // `on delete set null`.
+      expect(tracks).toEqual([{ track: 'debug', problem_id: null }])
+    })
+
+    /**
+     * Nothing can be written for nobody. Every RLS policy would reject it, and
+     * failing here turns a driver-level `row-level security` error into a
+     * sentence naming the actual problem.
+     */
+    it('refuses to write for an unauthenticated request', async () => {
+      await expect(dbWorkStore(null).appendDrillLog(row())).rejects.toThrow(/unauthenticated/)
+      await expect(dbWorkStore(null).readHistory()).rejects.toThrow(/unauthenticated/)
     })
   })
 })
