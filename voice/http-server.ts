@@ -23,6 +23,7 @@ import {
   type Track,
 } from './context'
 import { findCodingProblem, listCodingProblems, problemDir } from './problems'
+import { readSolution, writeSolution, versionOf } from './solution-file'
 import { findCompetency, listCompetencies } from './competencies'
 import { findExercise, listExercises } from './exercises'
 import { runDebugTests, debugVerdictCue, type DebugVerdict } from './debug-tests'
@@ -228,6 +229,18 @@ export function parseDrill(body: Record<string, unknown> | null): Drill {
       throw new Error('budgetMinutes must be a number between 5 and 180.')
     }
     budgetMs = Math.round(raw) * 60_000
+  }
+
+  // Coding track only: where the answer is written. Absent (or an empty/null
+  // value) means the candidate's own editor, the long-standing default — this
+  // does not coerce an unrecognised value, the same style as `competency`
+  // above, since this is the one place client input reaches a filesystem path.
+  const editor = body?.editor
+  if (editor !== undefined && editor !== null && editor !== '') {
+    if (track !== 'coding' || (editor !== 'browser' && editor !== 'own')) {
+      throw new Error(`Invalid editor mode: ${String(editor)}`)
+    }
+    return { track, problem, budgetMs, editor }
   }
   return { track, problem, budgetMs }
 }
@@ -456,6 +469,10 @@ function finishOptions(deps: VoiceServerDeps, stored: StoredSession, elapsedMs: 
     track: stored.drill.track,
     problem: stored.drill.problem,
     startedAt: stored.startedAt,
+    // Coding track only — a design or behavioural drill has no editing mode,
+    // and `formatSession` treats an absent value as "omit the line" rather
+    // than guessing.
+    editor: stored.drill.track === 'coding' ? stored.drill.editor : undefined,
     // Both drilling tracks write a row, into the same table, because `/status`
     // and the history screen read exactly one log. `debug.md` says to set
     // `Pattern` to `debugging`, which is why that column is a plain string here
@@ -720,6 +737,68 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // while the old one is still writing.
       const ended = endAndPersist(deps, store, entryClocks, closing, id) !== null
       sendJson(res, ended ? 200 : 409, ended ? { ended } : { ended, error: 'that session is already ending' })
+      return
+    }
+
+    // The coding track's working file. Slug-only in and out: a problem's path
+    // is `problems/<pattern>/<slug>` and the pattern is the answer, so it never
+    // crosses this boundary. See `stripPatternPaths` for the same rule applied
+    // to anything derived from test output.
+    // POST is accepted as an alias for PUT here solely for
+    // `navigator.sendBeacon`, which the browser client's `beforeunload`/
+    // unmount best-effort save uses (`voice/web/src/useSolution.ts`) — it is
+    // POST-only and the only mechanism guaranteed to still deliver a request
+    // once the page has started tearing down. The write path below does not
+    // otherwise distinguish the two methods.
+    const solutionRoute = /^\/api\/coding\/([^/]+)\/solution$/.exec(url.pathname)
+    if (solutionRoute && (req.method === 'GET' || req.method === 'PUT' || req.method === 'POST')) {
+      const slug = solutionRoute[1]!
+      if (!PROBLEM_SLUG.test(slug)) {
+        sendJson(res, 400, { error: 'Invalid problem name.' })
+        return
+      }
+
+      if (req.method === 'GET') {
+        const file = readSolution(deps.root, slug)
+        if (file === null) {
+          sendJson(res, 404, { error: 'Unknown problem.' })
+          return
+        }
+        sendJson(res, 200, file)
+        return
+      }
+
+      let body: Record<string, unknown> | null
+      try {
+        body = await readJsonBody(req)
+      } catch (error) {
+        sendJson(res, 400, { error: errorMessage(error) })
+        return
+      }
+      const text = body?.text
+      const version = body?.version
+      if (typeof text !== 'string' || typeof version !== 'string') {
+        sendJson(res, 400, { error: 'A save needs `text` and `version`.' })
+        return
+      }
+
+      const outcome = writeSolution(deps.root, slug, text, version)
+      if (outcome === 'missing') {
+        sendJson(res, 404, { error: 'Unknown problem.' })
+        return
+      }
+      if (outcome === 'stale') {
+        // 409, the same shape `POST /end` uses for its non-re-entrancy latch.
+        // The client keeps the typed buffer; it must never resolve this by
+        // discarding what the candidate wrote.
+        const current = readSolution(deps.root, slug)!
+        sendJson(res, 409, {
+          error: 'solution.ts changed on disk since you opened it.',
+          version: current.version,
+        })
+        return
+      }
+      sendJson(res, 200, { version: versionOf(text) })
       return
     }
 

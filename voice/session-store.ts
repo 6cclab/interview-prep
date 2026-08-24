@@ -39,6 +39,14 @@ export interface Drill {
   competency?: string
   /** The design track's time budget in ms; absent when the drill is untimed. */
   budgetMs?: number
+  /**
+   * Coding track only: where the answer is written. `browser` puts a
+   * deliberately limited editor on screen; `own` means the candidate edits
+   * `solution.ts` in their own editor, which is the mode that keeps real types.
+   * Absent means `own` — see `parseDrill` in http-server.ts, the only place
+   * this is validated.
+   */
+  editor?: 'browser' | 'own'
 }
 
 export interface StoredSession {
