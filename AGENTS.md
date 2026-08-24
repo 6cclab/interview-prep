@@ -162,6 +162,11 @@ pnpm exercises          # audits every authored exercise against its track's con
                         # drilled; exit 1) and `unauthored` (works, a part was never
                         # written; exit 0, because a script that fails over a to-do list
                         # gets ignored).
+pnpm ingest             # copy the problem definitions into a deployed instance's Postgres.
+                        # `--dry-run` scans, compares, names every problem that would be
+                        # inserted, updated or retired, and rolls back. A deploy step, not
+                        # a build step and not something the server does on boot.
+                        # Needs DATABASE_URL. Irrelevant to a local drill — see below.
 pnpm mock:voice         # spoken behavioral drill
 pnpm mock:web           # React browser client (127.0.0.1) — builds, serves, opens Chrome.
                         # PORT=4199 to serve a second one alongside a running drill.
@@ -730,6 +735,37 @@ structure. No checker can tell that from a leak, so the exercise declares it wit
 declaration. An undeclared match stays broken, which keeps the default strict and
 puts the exemption next to the exercise that needs it rather than in a list inside
 the checker.
+
+### Two stores: `VOICE_MODE`
+
+A local run keeps everything in files and needs no setup at all — no database, no
+environment, nothing. That is the default and it is not going away. A deployed
+instance sets `VOICE_MODE=deployed` and serves problem definitions out of
+Postgres instead, because a shared server has no `problems/` tree it can trust
+and no single `local/drill-log.md` it could honestly append to.
+
+The two are selected once, at startup, and never auto-detected: a server that
+guesses which store it is talking to is a server that can be wrong about it
+halfway through a drill. An unrecognised `VOICE_MODE` is a startup throw naming
+the value, not a quiet fall back to local — `VOICE_MODE=production` serving
+whatever tree happened to be baked into an image is exactly the failure that
+rules out.
+
+**In deployed mode the spoiler rule is a database grant, not a convention.**
+`app_runtime`, the role every request-serving connection drops into, holds no
+privilege at all on the `problem` and `problem_document` tables; it reads two
+views that project the pattern and the worked solution away. So a new route
+doing `select * from problem` fails at the database rather than returning the
+answer, which is the same shape as `assertNoSpoilers` throwing at read time —
+the unsafe thing is unreachable, not merely discouraged. Two callers legitimately
+need the base tables (the ingester, and the boot-time loader that supplies hint
+rung 2 and the coach track), and they use a separate `app_privileged` role that
+in turn holds nothing on any user-owned table.
+
+`meta.yaml` is a spoiler and is withheld like the solution: its first line is
+`pattern:`, and it carries the authored hint rungs a few lines below. Everything
+in it that a runtime consumer wants — title, tier, budget, complexity, companies
+— is parsed out at ingest into columns.
 
 ### The warm-up tier
 

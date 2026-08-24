@@ -100,20 +100,34 @@ export function resolveMode(env: NodeJS.ProcessEnv = process.env): VoiceMode {
 }
 
 /**
- * The Postgres-backed source, which does not exist yet.
+ * What `deployed` mode gets until something installs the real thing.
  *
  * A stub that throws rather than an absent case that falls through to the
- * filesystem. `VOICE_MODE=deployed` on a machine with no database should fail
- * on the first request with a sentence naming the reason, not serve whatever
- * `problems/` happens to be in the image.
+ * filesystem. `VOICE_MODE=deployed` on a machine where startup did not complete
+ * should fail on the first request with a sentence naming the reason, not serve
+ * whatever `problems/` happens to be in the image.
  */
-const notImplemented: ProblemSource = {
+const notInstalled: ProblemSource = {
   list() {
-    throw new Error('VOICE_MODE=deployed needs the Postgres problem source, which is not built yet.')
+    throw new Error('VOICE_MODE=deployed serves problems from Postgres, which startup has not installed.')
   },
   find() {
-    throw new Error('VOICE_MODE=deployed needs the Postgres problem source, which is not built yet.')
+    throw new Error('VOICE_MODE=deployed serves problems from Postgres, which startup has not installed.')
   },
+}
+
+/**
+ * Hand this process the source to serve from. Called once, from `main()`.
+ *
+ * Injected rather than imported, because importing it here would put `pg` — and
+ * the whole `voice/db` tree — on the local path. Every coding drill in the repo
+ * imports this module transitively, and none of them should load a database
+ * driver to find out where a README lives. `main()` reaches the Postgres source
+ * through a dynamic `import()` under `mode === 'deployed'` and passes it in, so
+ * a local run never resolves the module at all.
+ */
+export function installProblemSource(source: ProblemSource): void {
+  selected = source
 }
 
 /**
@@ -132,7 +146,7 @@ export function problemSource(): ProblemSource {
   // crossing each way is a module-level `const`, and neither is read until a
   // function is called, by which point both modules have finished evaluating.
   // Everything else that crosses is a type, which is erased.
-  selected ??= resolveMode() === 'local' ? fsProblems : notImplemented
+  selected ??= resolveMode() === 'local' ? fsProblems : notInstalled
   return selected
 }
 

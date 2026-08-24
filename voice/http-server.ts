@@ -22,7 +22,14 @@ import {
   PROBLEM_SLUG,
   type Track,
 } from './context'
-import { findCodingProblem, listCodingProblems, problemDir, resolveMode, type VoiceMode } from './problems'
+import {
+  findCodingProblem,
+  installProblemSource,
+  listCodingProblems,
+  problemDir,
+  resolveMode,
+  type VoiceMode,
+} from './problems'
 import { readSolution, writeSolution, versionOf } from './solution-file'
 import { findCompetency, listCompetencies } from './competencies'
 import { findExercise, listExercises } from './exercises'
@@ -1820,7 +1827,7 @@ function readTlsMaterial(root: string): { cert: Buffer; key: Buffer } | null {
   return { cert: readFileSync(certPath), key: readFileSync(keyPath) }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const port = process.env.PORT ? Number(process.env.PORT) : 4173
   const root = process.cwd()
   const distDir = join(root, 'voice/dist')
@@ -1846,6 +1853,24 @@ function main(): void {
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err))
     process.exit(1)
+  }
+  // The Postgres source is reached through a dynamic import, and only under
+  // `deployed`. A static import would put `pg` and the whole `voice/db` tree on
+  // the local path: every coding drill in the repo imports `problems.ts`
+  // transitively, and none of them should load a database driver to find out
+  // where a README lives. Loading the cache here rather than lazily means an
+  // unreachable database is a startup failure a deploy notices, not one failed
+  // request at three in the morning.
+  if (mode === 'deployed') {
+    try {
+      const { dbProblems, loadProblemCache } = await import('./problems-db')
+      const count = await loadProblemCache()
+      installProblemSource(dbProblems)
+      console.log(`  Loaded ${count} coding problems from Postgres.`)
+    } catch (err) {
+      console.error('Could not load problems from Postgres:', err instanceof Error ? err.message : String(err))
+      process.exit(1)
+    }
   }
   // Fail here, not on the interviewer's first sentence — several minutes into
   // a drill, after a model turn has already been paid for.
@@ -1909,5 +1934,12 @@ function main(): void {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main()
+  // `main` became async when `deployed` mode gained a dynamic import. A bare
+  // `main()` would swallow a startup rejection into an unhandled rejection with
+  // no stack worth reading, which is the opposite of what every `process.exit(1)`
+  // inside it is for.
+  main().catch((err: unknown) => {
+    console.error(err instanceof Error ? err.message : String(err))
+    process.exit(1)
+  })
 }
