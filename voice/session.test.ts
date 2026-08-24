@@ -4,6 +4,7 @@ import { createInterviewer, type Interviewer } from './interviewer'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fsWorkStore } from './work-store-fs'
 import { createSession, finishSession } from './session'
 
 function fakeInterviewer(replies: string[]): Interviewer {
@@ -367,12 +368,13 @@ describe('finishSession', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('writes the transcript to local/mock-<date>-<hhmm>.md', () => {
+  it('writes the transcript to local/mock-<date>-<hhmm>.md', async () => {
     const session = createSession({ interviewer: { turn: async function* () {}, lastRaw: () => '' }, now: () => 0 })
     session.submitTurn('Ready latency.', 0)
     const startedAt = new Date('2026-08-07T10:00:00.000Z')
-    const { relPath } = finishSession(session, { turn: async function* () {}, lastRaw: () => '' }, {
+    const { relPath } = await finishSession(session, { turn: async function* () {}, lastRaw: () => '' }, {
       root,
+      work: fsWorkStore(root),
       track: 'mock',
       startedAt,
     })
@@ -380,11 +382,12 @@ describe('finishSession', () => {
     expect(readFileSync(join(root, relPath), 'utf8')).toContain('Ready latency.')
   })
 
-  it('appends the story log when the interviewer emitted a trailer', () => {
+  it('appends the story log when the interviewer emitted a trailer', async () => {
     const session = createSession({ interviewer: { turn: async function* () {}, lastRaw: () => '' }, now: () => 0 })
     const raw = '```story-log\ncompetency: Conflict\nstory: The migration\nworked: Owned the timeline\nfix: Name the tradeoff sooner\n```'
-    const { storyLogWritten } = finishSession(session, { turn: async function* () {}, lastRaw: () => raw }, {
+    const { storyLogWritten } = await finishSession(session, { turn: async function* () {}, lastRaw: () => raw }, {
       root,
+      work: fsWorkStore(root),
       track: 'mock',
       startedAt: new Date('2026-08-07T10:00:00.000Z'),
     })
@@ -392,10 +395,11 @@ describe('finishSession', () => {
     expect(readFileSync(join(root, 'local/stories.md'), 'utf8')).toContain('## Conflict')
   })
 
-  it('does not write a story log when the interviewer emitted no trailer', () => {
+  it('does not write a story log when the interviewer emitted no trailer', async () => {
     const session = createSession({ interviewer: { turn: async function* () {}, lastRaw: () => '' }, now: () => 0 })
-    const { storyLogWritten } = finishSession(session, { turn: async function* () {}, lastRaw: () => 'No trailer here.' }, {
+    const { storyLogWritten } = await finishSession(session, { turn: async function* () {}, lastRaw: () => 'No trailer here.' }, {
       root,
+      work: fsWorkStore(root),
       track: 'mock',
       startedAt: new Date('2026-08-07T10:00:00.000Z'),
     })
