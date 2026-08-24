@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { codingDocument, findCodingProblem } from './problems'
+import { stripSuiteComments } from './suite-comments'
 
 /**
  * Everything a browser needs to run a coding drill's suite client-side, for
@@ -58,8 +59,18 @@ export function buildExercise(root: string, slug: string): Exercise | null {
   // `codingDocument` has no `solution` kind to ask for, which is what now makes
   // "reads stub.ts, never solution.ts" unstateable rather than merely stated.
   const stub = codingDocument(root, problem, 'stub')
-  const test = codingDocument(root, problem, 'test')
-  if (stub === null || test === null) return null
+  const source = codingDocument(root, problem, 'test')
+  if (stub === null || source === null) return null
+  // Comments out, because running the suite in the browser means shipping it to
+  // the browser. AGENTS.md withholds this file from the interviewer because its
+  // comments explain fixture construction and have leaked an approach once
+  // already — and four of the current suites name their own pattern directory in
+  // a comment outright, which is hint rung 2 in plain text.
+  //
+  // Applied to the served copy of `test` and to nothing else. `utils` are shared
+  // library modules that name no problem, and the stub's comments are the
+  // signature documentation the candidate is meant to read.
+  const test = stripSuiteComments(source)
   const utils: Record<string, string> = {}
   for (const specifier of testUtilsImports(test)) {
     const name = specifier.slice(specifier.lastIndexOf('/') + 1)

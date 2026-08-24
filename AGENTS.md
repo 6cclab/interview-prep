@@ -767,6 +767,41 @@ in turn holds nothing on any user-owned table.
 in it that a runtime consumer wants — title, tier, budget, complexity, companies
 — is parsed out at ingest into columns.
 
+### Grading in the browser
+
+A deployed drill runs its suite in a Web Worker, on the candidate's own hardware.
+Three consequences, all of them deliberate.
+
+**The suite is shipped to the browser, so its comments are stripped first.** This
+file withholds `solution.test.ts` from the interviewer because its comments
+explain fixture construction and have leaked an approach once already; serving it
+to a browser is the same exposure with a wider audience. `stripSuiteComments`
+parses and reprints rather than pattern-matching — a regex cannot tell a comment
+from the same characters inside a string, a template literal or a regex, and
+these suites contain all three. All forty-two are asserted to produce identical
+failure *titles* before and after.
+
+**Absolute wall-clock budgets are a machine's opinion.** Measured on 2026-08-24
+through the runner, with the worked answers: the slowest whole suite was
+`network-delay` at 366ms against its own 5s assertion — 13.7× of margin — and
+every other suite has 40× or more. A browser 4–6× slower still leaves the
+tightest case 2.3×, so a correct answer does not become a cost-red. What is *not*
+measured is whether a brute force still finishes inside the runner's 30s ceiling
+when throttled; no brute-force implementations are committed, so there is nothing
+to time. The clean long-term fix is to assert a **ratio** of brute-force to
+reference time rather than an absolute threshold, which is a `test-utils/` API
+change and a rewrite of every scale fixture.
+
+**A browser-computed verdict is forgeable, and the answer is to label it rather
+than prevent it.** The only adversary is the candidate deceiving themselves. But
+the cost is specific: `/status` reads `Solved` to tell rust from coverage, and
+because `hintRung` stays server-counted and honest, a forged-green low-hint row
+reads as maximally convincing while being maximally false. So `drill_log` records
+`verified_by` as `server` or `browser`, and altering the record afterwards means
+editing the log rather than typing in a console. Explicitly not done: sampling
+re-runs, rate limits, anomaly detection on fast green streaks — all real effort,
+none of it closes the hole.
+
 ### Who a request is, when there is more than one person
 
 Local mode has no identity at all: no cookie, no login, no `user` row. Deployed

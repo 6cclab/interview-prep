@@ -27,6 +27,25 @@ export interface RunnerWorker {
  * covers the slowest scale test with room to spare, and anything past it is a
  * loop that is not going to end. The budget suites exist to punish exactly
  * that, so the runner has to survive it rather than hang with the tab.
+ *
+ * **Measured against the references, on 2026-08-24, through this runner.** All
+ * twenty-six scale-test suites were run with their worked answers. The slowest
+ * whole suite was `network-delay` at 366ms — 13.7× inside its own 5s assertion,
+ * and eighty times inside this ceiling. `n-queens-count` is next at 264ms; every
+ * other suite has 40× or more against its budget. So a browser 4–6× slower than
+ * this machine still leaves the tightest case 2.3× of margin, and nothing is
+ * near turning a correct answer into a cost-red.
+ *
+ * **The other half of that question is not measured, and should not be assumed.**
+ * Whether a *brute force* still finishes inside this ceiling when throttled
+ * cannot be checked here: no brute-force implementations are committed to the
+ * repo — they exist only while a suite is being authored, as one leg of the
+ * three-way proof AGENTS.md requires. If a brute force does overrun, the verdict
+ * degrades from `cost-red` (a legitimate checkpoint: a working answer that costs
+ * too much) to `errored`, which is a materially worse message for exactly the
+ * case the suite exists to catch. Raising this number is not the fix without a
+ * measurement, because a longer ceiling is also a longer hang on a real infinite
+ * loop; what it needs is brute-force fixtures to time against.
  */
 export const SUITE_TIMEOUT_MS = 30_000
 
@@ -65,7 +84,15 @@ export function runInWorker(
     }
 
     const timer = setTimer(() => {
-      finish({ kind: 'errored', message: 'the suite did not finish' })
+      // Names both causes, because the runner genuinely cannot tell them apart
+      // and one of them is not a mistake. A scale suite that overruns is often a
+      // working answer that costs too much — a cost-red, which is a legitimate
+      // checkpoint — and a bare "did not finish" reads as a broken drill and
+      // sends the candidate looking for a bug that is not there.
+      finish({
+        kind: 'errored',
+        message: `the suite did not finish within ${Math.round(timeoutMs / 1000)}s — either it loops forever, or it is a working answer too slow to measure`,
+      })
     }, timeoutMs)
 
     worker.onmessage = (event): void => {
