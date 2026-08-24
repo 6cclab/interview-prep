@@ -240,205 +240,9 @@ body {
 /* Main / transcript column                                                */
 /* ---------------------------------------------------------------------- */
 
-.main-column {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  justify-content: center;
-}
 
-.transcript-region {
-  position: relative;
-  width: 100%;
-  max-width: var(--measure);
-  padding: 0 28px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
 
-.transcript-empty {
-  padding: 96px 0 40px;
-  max-width: 46ch;
-}
 
-.transcript-empty h1 {
-  font-size: 30px;
-  line-height: 1.2;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  margin: 0 0 14px;
-}
-
-.transcript-empty p {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: 16px;
-}
-
-.transcript {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 28px 4px 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 26px;
-  scroll-behavior: smooth;
-}
-
-.turn--interviewer {
-  border: 2px solid var(--border);
-  background: var(--card);
-  box-shadow: 4px 4px 0 0 var(--shadow-color);
-  padding: 20px 24px 22px;
-}
-
-.turn__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.turn__label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-}
-
-.turn__label--muted {
-  color: var(--muted-foreground);
-}
-
-.turn__meta {
-  font-size: 11px;
-  color: var(--muted-foreground);
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  white-space: nowrap;
-}
-
-.turn__body {
-  font-size: 16.5px;
-  line-height: 1.62;
-  text-wrap: pretty;
-  overflow-wrap: anywhere;
-  /* The transcript column may now be far wider than a comfortable line. Cap the
-     prose rather than the column, so the extra width goes to layout. */
-  max-width: var(--measure-prose);
-}
-
-.turn__body--collapsed {
-  max-height: 152px;
-  overflow: hidden;
-}
-
-.turn__expand {
-  margin-top: 12px;
-  border: 2px solid var(--border);
-  background: var(--background);
-  color: var(--foreground);
-  padding: 6px 12px;
-  font-size: 12px;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  cursor: pointer;
-}
-
-.turn__expand:hover {
-  background: var(--accent);
-}
-
-.turn__sentence {
-  animation: sentenceIn 0.45s ease both;
-}
-
-.turn__caret {
-  display: inline-block;
-  width: 9px;
-  height: 18px;
-  background: var(--brand);
-  vertical-align: -3px;
-  animation: caret-blink 1.4s steps(1) infinite;
-}
-
-.turn--candidate {
-  margin-left: 64px;
-  border-left: 5px solid var(--brand);
-  padding: 2px 0 2px 20px;
-}
-
-.turn--candidate .turn__head {
-  margin-bottom: 8px;
-}
-
-.turn__body--candidate {
-  line-height: 1.6;
-  color: var(--muted-foreground);
-}
-
-@media (max-width: 720px) {
-  .turn--candidate {
-    margin-left: 28px;
-  }
-}
-
-/* Centred on the transcript column, not the viewport.
- *
- * It was `position: fixed; left: 50%`, which centres on the viewport — fine on
- * the behavioural screen, where the transcript IS the viewport, and wrong on the
- * two split screens, where the transcript is only the right-hand column. Measured
- * on the coding drill: the pill's centre landed at x=860 against a column centre
- * of x=1152, so it sat 292px to the left of the list it belongs to.
- *
- * `absolute` against `.transcript-region` (already `position: relative`) also
- * retires the `bottom: 204px` guess at the dock stack's height. That stack grows
- * when the error banner or the pacing bar appear, and a taller dock would have
- * covered the pill outright. The region's bottom edge is the dock's top edge, so
- * a small offset here is correct at every dock height.
- *
- * Still floats over the scrolling list: the pill is a sibling of `.transcript`,
- * which is the scroller, so it does not move with the content. */
-.jump-pill {
-  position: absolute;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
-  z-index: 30;
-  border: 2px solid var(--border);
-  background: var(--foreground);
-  color: var(--background);
-  box-shadow: 4px 4px 0 0 var(--shadow-color);
-  padding: 9px 18px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-/* ---------------------------------------------------------------------- */
-/* Dock stack: error banner, pacing bar, dock — bottom, always visible     */
-/* ---------------------------------------------------------------------- */
-
-.dock-stack {
-  flex: none;
-  position: sticky;
-  bottom: 0;
-  background: var(--background);
-  z-index: 25;
-}
-
-.dock-stack__row {
-  display: flex;
-  justify-content: center;
-  padding: 0 28px 14px;
-}
-
-.dock-stack__row:has(.pacing) {
-  padding-bottom: 12px;
-}
 
 /* Error banner */
 
@@ -486,12 +290,8 @@ body {
 /* The conflict banner's Overwrite/Reload — same shape as
    .error-banner__actions, kept separate because this banner lives inline in
    the editor pane rather than in the dock's ErrorBanner. */
-.solution-editor-pane__conflict-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 10px;
-}
+
+
 
 /* The "Show me where" expansion. Numbered because it is a sequence of steps to
    follow, and set in mono to match the rest of the app's instructional text. */
@@ -512,83 +312,7 @@ body {
 
 /* Pacing bar */
 
-.pacing {
-  width: 100%;
-  max-width: var(--measure);
-}
 
-.pacing__row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 8px;
-}
-
-.pacing__zone {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-}
-
-.pacing__clock {
-  font-size: 12px;
-  color: var(--muted-foreground);
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-}
-
-.pacing__track {
-  position: relative;
-  height: 18px;
-  border: 2px solid var(--border);
-  background: var(--muted);
-}
-
-.pacing__fill {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  transition: width 1s linear;
-  background: var(--muted-foreground);
-}
-
-.pacing[data-zone='zone'] .pacing__fill {
-  background: var(--success);
-}
-.pacing[data-zone='wrapping'] .pacing__fill {
-  background: var(--warning);
-}
-.pacing[data-zone='long'] .pacing__fill {
-  background: var(--destructive);
-}
-
-.pacing__mark {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--border);
-  opacity: 0.45;
-}
-
-.pacing__mark--target {
-  top: -5px;
-  bottom: -5px;
-  width: 3px;
-  background: var(--foreground);
-  opacity: 1;
-}
-
-.pacing__footer {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 7px;
-  font-size: 11px;
-  color: var(--muted-foreground);
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-}
 
 /* Dock */
 
@@ -597,14 +321,7 @@ body {
   background: var(--card);
 }
 
-.dock__inner {
-  max-width: var(--measure);
-  margin: 0 auto;
-  padding: 18px 28px 22px;
-  display: flex;
-  align-items: center;
-  gap: 24px;
-}
+
 
 .dock__status {
   flex: 1;
@@ -622,17 +339,7 @@ body {
   font-weight: 600;
 }
 
-.dock__detail {
-  font-size: 13px;
-  color: var(--muted-foreground);
-  margin: 5px 0 0;
-  max-width: 62ch;
-  text-wrap: pretty;
-}
 
-.dock__dot {
-  flex: none;
-}
 
 .dock__dot--recording {
   width: 12px;
@@ -648,12 +355,7 @@ body {
   border: 2px dashed var(--muted-foreground);
 }
 
-.dock__actions {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex: none;
-}
+
 
 @media (max-width: 720px) {
   .dock__inner {
@@ -702,15 +404,7 @@ body {
   opacity: 0.8;
 }
 
-.primary--go {
-  background: var(--brand);
-  color: var(--brand-foreground);
-}
 
-.primary--stop {
-  background: var(--destructive);
-  color: var(--destructive-foreground);
-}
 
 .primary--wait {
   border: 2px dashed var(--muted-foreground);
@@ -792,10 +486,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .turn__sentence,
   .recording-pill__dot,
-  .dock__dot--recording,
-  .turn__caret {
+  .dock__dot--recording {
     animation: none;
   }
 
@@ -965,85 +657,18 @@ body {
 /* The coding track's tools (CodingTools) — hint ladder and test runner. Lives in
    the dock stack, so it shares the dock's measure and sits where every other
    action already is. */
-.coding-tools {
-  width: 100%;
-  max-width: var(--measure);
-  margin: 0 auto;
-  padding: 12px 28px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
 
-.coding-tools__row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-}
+
 
 /* The help already taken, stated plainly. Mono because it is a count, and the
    same face every other metric on this screen uses. */
-.coding-tools__rung {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted-foreground);
-}
 
-.coding-tools__result {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
-  border: 2px solid var(--border);
-  /* A left rule carries the tone. Colour alone would be the only signal for a
-     distinction the drill is built on, so the headline states it in words too. */
-  border-left-width: 6px;
-  background: var(--muted);
-}
 
-.coding-tools__result--green {
-  border-left-color: var(--brand, currentColor);
-}
 
 /* A right answer that costs too much. Deliberately not styled as a failure —
    it is a working brute force, which is a real checkpoint. */
-.coding-tools__result--cost {
-  border-left-color: #b8860b;
-}
 
-.coding-tools__result--wrong,
-.coding-tools__result--errored {
-  border-left-color: #b3261e;
-}
 
-.coding-tools__headline {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  letter-spacing: 0.02em;
-}
-
-.coding-tools__body {
-  font-size: 0.85rem;
-  color: var(--muted-foreground);
-  max-width: 68ch;
-}
-
-.coding-tools__failed {
-  margin: 2px 0 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  /* Failing test names only, never a diff — a scale fixture's expected value is
-     a hundred thousand numbers, and a message quoting it hands over the answer.
-     Long names scroll inside this block rather than widening the page. */
-  overflow-x: auto;
-}
 
 /* The timed tracks' problem statement (ProblemPane). Sits between the header
    and the transcript, capped so a long prompt scrolls inside itself rather than
@@ -1148,13 +773,6 @@ body {
     min-width: 0;
   }
 
-  /* Fills its column rather than keeping a cap of its own, which left a hole of
-     unused column to the right of the conversation. Safe because the turn text
-     carries its own reading measure — see `.turn__body`. */
-  .drill-body--split .transcript-region {
-    max-width: none;
-  }
-
   /* Left-aligned rather than centred once it is a column of its own: a centred
      transcript inside a right-hand column reads as drifting away from the prompt. */
   .drill-body--split .main-column {
@@ -1162,11 +780,7 @@ body {
   }
 }
 
-.problem-pane-slot {
-  flex: none;
-  border-bottom: 2px solid var(--border);
-  background: var(--muted);
-}
+
 
 .problem-pane {
   max-width: var(--measure);
@@ -1354,121 +968,191 @@ ol.md__list {
   overflow-y: auto;
   display: flex;
   justify-content: center;
-  padding: 40px 28px 56px;
+  padding: 30px 22px 34px;
 }
 
+/* Wider than `--measure-home`, which was sized for a column of prose cards. The
+   table needs room for `210px 1fr 300px 200px` plus two 26px gaps before column
+   2 starts squeezing the blurbs. */
 .home__inner {
   width: 100%;
-  max-width: var(--measure-home);
+  max-width: 1180px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 22px;
 }
 
-/*
- * The three tracks side by side once there is room, rather than a stack with the
- * window's width unused beside it. Same threshold as the drill body's split, for
- * the same reason: below it a third of the width is not a readable card.
- *
- * The cap widens with the layout — three cards in an 880px block would be too
- * narrow to read, so this borrows the drill measure instead.
- */
-@media (min-width: 62rem) {
-  .home__inner {
-    max-width: var(--measure);
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    /* The grid is stretched to the scroll container's full height, and a grid's
-       default `align-content` stretches its auto rows to match — which opened a
-       200px gap under the heading and left dead space inside every card. Rows keep
-       their content height and the block sits at the top. */
-    align-content: start;
-  }
-
-  /* Both span the row: the heading names the whole screen, and an unreachable
-     server breaks every track, so neither belongs in one column. */
-  .home__title,
-  .home__offline {
-    grid-column: 1 / -1;
-  }
-
-  /* Equal height, with the action pushed to the bottom, so the three buttons line
-     up across the row even though the blurbs are different lengths. Stretch is the
-     grid default — the cards only need to fill the row they are given. */
-  .home__card {
-    height: 100%;
-  }
-
-  .home__card > :last-child {
-    margin-top: auto;
-  }
+/* The page head: the question on the left, the record on the right.
+   Both span the table's full width, so they are a row rather than the first
+   thing in the column flow. */
+.home__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
 }
 
 .home__title {
   margin: 0;
-  font-size: 26px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-size: 25px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
 }
 
-.home__card {
+/* `8 of 16 solved cold · last drill 2026-08-24`. A button, not a label: it is
+   the second door to the history screen, and someone who lands here already
+   knowing they want to read rather than drill should not have to scroll past
+   six tracks to find it. */
+.home__record {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  text-underline-offset: 3px;
+}
+
+.home__record:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+
+/* The table. One 1px border around the whole block and 1px between rows, so six
+   tracks read as one comparable set rather than six floating cards. */
+.home__tracks {
+  border: 1px solid var(--border);
+  background: var(--card, var(--background));
+}
+
+/*
+ * A track per row.
+ *
+ * Fixed columns are the point: every select starts at the same x and every
+ * button ends at the same one, which is what makes the tracks comparable at a
+ * glance. `align-items: start` lets column 2 set its own height — the pairing
+ * blurb is four times the behavioural one, and forcing them equal is what left
+ * ~200px of dead space in three of the old cards.
+ */
+.track-row {
+  display: grid;
+  grid-template-columns: 210px 1fr 300px 200px;
+  gap: 26px;
+  align-items: start;
+  padding: 20px 22px;
+}
+
+.track-row + .track-row {
+  border-top: 1px solid var(--border);
+}
+
+.track-row__id {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  align-items: start;
-  padding: 22px 24px;
-  border: 2px solid var(--border);
-  background: var(--card, var(--background));
-  box-shadow: var(--shadow-brutal, 4px 4px 0 0 var(--shadow-color, currentColor));
+  gap: 6px;
 }
 
-.home__card-title {
-  margin: 0;
+.track-row__name {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+/* The commitment, before the prose: 45 minutes and timed is the thing most
+   likely to decide whether you start this track right now. */
+.track-row__meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 14px;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--muted-foreground);
 }
 
-.home__card-body {
+.track-row__blurb {
   margin: 0;
-  font-size: 15px;
-  line-height: 1.55;
-  max-width: 68ch;
+  font-size: 14.5px;
+  line-height: 22px;
+  color: var(--muted-foreground);
   text-wrap: pretty;
 }
 
-/* `width: 100%` on every row, not just the ones that overflowed.
-   `.home__card` is `align-items: start`, so a row shrink-wraps its contents —
-   and once a row is wider than the card, a `max-width: 100%` on the control
-   inside it is measured against that too-wide row and caps nothing. The
-   behavioural card hit this first (prose titles) and the debugging card hit it
-   next (bug-report headlines); fixing it per-card just waits for the third. */
-.home__row {
+.track-row__choose {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-}
-
-/* The picker trigger. Brutalkit's Select renders its list in a portal, so the
-   trigger is not sized by its widest option the way a native select is — this
-   only has to let it share the row and shrink when the row wraps. `min-width: 0`
-   is what actually permits shrinking below the flex base size. */
-.home__select {
-  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 10px;
   min-width: 0;
-  max-width: 100%;
 }
 
-.home__label {
+.track-row__select {
+  width: 100%;
+  min-width: 0;
+}
+
+.track-row__go {
+  justify-self: end;
+}
+
+/* 44px, and set on the button itself rather than the cell: the cell is
+   `justify-self: end` and would otherwise shrink-wrap a shorter control. */
+.track-row__go button {
+  height: 44px;
+}
+
+/* A server that answered badly. Ochre rather than red — the track is
+   unavailable, which is a condition to be told about, not a failure of yours. */
+.track-row__unavailable {
+  margin: 0;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10.5px;
+  line-height: 14px;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted-foreground);
+  letter-spacing: 0.14em;
+  color: var(--warning);
+}
+
+.track-row[data-unavailable] .track-row__select {
+  opacity: 0.55;
+}
+
+.track-row[data-unavailable] .track-row__go button {
+  border-style: dashed;
+}
+
+/* Below the table, because looking at past results answers a different question
+   from the one this screen asks. */
+.home__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/*
+ * Narrow: the four columns stop being comparable long before they stop fitting,
+ * so the row becomes a stack rather than four squeezed columns. The button goes
+ * full width because `justify-self: end` on a 100%-wide cell is a no-op that
+ * leaves it stranded mid-stack.
+ */
+@media (max-width: 62rem) {
+  .track-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .track-row__go {
+    justify-self: stretch;
+  }
+
+  .track-row__go button {
+    width: 100%;
+  }
 }
 
 .home__offline {
@@ -1530,147 +1214,704 @@ ol.md__list {
 /* Past drills (History.tsx)                                             */
 /* ---------------------------------------------------------------------- */
 
-.home__aside {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-  margin: 1.5rem 0 0;
-}
-
 .history {
   inline-size: 100%;
-  max-inline-size: var(--measure);
+  max-inline-size: 1180px;
   margin-inline: auto;
-  padding: 1.5rem;
+  padding: 0 22px 32px;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 18px;
   /* The table is the only thing here that can exceed the viewport, and it gets
      its own scroller below — the page itself must never scroll sideways. */
   min-inline-size: 0;
 }
 
+/*
+ * The stat strip: one bordered row, five equal cells, 1px dividers.
+ *
+ * A row rather than five separate bordered boxes, because these five numbers
+ * are one reading — cold, helped, unsolved, seen, median — and boxing them
+ * apart invited reading any single one as the headline. Cold is first because
+ * it is the only figure that means the recall was actually there.
+ */
 .history__summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: 1rem;
+  display: flex;
+  border: 1px solid var(--border);
+  background: var(--card, var(--background));
   margin: 0;
 }
 
 .history__stat {
-  border: 2px solid var(--border);
-  padding: 0.75rem 1rem;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
 }
 
-.history__stat dt {
-  font-size: 0.8rem;
+.history__stat + .history__stat {
+  border-left: 1px solid var(--border);
+}
+
+.history__stat-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 14px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.14em;
   color: var(--muted-foreground);
 }
 
-.history__stat dd {
-  margin: 0.25rem 0 0;
-  font-size: 1.75rem;
+.history__stat-value {
+  font-family: var(--font-mono);
+  font-size: 23px;
+  line-height: 28px;
   font-variant-numeric: tabular-nums;
 }
 
+/* "of 16" is context for the figure, not part of it — set down so the eye takes
+   the cold count first and the denominator second. */
 .history__of {
-  font-size: 1rem;
+  font-size: 13px;
   color: var(--muted-foreground);
-}
-
-/* A row whose select must not exceed its card. `.home__row` is shrink-to-fit,
-   so a wide select widens the row rather than being clipped by it — this pins
-   the row to the card and lets the select shrink inside it. */
-/* Reads as an annotation on the help column, not a second result. */
-.history__paired {
-  color: var(--muted-foreground);
-  white-space: nowrap;
 }
 
 .history__controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem;
+  gap: 12px;
 }
 
 .history__warning {
   margin: 0;
 }
 
-/* Its own scroller so a long note cannot push the page sideways. */
-.history__scroller {
-  overflow-x: auto;
-  min-inline-size: 0;
-  border: 2px solid var(--border);
-}
-
+/*
+ * The table.
+ *
+ * A grid rather than a `<table>`, because an expanded note has to render as a
+ * full-width block *between* two rows — which a table can only do with a
+ * `colspan` cell that then has to be kept in sync with the column count as the
+ * pattern column comes and goes. Roles carry the semantics instead.
+ *
+ * The 1fr is the note column: every other column is content-sized to its widest
+ * real value, so the note gets whatever is left and ellipsises into it.
+ */
 .history__table {
-  border-collapse: collapse;
-  inline-size: 100%;
-  font-size: 0.9rem;
+  border: 1px solid var(--border);
+  min-inline-size: 0;
+  font-size: 13px;
 }
 
-.history__table th,
-.history__table td {
-  text-align: start;
-  padding: 0.6rem 0.85rem;
-  border-block-end: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  vertical-align: top;
+.history__head,
+.history__row {
+  display: grid;
+  grid-template-columns: 96px 200px 132px 148px 70px 1fr 30px;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 16px;
 }
 
-.history__table th {
-  font-size: 0.75rem;
+/* The pattern column only exists while patterns are revealed, so the template
+   gains a slot rather than reserving an empty one the rest of the time. */
+.history[data-revealed] .history__head,
+.history[data-revealed] .history__row {
+  grid-template-columns: 96px 200px 150px 132px 148px 70px 1fr 30px;
+}
+
+.history__head {
+  background: var(--card, var(--background));
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 14px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.14em;
   color: var(--muted-foreground);
+}
+
+.history__group + .history__group .history__row {
+  border-top: 1px solid var(--border);
+}
+
+/* Every cell is one line. This is the whole redesign: a 400-word note used to
+   make one row ~600px tall and bury the eight rows around it. */
+.history__row > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.history__table td {
+.history__date,
+.history__time {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
   font-variant-numeric: tabular-nums;
-}
-
-/* The note is the long column; everything else stays on one line. */
-.history__note {
-  min-inline-size: 18rem;
-  font-variant-numeric: normal;
   color: var(--muted-foreground);
 }
 
-/* Three outcomes, not two: a solve that needed the worked solution is a
-   different result from a cold one, and colouring them alike would undo the
-   distinction this whole screen is built around. */
-.history__row--cold td:first-child {
-  box-shadow: inset 3px 0 0 var(--brand, currentColor);
+.history__problem,
+.history__pattern {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
 }
 
-.history__row--helped td:first-child {
-  box-shadow: inset 3px 0 0 color-mix(in srgb, currentColor 45%, transparent);
+/* A mono verdict, not a colour swatch — a red pill reads as an alarm, and a
+   drill you did not solve is a measurement. */
+.history__result {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
 }
 
-.history__row--unsolved td:first-child {
-  box-shadow: inset 3px 0 0 color-mix(in srgb, currentColor 18%, transparent);
+.history__result[data-result='solved'] {
+  color: var(--success);
+}
+
+.history__result[data-result='unsolved'] {
+  color: var(--destructive);
+}
+
+/*
+ * Help taken, in its own column and ochre only when help was in fact taken.
+ *
+ * Ochre is the app's one colour for a metered thing being spent — the hint
+ * ladder uses it for exactly this. A cold solve and a four-rung solve must
+ * never look alike, and putting help in the result column is precisely how they
+ * came to.
+ */
+.history__help {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.history__help[data-helped] {
+  color: var(--brand);
+}
+
+.history__note-line {
+  color: var(--muted-foreground);
+}
+
+/* The expander. `+`/`−` rather than a chevron: it is the only control in the
+   row and it must read as "there is more text here", not as navigation. */
+.history__toggle {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.history__toggle:hover {
+  color: var(--foreground);
+  border-color: var(--foreground);
+}
+
+/*
+ * The open note, full width beneath its row.
+ *
+ * Capped at a 900px measure because these notes run to several paragraphs and
+ * the table is wider than prose wants to be read at. Only one is ever open, so
+ * this can afford the height.
+ */
+.history__note-full {
+  border-top: 1px solid var(--border);
+  background: var(--card, var(--background));
+  padding: 14px 16px 18px;
+  font-size: 14px;
+  line-height: 22px;
+  max-width: 900px;
+  white-space: pre-wrap;
+  text-wrap: pretty;
 }
 
 .history__empty {
-  border: 2px dashed var(--border);
-  padding: 1.25rem;
+  border: 1px dashed var(--border);
+  padding: 20px;
 }
 
 /* Shares the table's measure and padding so the title lines up with the content
    under it rather than sitting at the viewport edge. */
 .history__header {
   inline-size: 100%;
-  max-inline-size: var(--measure);
+  max-inline-size: 1180px;
   margin-inline: auto;
-  padding: 1.25rem 1.5rem 0;
+  padding: 28px 22px 18px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
 }
+
+
+/* ==========================================================================
+   CODING DRILL SCREEN — structure 1a
+   ==========================================================================
+   From the design handoff (`design_handoff_coding_drill`), appended per its
+   instructions: plain CSS over Brutalkit tokens, no Tailwind, no new
+   dependencies, nothing reading a palette value directly, so both modes and all
+   five theme families keep working.
+
+   Reconciliation with the stylesheet above, which the handoff flagged as the
+   first implementation step: of the thirty-one `.drill-*` classes it defines,
+   exactly one already existed — `.drill-body` — and it named the same thing.
+   That one is scoped and made explicit below. Every other selector is new, so
+   the rest is appended as authored.
+
+   The rules above this block still serve the landing and past-drills screens,
+   which this redesign has not reached yet.
+   ========================================================================== */
+/* ============================================================
+   Coding drill screen — structure 1a
+   Plain CSS over Brutalkit tokens. No Tailwind, no new deps,
+   no network fetches. Append to the existing stylesheet; nothing
+   here reads a palette value directly, so both modes and all
+   five theme families keep working.
+   ============================================================ */
+
+/* --- the scale -------------------------------------------------
+   One rule holds it together: prose and code share a 22px line
+   box, and mono is set 1px smaller than sans so their x-heights
+   agree. Labels are 10.5/14 — exactly half the body rhythm — so
+   a label plus one line of content always measures 36px.
+--------------------------------------------------------------- */
+.drill {
+  --drill-sans: 'Geist Sans', system-ui, sans-serif;
+  --drill-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --step-title: 19px;
+  --step-live: 15px;
+  --step-body: 14.5px;
+  --step-code: 13.5px;
+  --step-clock: 13px;
+  --step-data: 12.5px;
+  --step-label: 10.5px;
+
+  --lead-tight: 14px;   /* labels */
+  --lead-data: 20px;
+  --lead-base: 22px;    /* body AND code */
+
+  --track-label: 0.14em;
+
+  /* 4px grid */
+  --gap-1: 4px;  --gap-2: 8px;  --gap-3: 12px;
+  --gap-4: 16px; --gap-5: 20px; --gap-6: 26px;
+
+  --editor-height: 352px;  /* ~16 lines; fixed, code starts at top */
+
+  font-family: var(--drill-sans);
+  font-size: var(--step-body);
+  line-height: var(--lead-base);
+  color: var(--foreground);
+  background: var(--background);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.drill-label {
+  font-family: var(--drill-mono);
+  font-size: var(--step-label);
+  line-height: var(--lead-tight);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+
+
+/* --- header ---------------------------------------------------- */
+
+
+/* quiet metadata, not a scoreboard; counts down only, and nothing
+   in the UI reacts at 00:00 — the interviewer decides when time is up */
+
+
+
+/* --- the reserved rail ----------------------------------------
+   Always 28px, always in the layout. Banners recolour it in
+   place; they never insert a box and never shove the columns.
+--------------------------------------------------------------- */
+.drill-rail {
+  /* A *fixed* height, not a minimum.
+     `min-height` let the two banner states grow the rail: their buttons are
+     taller than the idle label, so the rail went 33px → 41px and pushed the
+     problem pane and the editor 8px down the screen — the precise movement the
+     always-present rail exists to prevent, reintroduced by the states it was
+     built for. Measured before and after: body top 107px idle, 115px on a save
+     conflict. `overflow: hidden` is the backstop for whatever gets put in here
+     next. */
+  flex: none; height: 33px; overflow: hidden;
+  display: flex; align-items: center; gap: var(--gap-3);
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--drill-mono); font-size: var(--step-label);
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.drill-rail[data-state="transcription-failed"] {
+  background: color-mix(in oklab, var(--warning) 15%, var(--background));
+  border-color: var(--warning); color: var(--foreground);
+}
+.drill-rail[data-state="save-conflict"] {
+  background: color-mix(in oklab, var(--destructive) 13%, var(--background));
+  border-color: var(--destructive); color: var(--foreground);
+}
+/* `line-height: 1` and a flat height so the control cannot outgrow the rail it
+   sits in — see the fixed height above. */
+.drill-rail button {
+  font: inherit; letter-spacing: inherit; text-transform: inherit;
+  line-height: 1; height: 21px;
+  background: transparent; color: inherit;
+  border: 1px solid currentColor; padding: 0 8px; cursor: pointer;
+  flex: none; white-space: nowrap;
+}
+
+/* --- body: problem | editor + stream --------------------------- */
+/* Scoped, and `flex-direction` stated rather than inherited.
+   The pre-redesign stylesheet has its own `.drill-body` a thousand lines up
+   which sets `flex-direction: column` — appending this at equal specificity
+   would let that declaration survive and stack the problem pane above the
+   editor, which is the one thing this layout exists to stop doing. */
+.drill .drill-body { flex: 1; display: flex; flex-direction: row; min-height: 0; }
+
+.drill-problem {
+  width: 560px; flex: none;          /* 62ch measure, not four words */
+  padding: var(--gap-5) var(--gap-6) 30px;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: var(--gap-5);
+  transition: opacity 140ms linear;
+}
+.drill-problem[data-collapsed] { width: 34px; padding: 0; overflow: hidden; }
+.drill-problem h2 { margin: 0; font-size: var(--step-title); line-height: 26px; font-weight: 500; letter-spacing: -0.01em; }
+.drill-problem p { margin: 0; text-wrap: pretty; }
+.drill-problem code {
+  font-family: var(--drill-mono); font-size: var(--step-code);
+  background: var(--muted); padding: 1px 4px;
+}
+.drill-problem pre {
+  margin: 0; background: var(--muted); border: 1px solid var(--border);
+  padding: var(--gap-3) 14px; overflow-x: auto;
+  font-family: var(--drill-mono); font-size: var(--step-data); line-height: var(--lead-data);
+}
+
+.drill-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+/* --- editor --------------------------------------------------
+   Fixed height, code starts at the top. CodeMirror's own DOM is
+   untouched: container, gutter and theme tokens only.
+--------------------------------------------------------------- */
+.drill-editor { flex: none; display: flex; flex-direction: column; transition: opacity 140ms linear; }
+.drill-editor-head {
+  flex: none; height: 30px; display: flex; align-items: center;
+  justify-content: space-between; padding: 0 18px;
+  border-bottom: 1px solid var(--border);
+}
+.drill-cm { height: var(--editor-height); overflow: auto; padding: 14px 18px; }
+.drill-cm .cm-editor { background: transparent; }
+.drill-cm .cm-editor.cm-focused { outline: none; }
+.drill-cm .cm-scroller { font-family: var(--drill-mono); font-size: var(--step-code); line-height: var(--lead-base); }
+.drill-cm .cm-gutters { background: transparent; border-right: none; color: var(--muted-foreground); }
+.drill-cm .cm-lineNumbers .cm-gutterElement { opacity: 0.45; padding-right: 14px; }
+.drill-cm .cm-activeLine,
+.drill-cm .cm-activeLineGutter { background: var(--muted); }
+.drill-cm .cm-activeLineGutter { opacity: 1; }
+.drill-cm .cm-cursor { border-left-color: var(--brand); }
+.drill-cm .cm-selectionBackground,
+.drill-cm ::selection { background: color-mix(in oklab, var(--brand) 26%, transparent); }
+.drill-cm .cm-matchingBracket { background: color-mix(in oklab, var(--foreground) 14%, transparent); outline: none; }
+/* restrained highlighting, all from tokens */
+.drill-cm .tok-keyword { color: var(--chart-5); }
+.drill-cm .tok-number  { color: var(--chart-3); }
+.drill-cm .tok-string  { color: var(--chart-4); }
+.drill-cm .tok-comment,
+.drill-cm .tok-type,
+.drill-cm .tok-punct   { color: var(--muted-foreground); }
+
+/* --- toolbar + hint ladder ------------------------------------- */
+.drill-toolbar {
+  flex: none; display: flex; align-items: center; gap: 14px;
+  padding: var(--gap-3) 18px; border-top: 1px solid var(--border);
+}
+.drill-btn {
+  font-family: var(--drill-mono); font-size: 11px; letter-spacing: 0.1em;
+  text-transform: uppercase; padding: 9px 15px; cursor: pointer;
+  background: var(--card); color: var(--foreground);
+  border: 2px solid var(--foreground);
+}
+.drill-btn--quiet { background: transparent; color: var(--muted-foreground); border: 1px solid var(--border); }
+.drill-btn:disabled { border-style: dashed; opacity: 0.5; cursor: default; }
+/* no hover lift on tool buttons — nothing moves during a drill */
+.drill-btn:hover { background: var(--accent); }
+
+.drill-ladder { display: flex; gap: 3px; }
+/* An unspent rung must read as *quieter* than a spent one in both themes.
+   `--border` cannot do that job: it is `oklch(15%)` in the sage light theme —
+   near-black on a 98% background — which is darker and louder than the ochre
+   that means "spent". At zero hints the whole ladder read as fully spent, the
+   exact inversion of the signal. Mixing against the surface keeps the unspent
+   rung low-contrast whichever way round the theme is. */
+.drill-ladder span {
+  width: 16px; height: 4px;
+  background: color-mix(in oklch, var(--foreground) 22%, var(--background));
+}
+.drill-ladder span[data-spent] { background: var(--brand); }
+.drill-hint-count { color: var(--muted-foreground); }
+.drill-hint-count[data-spent] { color: var(--foreground); }
+
+/* --- the stream ----------------------------------------------
+   One append-only record of the round: interviewer speech, suite
+   verdicts, rungs spent. Everything that used to insert a box
+   above the fold now appends to the bottom of this container.
+--------------------------------------------------------------- */
+.drill-stream {
+  flex: 1; min-height: 0; overflow: auto;
+  border-top: 1px solid var(--border);
+  padding: 14px 18px 18px;
+  display: flex; flex-direction: column; gap: 14px;
+  transition: opacity 140ms linear;
+}
+.drill-entry { display: flex; gap: 14px; }
+.drill-entry > time {
+  flex: none; width: 76px;
+  font-family: var(--drill-mono); font-size: var(--step-label); line-height: var(--lead-base);
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground);
+}
+.drill-entry p { margin: 0; color: var(--muted-foreground); text-wrap: pretty; }
+.drill-entry[data-live] > time { color: var(--foreground); }
+.drill-entry[data-live] p { color: var(--foreground); font-size: var(--step-live); }
+
+/* --- verdicts, as stream entries ------------------------------
+   Red carries one meaning: the answer is wrong. Cost is ochre and
+   reads as a measurement. A pass takes the least ink of the three.
+--------------------------------------------------------------- */
+.drill-verdict {
+  flex: 1; min-width: 0;
+  background: var(--card); border: 1px solid var(--border);
+  padding: var(--gap-3) 15px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.drill-verdict header { display: flex; justify-content: space-between; align-items: baseline; }
+.drill-verdict h4 {
+  margin: 0; font-family: var(--drill-mono); font-size: 11.5px; font-weight: 400;
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+.drill-verdict p { margin: 0; color: var(--foreground); }
+.drill-verdict pre {
+  margin: 0; font-family: var(--drill-mono); font-size: var(--step-data);
+  line-height: var(--lead-data); color: var(--muted-foreground);
+}
+.drill-verdict footer {
+  font-family: var(--drill-mono); font-size: var(--step-label);
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted-foreground);
+}
+
+.drill-verdict[data-verdict="pass"] { border-left: 3px solid var(--success); }
+.drill-verdict[data-verdict="pass"] h4 { color: var(--success); }
+
+.drill-verdict[data-verdict="wrong"] {
+  border-left: 3px solid var(--destructive);
+  background: color-mix(in oklab, var(--destructive) 9%, var(--card));
+}
+.drill-verdict[data-verdict="wrong"] h4 { color: var(--destructive); }
+
+/* right answer, too expensive — a checkpoint, so not red */
+.drill-verdict[data-verdict="over-budget"] {
+  border-left: 3px solid var(--brand);
+  background: color-mix(in oklab, var(--brand) 9%, var(--card));
+}
+/* foreground, not brand-foreground: that pair is sized for the solid fill */
+.drill-verdict[data-verdict="over-budget"] h4 { color: var(--foreground); }
+
+
+
+/* --- dock ----------------------------------------------------- */
+.drill-dock {
+  flex: none; height: 76px;
+  display: flex; align-items: center; gap: var(--gap-4);
+  padding: 0 18px;
+  border-top: 1px solid var(--border); background: var(--card);
+}
+.drill-dot { width: 7px; height: 7px; flex: none; background: var(--muted-foreground); }
+.drill-dock-copy { flex: 1; max-width: 520px; font-size: 14px; line-height: 21px; color: var(--muted-foreground); text-wrap: pretty; }
+.drill-wave { flex: none; display: flex; align-items: flex-end; gap: 3px; height: 22px; opacity: 0.22; transition: opacity 140ms linear; }
+.drill-wave span { width: 3px; background: var(--muted-foreground); }
+
+
+
+/* --- the attention model --------------------------------------
+   Opacity only. Nothing resizes, moves, or changes border weight
+   between the three moments, so the code never reflows under the
+   cursor and the eye is never chased.
+--------------------------------------------------------------- */
+.drill[data-moment="interviewer-speaking"] .drill-editor  { opacity: 0.55; }
+.drill[data-moment="interviewer-speaking"] .drill-problem { opacity: 0.70; }
+.drill[data-moment="interviewer-speaking"] .drill-stream  { opacity: 1; }
+.drill[data-moment="interviewer-speaking"] .drill-dot     { background: var(--foreground); }
+.drill[data-moment="interviewer-speaking"] .drill-wave    { opacity: 1; }
+.drill[data-moment="interviewer-speaking"] .drill-turn    { background: transparent; color: var(--muted-foreground); }
+
+/* talking while typing is the normal case — the editor is not dimmed for it */
+.drill[data-moment="candidate-speaking"] .drill-editor  { opacity: 1; }
+.drill[data-moment="candidate-speaking"] .drill-problem { opacity: 1; }
+.drill[data-moment="candidate-speaking"] .drill-stream  { opacity: 0.65; }
+.drill[data-moment="candidate-speaking"] .drill-dot     { background: var(--brand); }
+.drill[data-moment="candidate-speaking"] .drill-wave    { opacity: 1; }
+.drill[data-moment="candidate-speaking"] .drill-turn    { background: var(--brand); color: var(--brand-foreground); }
+
+.drill[data-moment="writing"] .drill-editor  { opacity: 1; }
+.drill[data-moment="writing"] .drill-problem { opacity: 1; }
+.drill[data-moment="writing"] .drill-stream  { opacity: 0.55; }
+
+/* --- light mode ----------------------------------------------
+   Everything above is token-driven, so light needs no overrides
+   except the tints: ochre and red both read louder on a light
+   ground, and the light --border token is near-black rather than
+   a hairline, so the panes already divide harder.
+--------------------------------------------------------------- */
+html:not(.dark) .drill-verdict[data-verdict="over-budget"] { background: color-mix(in oklab, var(--brand) 7%, var(--card)); }
+html:not(.dark) .drill-verdict[data-verdict="wrong"]       { background: color-mix(in oklab, var(--destructive) 7%, var(--card)); }
+html:not(.dark) .drill-rail[data-state="save-conflict"]    { background: color-mix(in oklab, var(--destructive) 10%, var(--background)); }
+html:not(.dark) .drill-rail[data-state="transcription-failed"] { background: color-mix(in oklab, var(--warning) 22%, var(--background)); }
+
+/* --- hint entry in the stream --------------------------------- */
+.drill-entry[data-kind="hint"] .drill-verdict,
+.drill-hint-entry {
+  flex: 1; min-width: 0;
+  border: 1px solid var(--border); border-left: 3px solid var(--brand);
+  background: color-mix(in oklab, var(--brand) 9%, var(--card));
+  padding: 11px 14px; display: flex; flex-direction: column; gap: 7px;
+}
+html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand) 7%, var(--card)); }
+
+/* file label states — a paused autosave cannot be dismissed and forgotten */
+.drill-editor-head [data-autosave="paused"] { color: var(--destructive); }
+
+/* --- scrolled back off live ----------------------------------- */
+.drill-stream[data-behind] { opacity: 0.72; }
+.drill-back-to-live {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px;
+  background: var(--popover); border: 1px solid var(--border);
+  padding: 8px 13px; cursor: pointer;
+  font-family: var(--drill-mono); font-size: var(--step-label);
+  letter-spacing: 0.12em; text-transform: uppercase;
+  box-shadow: 0 6px 18px rgb(from var(--shadow-color) r g b / 0.35);
+}
+.drill-back-to-live span { width: 5px; height: 5px; background: var(--brand); }
+
+@media (prefers-reduced-motion: reduce) {
+  .drill *, .drill *::before, .drill *::after { transition: none !important; }
+}
+
+/* --- 1a: the joins -------------------------------------------------------
+   Small rules the handoff sheet does not carry because they are about wiring
+   its structure to this app's existing components rather than about the design.
+------------------------------------------------------------------------- */
+
+/* The stream needs a positioned parent for the back-to-live pill, which floats
+   and must occupy no layout — see `.drill-back-to-live`. */
+.drill-stream-wrap { flex: 1; min-height: 0; position: relative; display: flex; }
+.drill-stream-wrap > .drill-stream { flex: 1; }
+/* Bottom padding so the pill never covers the newest entry it is announcing. */
+.drill-stream { padding-bottom: 52px; }
+
+/* "Scrolled up · 2 newer entries". Renders only while scrolled back, and inside
+   the wrap rather than above it, so the stream gives up the 24px rather than
+   the editor moving. */
+.drill-stream-head {
+  flex: none;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+/* The wrap is a row by default (the scroller fills it); with a head it has to
+   stack. */
+.drill-stream-wrap:has(.drill-stream-head) { flex-direction: column; }
+
+/* Before the first turn. Lives inside the scroll container so the first entry
+   appends under it rather than replacing a box, and the top padding is far
+   smaller than the old transcript's 96px: this is a 1240px-wide column beside
+   the editor now, not the full screen. */
+.drill-stream-empty { padding: 40px 0 24px; max-width: 46ch; }
+.drill-stream-empty h1 {
+  font-size: 26px; line-height: 1.2; font-weight: 600;
+  letter-spacing: -0.02em; margin: 0 0 12px;
+}
+.drill-stream-empty p { margin: 0; color: var(--muted-foreground); font-size: 15px; line-height: 23px; }
+
+/* The streaming caret, carried over from the old transcript. */
+.drill-caret {
+  display: inline-block; width: 7px; height: 1em; margin-left: 3px;
+  background: var(--brand); vertical-align: text-bottom;
+  animation: drill-caret-blink 1s steps(1) infinite;
+}
+@keyframes drill-caret-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .drill-caret { animation: none; } }
+
+.drill-toolbar__divider { width: 1px; height: 22px; background: var(--border); flex: none; }
+.drill-toolbar__spacer,
+.drill-dock-spacer { flex: 1; }
+
+/* The problem pane wraps an existing component that brings its own padding. */
+.drill-problem > * { min-width: 0; }
+
+/* The four interrupting errors sit between the body and the dock. They are
+   `flex: none`, so they shorten the stream rather than pushing the dock off
+   screen — the stream is the only row that may give up space. */
+.drill-error { flex: none; border-top: 1px solid var(--border); padding: 12px 18px; }
+
+/* Header, device and mic panels are siblings of the rows inside `.drill`, so
+   they must not stretch or absorb the body's space. */
+.drill > .app-header,
+.drill > .device-settings-panel,
+.drill > .mic-check-panel { flex: none; }
+
+/* Dock status block: the design gives it a fixed 190px so the copy beside it
+   does not reflow every time the status word changes length. */
+.drill-dock .dock__status { flex: none; width: 190px; }
+.drill-dock .dock__detail--sub {
+  font-family: var(--drill-mono); font-size: 10px; line-height: 14px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground);
+  margin: 0;
+}
+.drill-dock .dock__title {
+  font-family: var(--drill-mono); font-size: 12.5px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+
+/* The problem pane, rehomed.
+   `ProblemPane` was written for a full-width slot above the transcript: it
+   centres itself on `--measure` and its body caps at 32vh with a scrollbar of
+   its own. Inside a 560px column that owns its own scrolling, both are wrong —
+   the cap truncated the statement mid-section and the measure clipped the prose
+   horizontally. The pane keeps its markup; the column keeps the scrolling. */
+.drill-problem .problem-pane { max-width: none; margin: 0; padding: 0; }
+.drill-problem .problem-pane__body { max-height: none; overflow: visible; padding-bottom: 0; }
+.drill-problem .problem-pane__summary { padding-top: 0; }
+
+/* Dock copy: the design gives the status its own 190px block and the sentence
+   its own 520px one. Collapsing them into the narrow block wrapped a paragraph
+   into four lines inside a 76px row. */
+.drill-dock .dock__detail--sub { display: none; }
+.drill-dock-copy { flex: 1; max-width: 520px; font-size: 14px; line-height: 21px; color: var(--muted-foreground); text-wrap: pretty; margin: 0; }

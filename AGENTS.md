@@ -225,11 +225,28 @@ Browser only — there is no `coding:voice`. The drill needs the problem on scre
 for 45 minutes and a **Run tests** button, and neither works in a terminal that
 scrolls.
 
-**There is no editor in the browser, deliberately.** You write the answer in your
-own editor, in the real `solution.ts`, against real types. The button runs that
-problem's suite server-side and the interviewer is told the outcome as a
-bracketed note it never speaks — `drill.md`'s step 7, reassigned, the same way
-the design track's time check is.
+**Two editing modes, chosen on the picker before the drill starts.** The choice
+is not a preference — the modes rehearse different things, so both are named
+with their trade-off rather than their location.
+
+- **Browser editor** (the default): CodeMirror in the page, writing through to
+  the real `solution.ts` with a content-hash conflict guard. Highlighting and
+  line numbers, and deliberately **no autocomplete, no inline diagnostics, no
+  language service** — a real coding screen gives you no IDE, and drilling with
+  one rehearses an advantage you will not have. `SolutionEditor.test.tsx` fails
+  if any of those packages is ever imported, so adding one breaks a test rather
+  than shipping as an improvement.
+- **Your own editor**: you edit `solution.ts` yourself, against real types,
+  isolated by the OS. This is the mode that keeps the file the buffer.
+
+Either way the button runs that problem's suite server-side and the interviewer
+is told the outcome as a bracketed note it never speaks — `drill.md`'s step 7,
+reassigned, the same way the design track's time check is.
+
+The editor mode is a **start-time choice and is not in the URL**. Reopening a
+live session gets it back from the server's session state; a reparsed hash
+cannot carry it. `keepStartChoices` in `voice/web/src/route.ts` is what stops a
+`hashchange` from silently downgrading a browser-editor session to `own`.
 
 The verdict distinguishes three reds and the distinction is the whole point:
 correctness-red is a **wrong answer**; correctness-green-with-cost-red is a

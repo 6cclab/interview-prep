@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useEffect } from 'react'
 import { Button } from 'brutalkit/button'
 import type { HistoryPayload, HistoryRow } from '../types'
 import { fmt } from '../phase'
@@ -21,13 +22,38 @@ import { fmt } from '../phase'
  * A history screen is read between drills, and `/review` re-queues problems for
  * spaced repetition — a permanent problem-to-pattern list would spoil every
  * re-drill at a glance. The reveal is a deliberate act, like `/coach` is.
+ *
+ * **Every row is one line** (handoff §5). This is the most valuable screen in
+ * the app and was the least usable, because a single 400-word note made one row
+ * ~600px tall and buried the eight rows around it. The note column now shows its
+ * first sentence and opens on demand, one at a time — the full text is still
+ * one click away, but the *record* is readable as a record again.
  */
 
-/** What each rung cost him, worded as what was already given away. Mirrors CodingTools. */
-const RUNG = ['cold', 'nudged', 'pattern named', 'approach given', 'solution shown'] as const
+/** What each rung cost him, worded as what was already given away. Mirrors the drill toolbar. */
+const RUNG = ['Cold', 'Nudged', 'Pattern named', 'Approach given', 'Solution shown'] as const
 
 function rungLabel(hints: number): string {
-  return RUNG[Math.min(Math.max(hints, 0), RUNG.length - 1)] ?? 'unknown'
+  return RUNG[Math.min(Math.max(hints, 0), RUNG.length - 1)] ?? 'Unknown'
+}
+
+/**
+ * The first sentence of a note, for the collapsed row.
+ *
+ * Deliberately not a character truncation: the notes open with a summary
+ * sentence and continue into detail, so the first sentence is the part written
+ * to be read alone. Falls back to the whole note when there is no sentence
+ * break — CSS ellipsis catches the overflow either way.
+ */
+export function firstSentence(note: string): string {
+  // The closing-markup class is load-bearing, not defensive. These notes open
+  // with a bolded verdict — `**Real interview, not a drill.** Hints column is
+  // n/a.` — where the terminator is followed by `*`, not a space. Requiring
+  // whitespace immediately after the `.` skipped that break entirely and ran on
+  // to the end of the note, which is the one outcome this function exists to
+  // avoid. Trailing markers are consumed so the emphasis closes in the preview.
+  const match = /^.*?[.!?][*_~`")'\]]*(?=\s|$)/.exec(note.trim())
+  return match === null ? note.trim() : match[0]
 }
 
 /**
@@ -71,11 +97,32 @@ function useHistory(reveal: boolean): { payload: HistoryPayload | null; loading:
   return state
 }
 
+/** One cell of the stat strip: a 10px label over a 23px tabular figure. */
+function Stat({ label, value, of }: { label: string; value: string | number; of?: string }) {
+  return (
+    <div className="history__stat">
+      <span className="history__stat-label">{label}</span>
+      <span className="history__stat-value">
+        {value}
+        {of !== undefined && <span className="history__of"> {of}</span>}
+      </span>
+    </div>
+  )
+}
+
 export function History({ onGoHome }: { onGoHome(): void }) {
   // Re-fetches when toggled rather than holding patterns client-side: the point
   // of withholding them is that they are not in the page until asked for.
   const [reveal, setReveal] = useState(false)
   const { payload, loading, failed } = useHistory(reveal)
+  /**
+   * Which row's note is open, by index. One at a time.
+   *
+   * A second open note pushes the first one's row off screen, which is the
+   * behaviour this screen was redesigned to stop. Closing the previous one is
+   * not a limitation — it is the feature.
+   */
+  const [openNote, setOpenNote] = useState<number | null>(null)
 
   const summary = payload?.summary
   const rows = payload?.rows ?? []
@@ -111,7 +158,7 @@ export function History({ onGoHome }: { onGoHome(): void }) {
         </Button>
       </header>
 
-      <section className="history" aria-busy={loading}>
+      <section className="history" aria-busy={loading} data-revealed={reveal ? '' : undefined}>
         {firstLoad && <p className="home__note">Loading your drill log…</p>}
 
         {failed && (
@@ -137,31 +184,16 @@ export function History({ onGoHome }: { onGoHome(): void }) {
           <>
             {/* Cold solves lead. See the component comment for why that is not
                 interchangeable with the solve count. */}
-            <dl className="history__summary">
-              <div className="history__stat">
-                <dt>Solved cold</dt>
-                <dd>
-                  {summary.cold}
-                  <span className="history__of"> of {summary.attempts}</span>
-                </dd>
-              </div>
-              <div className="history__stat">
-                <dt>Solved with help</dt>
-                <dd>{summary.solved - summary.cold}</dd>
-              </div>
-              <div className="history__stat">
-                <dt>Not solved</dt>
-                <dd>{summary.attempts - summary.solved}</dd>
-              </div>
-              <div className="history__stat">
-                <dt>Problems seen</dt>
-                <dd>{summary.problems}</dd>
-              </div>
-              <div className="history__stat">
-                <dt>Median, when solved</dt>
-                <dd>{summary.medianSolvedMs === null ? '—' : fmt(Math.round(summary.medianSolvedMs / 1000))}</dd>
-              </div>
-            </dl>
+            <div className="history__summary">
+              <Stat label="Solved cold" value={summary.cold} of={`of ${summary.attempts}`} />
+              <Stat label="Solved with help" value={summary.solved - summary.cold} />
+              <Stat label="Not solved" value={summary.attempts - summary.solved} />
+              <Stat label="Problems seen" value={summary.problems} />
+              <Stat
+                label="Median, when solved"
+                value={summary.medianSolvedMs === null ? '—' : fmt(Math.round(summary.medianSolvedMs / 1000))}
+              />
+            </div>
 
             <div className="history__controls">
               <Button variant="outline" onClick={() => setReveal((was) => !was)}>
@@ -174,45 +206,78 @@ export function History({ onGoHome }: { onGoHome(): void }) {
               </p>
             </div>
 
-            <div className="history__scroller">
-              <table className="history__table">
-                <thead>
-                  <tr>
-                    <th scope="col">Date</th>
-                    <th scope="col">Problem</th>
-                    {reveal && <th scope="col">Pattern</th>}
-                    <th scope="col">Result</th>
-                    <th scope="col">Help taken</th>
-                    <th scope="col">Time</th>
-                    <th scope="col">Note</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, index) => (
-                    <tr key={`${row.date}-${row.problem}-${index}`} className={`history__row--${tone(row)}`}>
-                      <td>{row.date}</td>
-                      <td>
-                        <code>{row.problem}</code>
-                      </td>
-                      {reveal && <td>{row.pattern ? <code>{row.pattern}</code> : '—'}</td>}
-                      <td>{row.solved ? 'Solved' : 'Not solved'}</td>
-                      <td>
+            <div className="history__table" role="table" aria-label="Past drills">
+              <div className="history__head" role="row">
+                <span role="columnheader">Date</span>
+                <span role="columnheader">Problem</span>
+                {reveal && <span role="columnheader">Pattern</span>}
+                <span role="columnheader">Result</span>
+                <span role="columnheader">Help taken</span>
+                <span role="columnheader">Time</span>
+                <span role="columnheader">Note</span>
+                <span role="columnheader" aria-label="Expand note" />
+              </div>
+
+              {rows.map((row, index) => {
+                const open = openNote === index
+                const helped = row.hints > 0 || coached.has(row.problem)
+                return (
+                  <div className="history__group" key={`${row.date}-${row.problem}-${index}`}>
+                    <div className="history__row" role="row" data-tone={tone(row)}>
+                      <span role="cell" className="history__date">
+                        {row.date}
+                      </span>
+                      <span role="cell" className="history__problem">
+                        {row.problem}
+                      </span>
+                      {reveal && (
+                        <span role="cell" className="history__pattern">
+                          {row.pattern ?? '—'}
+                        </span>
+                      )}
+                      {/* A mono verdict, not a colour swatch. `Correct, over
+                          budget` is in the design but not in the data: the log's
+                          Solved column is yes/no, so rendering a third verdict
+                          would mean inventing a record that was never written. */}
+                      <span role="cell" className="history__result" data-result={row.solved ? 'solved' : 'unsolved'}>
+                        {row.solved ? 'Solved' : 'Not solved'}
+                      </span>
+                      {/* Ochre when help was in fact taken, muted when it was not.
+                          A cold solve and a four-rung solve must never look alike.
+                          Paired is marked on the row rather than deducted from the
+                          headline: a cold solve of a problem that has been paired
+                          on is still a cold solve — nobody helped during the
+                          attempt — but it is weaker evidence of recall, and only
+                          he can weigh that. */}
+                      <span role="cell" className="history__help" data-helped={helped ? '' : undefined}>
                         {rungLabel(row.hints)}
-                        {/* Marked on the row rather than deducted from the headline.
-                            A cold solve of a problem that has been paired on is
-                            still a cold solve — nobody helped during the attempt —
-                            but it is weaker evidence of recall than one on a
-                            problem never walked through, and only he can weigh
-                            that. Silently folding it into the count would be
-                            inventing a judgement the log never recorded. */}
-                        {coached.has(row.problem) && <span className="history__paired"> · paired</span>}
-                      </td>
-                      <td>{row.elapsedMs === 0 ? '—' : fmt(Math.round(row.elapsedMs / 1000))}</td>
-                      <td className="history__note">{row.note}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        {coached.has(row.problem) && ' · paired'}
+                      </span>
+                      <span role="cell" className="history__time">
+                        {row.elapsedMs === 0 ? '—' : fmt(Math.round(row.elapsedMs / 1000))}
+                      </span>
+                      <span role="cell" className="history__note-line">
+                        {firstSentence(row.note)}
+                      </span>
+                      <span role="cell">
+                        {row.note.trim() !== '' && (
+                          <button
+                            type="button"
+                            className="history__toggle"
+                            aria-expanded={open}
+                            aria-label={open ? `Collapse note for ${row.problem}` : `Expand note for ${row.problem}`}
+                            onClick={() => setOpenNote(open ? null : index)}
+                          >
+                            {open ? '−' : '+'}
+                          </button>
+                        )}
+                      </span>
+                    </div>
+
+                    {open && <div className="history__note-full">{row.note}</div>}
+                  </div>
+                )
+              })}
             </div>
 
             {rows.some((row) => coached.has(row.problem)) && (

@@ -1,4 +1,4 @@
-import type { ErrorKind, Mode, Phase } from './types'
+import type { ErrorKind, Mode, Moment, Phase } from './types'
 
 /**
  * Splits the hook's `listening-to-interviewer` into the handoff's `ready`
@@ -73,6 +73,42 @@ export function shouldAutoRecord(state: {
   return state.phase === 'ready' && state.micReady && state.errorKind === null && state.hasAnswered
 }
 
+/**
+ * Which of the three moments the screen is in, from the phase it is already in.
+ *
+ * Derived, never stored. The design calls the moment a driver of the attention
+ * model, the dot colour, the turn button and the dock copy — but making it a
+ * second source of truth beside `Phase` would create a pair that can disagree,
+ * and the failure would be a screen that dims the editor while the microphone is
+ * live. There is one state; this is a reading of it.
+ *
+ * Two mappings are worth stating because neither is obvious:
+ *
+ * - **`transcribing` and `thinking` are the interviewer's moment**, though
+ *   nobody is audibly speaking in either. What the moment actually governs is
+ *   who holds the turn, and in both of these the candidate has finished and is
+ *   waiting on a reply. Calling them `writing` would brighten the stream at the
+ *   exact moment there is nothing new in it.
+ * - **`idle`, `ready` and `ended` are `writing`.** None of them has anyone
+ *   speaking, and `writing` is the undimmed moment — which is right for a screen
+ *   nobody is being asked to listen to.
+ */
+export function deriveMoment(phase: Phase): Moment {
+  switch (phase) {
+    case 'recording':
+      return 'candidate-speaking'
+    case 'transcribing':
+    case 'thinking':
+    case 'speaking':
+      return 'interviewer-speaking'
+    case 'idle':
+    case 'requesting':
+    case 'ready':
+    case 'ended':
+      return 'writing'
+  }
+}
+
 /** `s` -> `m:ss`, matching the handoff's `fmt`. */
 export function fmt(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds))
@@ -82,26 +118,6 @@ export function fmt(totalSeconds: number): string {
 /** 24-hour wall-clock, e.g. "07:41" — used for interviewer turn timestamps. */
 export function wallClock(date: Date): string {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
-}
-
-/**
- * A timed track's budget in minutes, for display before a session exists.
- *
- * Mirrors `DESIGN_BUDGET_MS`, `CODING_BUDGET_MS` and `ASSISTED_BUDGET_MS` in
- * voice/context.ts, which are the authority — the client cannot import server
- * code.
- *
- * This became per-track on 2026-08-21, which the single constant it replaced had
- * already called: "if they ever diverge this has to become per-track rather than
- * quietly showing one track the other's number." The assisted track runs 60
- * minutes rather than 45, so they diverged.
- *
- * Display only: once a drill starts the countdown runs off the `budgetMs` the
- * server actually reported, so a drift here would show the wrong number on the
- * Idle screen and nowhere else.
- */
-export function timedBudgetMinutes(view: string): number {
-  return view === 'assisted' ? 60 : 45
 }
 
 export interface ErrorCopy {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { derivePhase, fmt, shouldAutoRecord, wallClock, ANNOUNCEMENTS } from './phase'
+import { derivePhase, deriveMoment, fmt, shouldAutoRecord, wallClock, ANNOUNCEMENTS } from './phase'
 import type { Mode, Phase } from './types'
 
 /**
@@ -186,5 +186,45 @@ describe('shouldAutoRecord', () => {
   it('waits while a banner is asking for a decision', () => {
     expect(shouldAutoRecord({ ...READY, errorKind: 'transcript' })).toBe(false)
     expect(shouldAutoRecord({ ...READY, errorKind: 'denied' })).toBe(false)
+  })
+})
+
+describe('deriveMoment', () => {
+  it.each([
+    ['recording', 'candidate-speaking'],
+    ['speaking', 'interviewer-speaking'],
+    ['thinking', 'interviewer-speaking'],
+    ['transcribing', 'interviewer-speaking'],
+    ['idle', 'writing'],
+    ['requesting', 'writing'],
+    ['ready', 'writing'],
+    ['ended', 'writing'],
+  ] as const)('reads %s as the %s moment', (phase, moment) => {
+    expect(deriveMoment(phase)).toBe(moment)
+  })
+
+  // Both are silent, and both are the interviewer's: the candidate has finished
+  // and is waiting on a reply. Calling them `writing` would undim the stream at
+  // the one moment there is nothing new in it to read.
+  it('gives the silent waits to the interviewer, not to writing', () => {
+    expect(deriveMoment('transcribing')).toBe(deriveMoment('speaking'))
+    expect(deriveMoment('thinking')).toBe(deriveMoment('speaking'))
+  })
+
+  // The asymmetry the design is explicit about: talking while typing is the
+  // normal case on this track, so the candidate's own moment must not be the
+  // one that dims their code. Only `interviewer-speaking` dims the editor, and
+  // that is enforced in CSS — this pins the state that CSS keys off.
+  it('never puts a live microphone and a dimmed editor in the same moment', () => {
+    expect(deriveMoment('recording')).not.toBe('interviewer-speaking')
+  })
+
+  // Every phase maps somewhere. A new phase added without a moment would be a
+  // type error at the switch, not a screen that silently renders undimmed.
+  it('covers every phase', () => {
+    const phases = [
+      'idle', 'requesting', 'ready', 'recording', 'transcribing', 'thinking', 'speaking', 'ended',
+    ] as const
+    for (const phase of phases) expect(deriveMoment(phase)).toBeTruthy()
   })
 })
