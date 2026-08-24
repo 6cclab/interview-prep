@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, parseDrill, type VoiceServerDeps } from './http-server'
+import { resetProblemSource } from './problems'
 import { createSessionStore } from './session-store'
 import { appendCoached } from './coached'
 import { readSSE } from './test-helpers/sse'
@@ -116,6 +117,57 @@ afterEach(async () => {
   }
   server = undefined
   rmSync(root, { recursive: true, force: true })
+})
+
+/**
+ * The last error boundary around the route chain.
+ *
+ * `handleRequest` is invoked as a floating promise. Without a `.catch` on it,
+ * any throw in any route becomes an unhandled rejection and Node terminates the
+ * process — one bad request would end every live session on the server,
+ * mid-drill, along with the transcripts that had not been written yet.
+ *
+ * `VOICE_MODE=deployed` gives a route that throws by design (the Postgres
+ * source is not built yet), which is how this got noticed: a single
+ * `GET /api/problems` took the whole server down. The routes are careful today,
+ * but careful is a convention, not a boundary.
+ */
+describe('an unhandled error in a route', () => {
+  afterEach(() => {
+    delete process.env.VOICE_MODE
+    resetProblemSource()
+  })
+
+  it('becomes a 500 and leaves the server serving', async () => {
+    const { port } = await listen(baseDeps())
+    process.env.VOICE_MODE = 'deployed'
+    resetProblemSource()
+
+    const first = await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)
+    expect(first.status).toBe(500)
+    // The message says a server error happened and nothing else. The thrown
+    // text names internals, and this route's whole job is withholding those.
+    expect(await first.json()).toEqual({ error: 'The server hit an unexpected error handling this request.' })
+
+    // The process is the thing under test: a second request proves it is still
+    // there, and an unrelated route proves it is still working.
+    expect((await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)).status).toBe(500)
+    expect((await fetch(`http://127.0.0.1:${port}/api/history`)).status).toBe(200)
+  })
+
+  /**
+   * The failure must not degrade into serving the wrong store. A deployed
+   * instance that quietly answered out of whatever `problems/` tree was baked
+   * into its image would look like it worked.
+   */
+  it('does not fall back to the filesystem', async () => {
+    const { port } = await listen(baseDeps())
+    process.env.VOICE_MODE = 'deployed'
+    resetProblemSource()
+    const body = await (await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)).text()
+    expect(body).not.toContain(SLUG)
+    expect(body).not.toContain('celebrity')
+  })
 })
 
 describe('GET /api/problems?track=coding', () => {
