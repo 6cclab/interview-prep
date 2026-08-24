@@ -19,6 +19,7 @@ import { DebugTools } from './components/DebugTools'
 import { SolutionEditor } from './components/SolutionEditor'
 import { useSolution, runAfterSave } from './useSolution'
 import { routeDrill, routeHash, useRoute, type Route } from './route'
+import { targetOwnsSpace } from './keys'
 import { useTheme } from './theme'
 import {
   derivePhase,
@@ -309,14 +310,15 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   }, [phase, micReady, errorKind, hasAnswered, record])
 
   // Space triggers the primary action from anywhere on the page, per the
-  // handoff — suppressed when focus is on an interactive element (that
-  // element's own key handling applies, and there are no text inputs for
-  // Space to type into here).
+  // handoff — suppressed when focus is somewhere that Space means something
+  // else, in which case that element's own key handling applies.
+  //
+  // `targetOwnsSpace` decides; see keys.ts for why a tag-name check alone was
+  // not enough once the browser editor landed.
   useEffect(() => {
     const handler = (event: KeyboardEvent): void => {
       if (event.code !== 'Space' || event.repeat) return
-      const target = event.target as HTMLElement | null
-      if (target && ['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
+      if (targetOwnsSpace(event.target as HTMLElement | null)) return
       event.preventDefault()
       onPrimaryAction()
     }

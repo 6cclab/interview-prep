@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { parseRoute, routeDrill, routeHash, type Route } from './route'
+import { keepStartChoices, parseRoute, routeDrill, routeHash, type Route } from './route'
 
 // Only the pure half of `route.ts` is exercised here. `useRoute` needs a `window`
 // and there is no DOM harness in this repo — adding jsdom to test a
 // three-line `hashchange` listener would be a dependency bought for very little.
-// All the logic that could actually be wrong is in these three functions.
+// All the logic that could actually be wrong is in these four functions.
 
 describe('parseRoute', () => {
   it.each([
@@ -266,5 +266,65 @@ describe('debugging route', () => {
   it('does not confuse an exercise with a coding problem or a competency', () => {
     expect(parseRoute('#/coding/two-sum-sorted')).toEqual({ view: 'coding', problem: 'two-sum-sorted' })
     expect(parseRoute('#/mock/failure')).toEqual({ view: 'mock', competency: 'failure' })
+  })
+})
+
+describe('keepStartChoices', () => {
+  // The regression this exists for: `editor` is chosen on the picker and kept
+  // out of the hash on purpose, so the `hashchange` that follows a navigation
+  // reparses a route without it. Before this function existed, that reparse
+  // won — every "Browser editor" choice silently became `own` between pressing
+  // the button and the session being created, and the only evidence was a
+  // drill screen with no editor on it and a server that had been told nothing.
+  it('keeps the editor a reparsed hash cannot carry', () => {
+    const current: Route = { view: 'coding', problem: 'valid-palindrome', editor: 'browser' }
+    const parsed: Route = { view: 'coding', problem: 'valid-palindrome' }
+    expect(keepStartChoices(parsed, current)).toEqual({
+      view: 'coding',
+      problem: 'valid-palindrome',
+      editor: 'browser',
+    })
+  })
+
+  it('keeps an explicit `own` too, rather than only the non-default', () => {
+    const current: Route = { view: 'coding', problem: 'valid-palindrome', editor: 'own' }
+    const parsed: Route = { view: 'coding', problem: 'valid-palindrome' }
+    expect(keepStartChoices(parsed, current)).toEqual({
+      view: 'coding',
+      problem: 'valid-palindrome',
+      editor: 'own',
+    })
+  })
+
+  // A different problem is a different drill, and its editor is whatever that
+  // drill was started with — carrying the last one over would silently apply a
+  // choice the candidate never made for this problem.
+  it('drops the editor when the hash moves to another problem', () => {
+    const current: Route = { view: 'coding', problem: 'valid-palindrome', editor: 'browser' }
+    const parsed: Route = { view: 'coding', problem: 'two-sum-sorted' }
+    expect(keepStartChoices(parsed, current)).toEqual({ view: 'coding', problem: 'two-sum-sorted' })
+  })
+
+  it('drops the editor when the hash leaves the coding track', () => {
+    const current: Route = { view: 'coding', problem: 'valid-palindrome', editor: 'browser' }
+    expect(keepStartChoices({ view: 'home' }, current)).toEqual({ view: 'home' })
+    expect(keepStartChoices({ view: 'debug', problem: 'loyalty-discount' }, current)).toEqual({
+      view: 'debug',
+      problem: 'loyalty-discount',
+    })
+  })
+
+  // Arriving on `#/coding/<slug>` cold — a bookmark, a reload, a pasted link —
+  // has no choice to keep, and must not invent one. An absent editor is the
+  // candidate's own, which is the long-standing default.
+  it('invents nothing when there was no previous choice', () => {
+    const current: Route = { view: 'coding', problem: 'valid-palindrome' }
+    const parsed: Route = { view: 'coding', problem: 'valid-palindrome' }
+    expect(keepStartChoices(parsed, current)).toEqual({ view: 'coding', problem: 'valid-palindrome' })
+  })
+
+  it('does not carry a choice in from a non-coding route', () => {
+    const parsed: Route = { view: 'coding', problem: 'valid-palindrome' }
+    expect(keepStartChoices(parsed, { view: 'home' })).toEqual(parsed)
   })
 })

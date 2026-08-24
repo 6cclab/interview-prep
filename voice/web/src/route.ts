@@ -106,22 +106,49 @@ export function parseRoute(hash: string): Route {
   return { view: 'home' }
 }
 
+/**
+ * The parsed route, but keeping any start-time choice the URL cannot carry.
+ *
+ * `editor` is chosen on the picker and deliberately kept out of the hash, so
+ * `parseRoute` can never recover it — it returns a coding route with the field
+ * absent, which reads as "the candidate's own editor". Navigating from the
+ * picker to the drill therefore *silently downgraded every browser-editor
+ * choice to `own`*: `navigate` assigned the hash, `hashchange` reparsed it, and
+ * the choice was gone before the session was ever created. The picker worked,
+ * the radio was set, and the server was told nothing.
+ *
+ * So a reparse only replaces the choice when it is genuinely a different drill.
+ * Same view and same problem means the hash did not move away from what is on
+ * screen — a re-entrant `hashchange`, or a hand-edited hash pointing at the
+ * drill already running — and the choice made at start still stands.
+ */
+export function keepStartChoices(parsed: Route, current: Route): Route {
+  if (parsed.view !== 'coding' || current.view !== 'coding') return parsed
+  if (parsed.problem !== current.problem || current.editor === undefined) return parsed
+  return { ...parsed, editor: current.editor }
+}
+
 export function useRoute(): [Route, (next: Route) => void] {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash))
 
   // Back/forward, and a hand-edited hash, both go through `hashchange`.
   useEffect(() => {
-    const onHashChange = () => setRoute(parseRoute(window.location.hash))
+    const onHashChange = () =>
+      setRoute((current) => keepStartChoices(parseRoute(window.location.hash), current))
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
   const navigate = useCallback((next: Route) => {
     const hash = routeHash(next)
+    // Set the route before touching the hash, not only in the same-hash branch.
+    // This is the object carrying `editor`; the `hashchange` that follows can
+    // only ever produce a poorer version of it, and `keepStartChoices` is what
+    // stops that reparse from overwriting this.
+    setRoute(next)
     if (window.location.hash === hash) {
-      // Same hash assigns nothing and fires no `hashchange`, so the state would
-      // never update on a re-selection of the current route.
-      setRoute(next)
+      // Same hash assigns nothing and fires no `hashchange`, so nothing further
+      // happens — the line above is the whole update.
       return
     }
     // Assigning the hash pushes a history entry, so the browser's back button
