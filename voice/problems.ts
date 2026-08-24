@@ -1,6 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
-import { PROBLEM_SLUG } from './context'
+import { fsProblems } from './problems-fs'
 
 /**
  * Coding problems, addressed by their own slug and never by their path.
@@ -16,6 +14,18 @@ import { PROBLEM_SLUG } from './context'
  * — routes, prompts, the client — deals in bare slugs, and the pattern reaches
  * exactly one consumer on purpose: the interviewer, which needs it to give rung
  * 2 of the hint ladder and is told never to volunteer it.
+ *
+ * ---
+ *
+ * **The seam.** Where the problems come from is chosen once, at startup, by
+ * `VOICE_MODE`. A local run walks `problems/` on disk; a deployed instance reads
+ * a Postgres serving copy and has no such tree. Both satisfy `ProblemSource`,
+ * and every caller above this module keeps talking to the same four functions,
+ * which is why this split is a no-op today and additive tomorrow.
+ *
+ * Selected once rather than per call, and never auto-detected: a server that
+ * guesses which store it is talking to is a server that can be wrong about it
+ * halfway through a drill.
  */
 
 export interface CodingProblem {
@@ -41,25 +51,6 @@ export const DIFFICULTIES = ['warmup', 'easy', 'medium', 'hard', 'unrated'] as c
 export type Difficulty = (typeof DIFFICULTIES)[number]
 
 /**
- * The `difficulty:` line from a problem's `meta.yaml`.
- *
- * A regex rather than a YAML parser, and a deliberately narrow one: this reads a
- * single scalar off a file whose only other consumer is a human. An unreadable
- * or unrecognised file is `'unrated'` and never a throw — a malformed `meta.yaml`
- * must not be able to empty the problem picker.
- */
-function readDifficulty(dir: string): Difficulty {
-  let text: string
-  try {
-    text = readFileSync(join(dir, 'meta.yaml'), 'utf8')
-  } catch {
-    return 'unrated'
-  }
-  const found = /^difficulty:[ \t]*([a-z]+)[ \t]*$/im.exec(text)?.[1]
-  return DIFFICULTIES.includes(found as Difficulty) ? (found as Difficulty) : 'unrated'
-}
-
-/**
  * Just enough of a problem to locate its directory.
  *
  * Separate from `CodingProblem` so that resolving a path never requires a
@@ -68,44 +59,107 @@ function readDifficulty(dir: string): Difficulty {
  */
 export type ProblemLocation = Pick<CodingProblem, 'slug' | 'pattern'>
 
+/**
+ * Where a mode gets its problems from.
+ *
+ * **Synchronous, and that is a decision rather than an oversight.** Problem
+ * definitions are read-only serving data: the repo always wins, ingestion is an
+ * explicit `pnpm ingest` on deploy, and there are forty-odd of them. A database
+ * implementation loads the set once at startup and answers out of memory, so
+ * nothing here has to become a promise and no call site above has to learn
+ * about one. The data that genuinely *is* per-request and mutable — a
+ * candidate's solution buffer — lives in `solution-file.ts`, not here, and is
+ * free to be async without dragging the picker with it.
+ */
+export interface ProblemSource {
+  list(root: string): CodingProblem[]
+  find(root: string, slug: string): CodingProblem | null
+}
+
+/** Which store this process talks to. Chosen once, at startup. */
+export type VoiceMode = 'local' | 'deployed'
+
+const MODES: readonly VoiceMode[] = ['local', 'deployed']
+
+/**
+ * `VOICE_MODE`, defaulting to `local`.
+ *
+ * Defaults rather than requiring the variable, because the local drill is the
+ * daily loop and must keep working with no setup at all — no database, no auth,
+ * no environment. An unrecognised value is a throw, not a silent fall back to
+ * local: `VOICE_MODE=production` quietly serving a developer's `problems/` tree
+ * is precisely the failure this is meant to make impossible.
+ */
+export function resolveMode(env: NodeJS.ProcessEnv = process.env): VoiceMode {
+  const raw = env.VOICE_MODE
+  if (raw === undefined || raw === '') return 'local'
+  if (!MODES.includes(raw as VoiceMode)) {
+    throw new Error(`VOICE_MODE must be one of ${MODES.join(', ')} — got "${raw}".`)
+  }
+  return raw as VoiceMode
+}
+
+/**
+ * The Postgres-backed source, which does not exist yet.
+ *
+ * A stub that throws rather than an absent case that falls through to the
+ * filesystem. `VOICE_MODE=deployed` on a machine with no database should fail
+ * on the first request with a sentence naming the reason, not serve whatever
+ * `problems/` happens to be in the image.
+ */
+const notImplemented: ProblemSource = {
+  list() {
+    throw new Error('VOICE_MODE=deployed needs the Postgres problem source, which is not built yet.')
+  },
+  find() {
+    throw new Error('VOICE_MODE=deployed needs the Postgres problem source, which is not built yet.')
+  },
+}
+
+/**
+ * Resolved on first use rather than at import time.
+ *
+ * Half this repo's tests import this module, and a throw during import would
+ * surface as an unrelated module failing to load rather than as a bad
+ * `VOICE_MODE`. Cached after the first call so the choice cannot change under a
+ * running process.
+ */
+let selected: ProblemSource | undefined
+
+export function problemSource(): ProblemSource {
+  // `problems-fs` imports `DIFFICULTIES` back out of this module, so the two
+  // form a cycle. It is safe in the shape they have: the only runtime value
+  // crossing each way is a module-level `const`, and neither is read until a
+  // function is called, by which point both modules have finished evaluating.
+  // Everything else that crosses is a type, which is erased.
+  selected ??= resolveMode() === 'local' ? fsProblems : notImplemented
+  return selected
+}
+
+/** Test seam: forget the cached choice so a test can exercise the other mode. */
+export function resetProblemSource(): void {
+  selected = undefined
+}
+
 /** `problems/<pattern>/<problem>` for a resolved problem. Never shown to Andre. */
 export function problemDir(problem: ProblemLocation): string {
   return `problems/${problem.pattern}/${problem.slug}`
 }
 
 /**
- * Every coding problem in the repo, slug and pattern, sorted by slug.
+ * Every coding problem, slug and pattern, sorted by slug.
  *
- * A directory only counts as a problem if it holds a `README.md` — there is no
- * drill to run without a prompt, and listing one would offer a broken choice.
+ * The public shape is unchanged from before the seam, deliberately: six modules
+ * call these two functions and none of them should have to know which store
+ * answered.
  */
 export function listCodingProblems(root: string): CodingProblem[] {
-  const base = join(root, 'problems')
-  if (!existsSync(base)) return []
-  const found: CodingProblem[] = []
-  for (const pattern of readdirSync(base, { withFileTypes: true })) {
-    if (!pattern.isDirectory() || !PROBLEM_SLUG.test(pattern.name)) continue
-    for (const slug of readdirSync(join(base, pattern.name), { withFileTypes: true })) {
-      if (!slug.isDirectory() || !PROBLEM_SLUG.test(slug.name)) continue
-      const dir = join(base, pattern.name, slug.name)
-      if (!existsSync(join(dir, 'README.md'))) continue
-      found.push({ slug: slug.name, pattern: pattern.name, difficulty: readDifficulty(dir) })
-    }
-  }
-  return found.sort((a, b) => a.slug.localeCompare(b.slug))
+  return problemSource().list(root)
 }
 
-/**
- * The problem with this slug, or `null` if there is none.
- *
- * Resolves by scanning rather than by building a path out of the input, so a
- * hostile slug cannot name a directory: the only paths this can ever return are
- * ones already found on disk. The slug guard is still applied first, because
- * defence that depends on a later step being correct is not defence.
- */
+/** The problem with this slug, or `null` if there is none. */
 export function findCodingProblem(root: string, slug: string): CodingProblem | null {
-  if (!PROBLEM_SLUG.test(slug)) return null
-  return listCodingProblems(root).find((problem) => problem.slug === slug) ?? null
+  return problemSource().find(root, slug)
 }
 
 /**
@@ -119,6 +173,11 @@ export function findCodingProblem(root: string, slug: string): CodingProblem | n
  *
  * Deliberately narrow: it rewrites the `problems/<pattern>/` prefix and nothing
  * else, so it cannot silently mangle a candidate's own words.
+ *
+ * **Not vestigial, and not to be deleted with the filesystem source.** Local
+ * mode still spawns vitest against a real path, so this is load-bearing there
+ * for as long as that is true. It is only unreachable on the deployed path,
+ * where no filename ever enters the picture.
  */
 export function stripPatternPaths(text: string): string {
   return text.replace(/problems\/[a-z0-9-]+\//g, 'problems/')

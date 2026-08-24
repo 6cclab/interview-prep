@@ -22,7 +22,7 @@ import {
   PROBLEM_SLUG,
   type Track,
 } from './context'
-import { findCodingProblem, listCodingProblems, problemDir } from './problems'
+import { findCodingProblem, listCodingProblems, problemDir, resolveMode, type VoiceMode } from './problems'
 import { readSolution, writeSolution, versionOf } from './solution-file'
 import { findCompetency, listCompetencies } from './competencies'
 import { findExercise, listExercises } from './exercises'
@@ -667,7 +667,31 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         console.error(`[req] ${req.method} ${req.url} -> ${res.statusCode} (${Date.now() - started}ms)`)
       })
     }
-    void handleRequest(req, res)
+    /**
+     * The last error boundary. Without it, `handleRequest` is a floating
+     * promise and any throw in any of the routes below becomes an unhandled
+     * rejection — which Node terminates the process for. One bad request would
+     * end every live session on the server, mid-drill, along with the
+     * transcript that had not been written yet.
+     *
+     * The routes are careful today, so this was latent rather than observed
+     * until `VOICE_MODE=deployed` gave a route that throws by design and a
+     * single `GET /api/problems` killed the whole process. Convention is not a
+     * boundary; this is.
+     *
+     * A 500 only when nothing has been sent yet. A streaming turn has already
+     * flushed its headers, so there is no status left to set — the honest move
+     * there is to drop the socket and let the client's `EventSource` reconnect,
+     * rather than append malformed JSON to an SSE body.
+     */
+    void handleRequest(req, res).catch((err: unknown) => {
+      console.error(`[voice] unhandled error in ${req.method} ${req.url}:`, err)
+      if (res.headersSent) {
+        res.destroy()
+        return
+      }
+      sendJson(res, 500, { error: 'The server hit an unexpected error handling this request.' })
+    })
   }
 
   // `https.Server` extends `http.Server`, so the declared return type holds
@@ -1812,6 +1836,17 @@ function main(): void {
     )
     process.exit(1)
   }
+  // Which store this process talks to, resolved before anything is served.
+  // Same reason as the speech check below: a typo in `VOICE_MODE` should stop
+  // the server here, with a sentence naming the value, rather than surface as a
+  // failing problem picker once someone is already trying to start a drill.
+  let mode: VoiceMode
+  try {
+    mode = resolveMode()
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err))
+    process.exit(1)
+  }
   // Fail here, not on the interviewer's first sentence — several minutes into
   // a drill, after a model turn has already been paid for.
   let speechBanner: string
@@ -1840,6 +1875,11 @@ function main(): void {
     // IPv4. The certificate covers both names.
     const url = `${scheme}://127.0.0.1:${port}/`
     console.log(`Voice mock drill: ${url}`)
+    // Said out loud, because the two modes read the same and store differently:
+    // `local` edits the real `solution.ts` and appends to `local/drill-log.md`;
+    // `deployed` writes to Postgres and touches neither. Discovering which one
+    // you are in by noticing a drill did not get logged is too late.
+    console.log(`  Mode: ${mode} — ${mode === 'local' ? 'problems and work on disk' : 'problems and work in Postgres'}`)
     console.log(`  ${speechBanner}`)
     announceBackends()
     if (!tls) {
