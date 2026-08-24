@@ -1,0 +1,75 @@
+# A deployed instance and its database, on one machine.
+#
+# This is the smallest thing that is honestly "deployed mode": Postgres holding
+# the problem definitions and everyone's work, the server in front of it, and
+# real cookie-backed identity. It is what the end-to-end check in the plan runs
+# against, and it is also a reasonable way to actually host this for a handful
+# of people.
+#
+#   cp deploy/env.example deploy/.env     # then edit it — see deploy/README.md
+#   docker compose -f deploy/compose.yaml --env-file deploy/.env up --build
+#   docker compose -f deploy/compose.yaml --env-file deploy/.env run --rm app pnpm ingest
+#
+# Ingest is a separate command on purpose. On boot it would take request-serving
+# down on every restart if it ever failed, and every restart would pay for a full
+# scan of the tree.
+
+name: interview-prep
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: interview
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: interview
+    volumes:
+      # Named, not a bind mount. This holds every drill anyone has ever taken and
+      # must outlive the container by a long way.
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      # The server applies its schema at startup and fails loudly if it cannot,
+      # so starting it against a database that is still initialising would be a
+      # crash loop rather than a wait.
+      test: ['CMD-SHELL', 'pg_isready -U interview -d interview']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      VOICE_MODE: deployed
+      DATABASE_URL: postgres://interview:${POSTGRES_PASSWORD}@db:5432/interview
+      # Signs the session cookies. Not defaulted and not generated at boot: a
+      # per-boot secret invalidates every live session on restart, and a
+      # hard-coded one is the same on every deployment of this code.
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in deploy/.env}
+      # The origin the cookies are scoped to, and the origin Better Auth accepts
+      # state-changing requests from. Must match what the browser actually types.
+      AUTH_BASE_URL: ${AUTH_BASE_URL:-http://127.0.0.1:4173}
+      # No default, deliberately — a transport nobody chose is one discovered
+      # mid-drill. See voice/backend.ts.
+      VOICE_BACKEND: ${VOICE_BACKEND:?set VOICE_BACKEND in deploy/.env}
+      OLLAMA_HOST: ${OLLAMA_HOST:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VOICE_NO_OPEN: '1'
+    ports:
+      - '${PORT:-4173}:4173'
+    volumes:
+      # The whisper model, mounted rather than baked: it is hundreds of megabytes
+      # to a couple of gigabytes and changes on a different cadence than the
+      # image. Read-only, because nothing should ever write to it.
+      - ../models:/opt/whisper/models:ro
+    restart: unless-stopped
+
+volumes:
+  db:

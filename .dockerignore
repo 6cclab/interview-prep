@@ -1,0 +1,22 @@
+# The image is built from source, not from the machine that built it.
+#
+# `node_modules` is the load-bearing entry: the Dockerfile installs into the
+# build stage, and copying the host's tree over it layers darwin binaries into
+# a linux image and shadows that install.
+node_modules
+**/node_modules
+
+# Whisper models are gigabytes and are mounted at runtime, never baked. Also
+# commonly a symlink to another checkout, which the build context would follow.
+models
+
+# `local/` is the candidate's own data — stories, transcripts, drill-log. It is
+# a mounted volume in a deployed instance and must never be baked into an image
+# other people pull.
+local
+
+.git
+.gitignore
+.claude
+voice/dist
+voice/dist-demo
