@@ -143,7 +143,7 @@ function DrillVerdictEntry({ verdict, hintRung }: { verdict: DrillVerdict; hintR
       </header>
       {verdict.kind === 'green' && (
         <>
-          <p>Correctness and cost. Expect to be asked for the time and space complexity before this counts as done.</p>
+          <p>Correctness and cost. Expect to be asked for complexity.</p>
           <footer>{passFooter(hintRung)}</footer>
         </>
       )}
@@ -169,7 +169,7 @@ function DrillVerdictEntry({ verdict, hintRung }: { verdict: DrillVerdict; hintR
       )}
       {verdict.kind === 'errored' && (
         <>
-          <p>The suite could not be run — usually a syntax or type error in the solution.</p>
+          <p>The suite could not be run — usually a syntax or type error.</p>
           <pre>{verdict.message}</pre>
         </>
       )}
@@ -203,10 +203,7 @@ function DebugVerdictEntry({ verdict }: { verdict: DebugVerdict }) {
       {verdict.kind === 'root-cause' && <p>Both suites pass. The reported symptom is gone and the invariant holds.</p>}
       {verdict.kind === 'symptom-patch' && (
         <>
-          <p>
-            The reported symptom is green and the invariant is not. That is a symptom patch: the same defect is still
-            reachable by a second path.
-          </p>
+          <p>The reported symptom is green, the invariant is not — the same defect is reachable by a second path.</p>
           <footer>Reported symptom fixed · root cause not</footer>
         </>
       )}
@@ -245,8 +242,8 @@ const DEBUG_HEAD: Record<DebugVerdict['kind'], string> = {
  */
 function emptyCopy(partner: string): string {
   return partner === 'Coach'
-    ? 'The coach speaks out loud. You press once to start talking and once when you are finished. Nothing ends a turn but you, and nothing here is timed or scored.'
-    : 'The interviewer asks out loud. You press once to start answering and once when you are finished. Nothing ends a turn but you.'
+    ? 'The coach speaks out loud. Press once to talk, once when you are done. Nothing here is timed or scored.'
+    : 'The interviewer asks out loud. Press once to answer, once when you are done.'
 }
 
 export function SessionStream({

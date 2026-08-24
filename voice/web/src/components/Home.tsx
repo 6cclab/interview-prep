@@ -332,38 +332,46 @@ function TrackRow({ name, meta, blurb, list, offline, buttonLabel, primary, onSt
  * because the choice is not a preference — the modes rehearse different things.
  * See AGENTS.md, "Two editing modes".
  */
+/**
+ * Two words each.
+ *
+ * These used to carry their whole trade-off in the label — "an interview
+ * screen: highlighting and line numbers, no type checking" — on the reasoning
+ * that the modes rehearse different things and the choice is not a preference.
+ * That reasoning is sound and the label was still the wrong place for it: it is
+ * read every single time the picker is opened, by someone who has known the
+ * difference since the first time. The trade-off lives in AGENTS.md, which is
+ * where a thing you need once belongs.
+ */
 const EDITOR_OPTIONS = [
-  {
-    value: 'browser',
-    id: 'editor-browser',
-    label: 'Browser editor — an interview screen: highlighting and line numbers, no type checking',
-  },
-  { value: 'own', id: 'editor-own', label: 'My own editor — edit solution.ts yourself, with real types' },
+  { value: 'browser', id: 'editor-browser', label: 'Browser' },
+  { value: 'own', id: 'editor-own', label: 'My own editor' },
 ] as const
 
 function EditorChoice({ value, onChange }: { value: 'browser' | 'own'; onChange(next: 'browser' | 'own'): void }) {
   return (
-    <fieldset className="mt-0.5 min-w-0 border-0 p-0">
-      <legend className="pb-1.5 text-[13px] font-semibold">Where are you writing this?</legend>
-      <RadioGroup value={value} onValueChange={(next) => onChange(next as 'browser' | 'own')}>
+    <fieldset className="m-0 flex min-w-0 items-center gap-x-4 border-0 p-0">
+      <legend className="sr-only">Where are you writing this</legend>
+      {/* One row now that the labels are two words. Stacking them was a
+          consequence of labels long enough to wrap, not a decision. */}
+      <RadioGroup
+        value={value}
+        onValueChange={(next) => onChange(next as 'browser' | 'own')}
+        className="flex flex-wrap items-center gap-x-4 gap-y-2"
+      >
         {EDITOR_OPTIONS.map((option) => (
           // `htmlFor`/`id` rather than wrapping the control in the label: Radix
           // renders the item as a button, and a button inside a label swallows
           // the click that is meant to select it.
-          //
-          // `items-start` with a 3px nudge rather than `items-baseline` — the
-          // item is a 16px button with no text in it, so it has no baseline of
-          // its own and `baseline` dropped it to the bottom of a two-line label.
-          <div key={option.value} className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-[9px]">
-            <RadioGroupItem value={option.value} id={option.id} className="mt-[3px]" />
+          <div key={option.value} className="flex items-center gap-x-2">
+            <RadioGroupItem value={option.value} id={option.id} />
             {/* Deliberately not Brutalkit's `Label`, which is
-                `text-xs uppercase tracking-wide` — it is built for a short field
-                name like "EMAIL", and it rendered this sentence of prose as
-                shouting uppercase. The control comes from the design system; the
-                sentence is a sentence. */}
+                `text-xs uppercase tracking-wide` — built for a field name like
+                "EMAIL". The control comes from the design system; the wording
+                is ours. */}
             <label
               htmlFor={option.id}
-              className={`cursor-pointer text-[13px] leading-[19px] text-pretty ${
+              className={`cursor-pointer text-[13px] leading-none ${
                 value === option.value ? 'text-foreground' : 'text-muted-foreground'
               }`}
             >
@@ -428,7 +436,7 @@ export function Home({ onChoose }: Props) {
           <TrackRow
             name="Behavioral"
             meta="Untimed · critiqued"
-            blurb="One question, cold, spoken aloud. No clock and no countdown — silence does not end a turn, and thinking time is the exercise. Critiqued against your own tone rules at the end."
+            blurb="One question, cold. Silence does not end a turn — thinking time is the exercise."
             list={mock}
             offline={offline}
             buttonLabel="Behavioral drill"
@@ -439,7 +447,7 @@ export function Home({ onChoose }: Props) {
           <TrackRow
             name="System design"
             meta="45 min · timed"
-            blurb="Forty-five minutes, spoken, timed. The prompt stays on screen the whole way; the interviewer keeps the clock, warns you once near the end, and scores you against the rubric at time."
+            blurb="The prompt stays on screen the whole way. Scored against the rubric at time."
             list={design}
             offline={offline}
             buttonLabel="Design drill"
@@ -449,7 +457,7 @@ export function Home({ onChoose }: Props) {
           <TrackRow
             name="Coding"
             meta="45 min · timed"
-            blurb="Forty-five minutes, spoken, timed. Talk through it as you go, and press Run tests when you want the suite run. Hints are rationed; ask for one and you get exactly one rung."
+            blurb="Talk through it as you go. Hints are rationed: one ask buys exactly one rung."
             list={coding}
             offline={offline}
             buttonLabel="Coding drill"
@@ -463,7 +471,7 @@ export function Home({ onChoose }: Props) {
             // 45, matching DEBUG_BUDGET_MS server-side. The blurb has always said
             // forty-five minutes; the client's timed check was what disagreed.
             meta="45 min · timed"
-            blurb="Forty-five minutes, spoken, timed. A bug report for code you did not write — read it in your own editor, say what you think is happening before you change anything, and run both suites when you are ready. A fix that turns the reported symptom green while the second suite stays red is a symptom patch, and it is reported as one."
+            blurb="A bug report for code you did not write. Say what you think is happening before you change anything — a fix that greens the symptom while the invariant stays red is reported as a symptom patch."
             list={debug}
             offline={offline}
             buttonLabel="Debugging round"
@@ -476,7 +484,7 @@ export function Home({ onChoose }: Props) {
             // The one track where help is unlimited on purpose, so the blurb has to
             // say what is being scored instead — otherwise it reads as the coding
             // drill with the difficulty turned down, which is the opposite of true.
-            blurb="Sixty minutes, spoken, timed. Bring your own coding agent and use it — nothing is rationed here. You work in local/assisted/<problem>/, and the interviewer sees that directory every turn. What gets scored is whether you framed the problem before delegating it, said what you expected back before reading it, verified instead of accepting, and can defend the code when pushed. Expect spoken algorithmic questions while your tool is working."
+            blurb="Bring your own agent — nothing is rationed. Scored on whether you framed it, verified it and can defend it, not on recall."
             list={assisted}
             offline={offline}
             buttonLabel="Assisted round"
@@ -490,7 +498,7 @@ export function Home({ onChoose }: Props) {
           <TrackRow
             name="Pairing"
             meta="Untimed · not scored"
-            blurb="Not an interview. The coach has the worked solution and the pattern notes, can see your solution.ts as you type, and will answer straight — nothing is rationed and nothing is scored. Untimed. Use it after a drill, not instead of one."
+            blurb="Not an interview. The coach has the worked solution and answers straight. Use it after a drill, not instead of one."
             list={coach}
             offline={offline}
             buttonLabel="Start pairing"

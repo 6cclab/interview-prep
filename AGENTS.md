@@ -226,8 +226,10 @@ for 45 minutes and a **Run tests** button, and neither works in a terminal that
 scrolls.
 
 **Two editing modes, chosen on the picker before the drill starts.** The choice
-is not a preference — the modes rehearse different things, so both are named
-with their trade-off rather than their location.
+is not a preference — the modes rehearse different things. The picker says only
+`Browser` and `My own editor`; the trade-off is written here rather than in the
+label, because a label is read every time the picker opens and this is something
+you need once.
 
 - **Browser editor** (the default): CodeMirror in the page, writing through to
   the real `solution.ts` with a content-hash conflict guard. Highlighting and

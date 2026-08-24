@@ -630,8 +630,8 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   const partner = track.partner
   let statusDetail =
     partner === 'Coach'
-      ? 'The coach opens out loud. Nothing is recorded until you start a turn.'
-      : 'The first question is asked out loud. Nothing is recorded until you start a turn.'
+      ? 'The coach opens out loud. Nothing is recorded until you start.'
+      : 'The first question is asked out loud. Nothing is recorded until you start.'
   if (starting) {
     statusTitle = 'Starting the session'
     statusDetail = 'Asking the server for a session. The microphone has not been touched yet.'
@@ -659,8 +659,8 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
     // any timed track without enumerating them.
     statusDetail =
       remainingSeconds === null
-        ? 'Start when you are ready. There is no time limit and no countdown.'
-        : 'Start when you are ready. Silence does not end a turn — the clock in the header is the only limit.'
+        ? 'Start when you are ready. No time limit.'
+        : 'Start when you are ready. Silence does not end a turn.'
   } else if (phase === 'ended') {
     statusTitle = 'Session ended'
     // "N turns" counts Andre's answers, not transcript entries: an entry is a
