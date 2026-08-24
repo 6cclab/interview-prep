@@ -1104,15 +1104,18 @@ ol.md__list {
 }
 
 /* A server that answered badly. Ochre rather than red — the track is
-   unavailable, which is a condition to be told about, not a failure of yours. */
+   unavailable, which is a condition to be told about, not a failure of yours.
+   Sentence case, because this is a sentence: uppercase is for a label, which is
+   a short name for a thing, and eighteen words of explanation set in caps is
+   shouting an apology. Same rule that rules out Brutalkit's `Label` for the
+   editor-picker prose. */
 .track-row__unavailable {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  line-height: 14px;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
+  font-size: 11px;
+  line-height: 16px;
   color: var(--warning);
+  text-wrap: pretty;
 }
 
 .track-row[data-unavailable] .track-row__select {
@@ -1635,9 +1638,23 @@ ol.md__list {
   text-transform: uppercase; height: auto; padding: 9px 15px;
   border: 2px solid var(--foreground); background: var(--card);
 }
+/*
+ * The hint button, which is the one control on this screen whose label is a
+ * *sentence* rather than a name.
+ *
+ * `Run tests` is a label and stays uppercase. This one reads "Ask for a hint —
+ * advances to rung 1 of 4", and the clause after the dash is the whole reason
+ * the cost is written into the label at all: it has to be read before the click,
+ * not discovered after it. Eleven words in caps is the fastest way to make a
+ * sentence unreadable, so it is not shouted. Being quieter than `Run tests` is
+ * also exactly what the design asks of it.
+ */
 .drill-btn--quiet {
   background: transparent; color: var(--muted-foreground);
   border: 1px solid var(--border);
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-size: 12px;
 }
 /* Dashed rather than merely faded: a rationed control that has run out is a
    different state from one that is momentarily busy, and opacity alone reads
