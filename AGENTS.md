@@ -767,6 +767,34 @@ in turn holds nothing on any user-owned table.
 in it that a runtime consumer wants — title, tier, budget, complexity, companies
 — is parsed out at ingest into columns.
 
+### Who a request is, when there is more than one person
+
+Local mode has no identity at all: no cookie, no login, no `user` row. Deployed
+mode uses Better Auth, and **everybody starts anonymous**. Opening the page mints
+a real user row flagged `isAnonymous` with an ordinary session cookie, before
+React renders anything — the landing screen fetches `/api/problems` and
+`/api/history` on mount, and every `/api/` route fails closed.
+
+The boundary is a sentence that can be said out loud: *a cookie holds your work
+on this browser, and registering makes it follow you.* A device fingerprint was
+rejected for exactly that reason — it is unstable, blockable, makes an
+unregistered visitor durably trackable, and on a shared machine can attach two
+people to one row. Registering fires `onLinkAccount`, which re-points every row
+from the anonymous id to the new one in a single transaction, written so a
+retried hook is a no-op.
+
+The 401 gate is drawn at the `/api/` prefix rather than at a list of routes.
+`/api/history` returning the wrong person's drill log is the same class of bug as
+a session leak and a much quieter one. `/api/auth/*` is mounted **first in the
+chain, above even static files** — not for tidiness: `readJsonBody` and the raw
+`for await` loop in `/turn` consume the request stream, and Better Auth cannot
+read a stream someone else has already drained. The sign-in would hang pending
+with nothing in any log to explain it.
+
+Deployed mode needs `DATABASE_URL`, `AUTH_SECRET` and `AUTH_BASE_URL`. None is
+defaulted: a generated-at-boot secret invalidates every live session on restart
+and differs between replicas, and a hard-coded one is the same as having none.
+
 ### The warm-up tier
 
 `meta.yaml` carries `difficulty:` — `warmup`, `easy`, `medium` or `hard` — and

@@ -4,9 +4,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pg from 'pg'
 import { NO_POSTGRES, postgresAvailable, startCluster, type Cluster } from '../test-helpers/pg-cluster'
-import { applySchema, closePool, configurePool, databaseUrl, withPrivileged, withRuntime } from './pool'
+import {
+  applySchema,
+  closePool,
+  configurePool,
+  databaseUrl,
+  withPrivileged,
+  withRelink,
+  withRuntime,
+} from './pool'
 import { collectProblems, ingest } from './ingest'
 import { dbProblems, loadProblemCache, resetProblemCache } from '../problems-db'
+import { VENDOR_TABLES, applyAuthSchema, authConfig, getAuth, linkAnonymousWork, resetAuth } from './auth'
 
 /**
  * Everything in `voice/db`, against a real Postgres.
@@ -27,6 +36,22 @@ if (!available) console.warn(NO_POSTGRES)
 const suite = available ? describe : describe.skip
 
 let cluster: Cluster
+
+/**
+ * A connection as the login user, outside the role split.
+ *
+ * Used only where the split is not the thing under test: cleaning fixtures, and
+ * reading the vendor tables Better Auth owns.
+ */
+async function asOwner<T>(fn: (client: pg.Client) => Promise<T>): Promise<T> {
+  const client = new pg.Client({ connectionString: cluster.url })
+  await client.connect()
+  try {
+    return await fn(client)
+  } finally {
+    await client.end()
+  }
+}
 
 suite('voice/db against a real Postgres', () => {
   beforeAll(async () => {
@@ -698,6 +723,219 @@ suite('voice/db against a real Postgres', () => {
       await withPrivileged((client) => client.query("update problem set difficulty = 'spicy'"))
       await loadProblemCache()
       expect(dbProblems.list('').every((p) => p.difficulty === 'unrated')).toBe(true)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+
+  describe('identity, and carrying work across', () => {
+    beforeEach(async () => {
+      process.env.AUTH_SECRET = 'test-secret-not-a-real-one-0123456789'
+      process.env.AUTH_BASE_URL = 'http://127.0.0.1:4173'
+      resetAuth()
+      await applyAuthSchema()
+    })
+
+    afterAll(() => {
+      delete process.env.AUTH_SECRET
+      delete process.env.AUTH_BASE_URL
+    })
+
+    async function seedWork(userId: string): Promise<void> {
+      const id = await withPrivileged(async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          `insert into problem (track, slug, pattern, difficulty, content_hash)
+           values ('coding', 'p-${userId}', 'two-pointers', 'easy', 'h-${userId}') returning id`,
+        )
+        return rows[0]!.id
+      })
+      await withRuntime(userId, async (client) => {
+        await client.query('insert into solution_buffer (user_id, problem_id, content) values ($1, $2, $3)', [
+          userId,
+          id,
+          `${userId} typed this`,
+        ])
+        await client.query(
+          `insert into drill_log (user_id, problem_id, started_at, track, solved)
+           values ($1, $2, now(), 'coding', 'solved')`,
+          [userId, id],
+        )
+        await client.query(
+          `insert into story (user_id, competency, story) values ($1, 'Conflict', $2)`,
+          [userId, `${userId}'s story`],
+        )
+      })
+    }
+
+    /**
+     * The four vendor tables, created by Better Auth's own migrator rather than
+     * by hand. `user.id` is read from what it generated — the app tables key off
+     * that type rather than an assumed `uuid`.
+     */
+    it('creates the vendor tables and gives user.id a text key', async () => {
+      const rows = await asOwner(async (client) => {
+        const { rows } = await client.query<{ table_name: string; data_type: string | null }>(
+          `select t.table_name, c.data_type
+           from information_schema.tables t
+           left join information_schema.columns c
+             on c.table_name = t.table_name and c.column_name = 'id' and t.table_name = 'user'
+           where t.table_schema = 'public' and t.table_name = any($1::text[])
+           order by t.table_name`,
+          [[...VENDOR_TABLES]],
+        )
+        return rows
+      })
+      expect(rows.map((r) => r.table_name)).toEqual(['account', 'session', 'user', 'verification'])
+      expect(rows.find((r) => r.table_name === 'user')!.data_type).toBe('text')
+    })
+
+    it('applies the auth migration more than once without complaint', async () => {
+      await expect(applyAuthSchema()).resolves.toBeUndefined()
+    })
+
+    /**
+     * The whole point of the anonymous plugin: work follows the person onto
+     * their real account, in one transaction.
+     */
+    it('carries every kind of work from the anonymous row to the new one', async () => {
+      await seedWork('anon-1')
+      expect(await linkAnonymousWork('anon-1', 'ada')).toBe(3)
+      const mine = await withRuntime('ada', async (client) => {
+        const buffers = await client.query('select content from solution_buffer')
+        const logs = await client.query('select solved from drill_log')
+        const stories = await client.query('select story from story')
+        return { buffers: buffers.rowCount, logs: logs.rowCount, stories: stories.rowCount }
+      })
+      expect(mine).toEqual({ buffers: 1, logs: 1, stories: 1 })
+      const stranded = await withRuntime('anon-1', async (client) => {
+        const { rowCount } = await client.query('select 1 from solution_buffer')
+        return rowCount
+      })
+      expect(stranded).toBe(0)
+    })
+
+    /**
+     * Better Auth may retry the hook. A second run has to be a no-op, because
+     * the alternative — some drills carried across and some stranded on a row
+     * nobody can log into again — is a state worth making unreachable.
+     */
+    it('is idempotent, so a retried hook cannot half-migrate an account', async () => {
+      await seedWork('anon-2')
+      expect(await linkAnonymousWork('anon-2', 'grace')).toBe(3)
+      expect(await linkAnonymousWork('anon-2', 'grace')).toBe(0)
+      const count = await withRuntime('grace', async (client) => {
+        const { rowCount } = await client.query('select 1 from solution_buffer')
+        return rowCount
+      })
+      expect(count).toBe(1)
+    })
+
+    it('leaves other people alone', async () => {
+      await seedWork('anon-3')
+      await seedWork('bystander')
+      await linkAnonymousWork('anon-3', 'ada')
+      const theirs = await withRuntime('bystander', async (client) => {
+        const { rows } = await client.query<{ content: string }>('select content from solution_buffer')
+        return rows
+      })
+      expect(theirs).toEqual([{ content: 'bystander typed this' }])
+    })
+
+    /**
+     * The relink runs as the anonymous user, so it sees that user's rows — it
+     * has to, because SELECT policies gate the WHERE clause of an UPDATE. What
+     * matters is that this is the *only* widening: `app.relink_to` buys the
+     * right to write one specific id and nothing more.
+     */
+    it('reaches nobody but the two people named', async () => {
+      await seedWork('anon-4')
+      await seedWork('bystander-2')
+      const seen = await withRelink('anon-4', 'ada', async (client) => {
+        const visible = await client.query<{ content: string }>('select content from solution_buffer')
+        const stolen = await client.query("update solution_buffer set user_id = 'ada' where user_id = 'bystander-2'")
+        return { visible: visible.rows.map((r) => r.content), stolen: stolen.rowCount }
+      })
+      expect(seen).toEqual({ visible: ['anon-4 typed this'], stolen: 0 })
+      const theirs = await withRuntime('bystander-2', async (client) => {
+        const { rows } = await client.query<{ content: string }>('select content from solution_buffer')
+        return rows
+      })
+      expect(theirs).toEqual([{ content: 'bystander-2 typed this' }])
+    })
+
+    /** And it can only ever hand rows to the id it was opened with. */
+    it('cannot redirect the work to a third id', async () => {
+      await seedWork('anon-6')
+      await expect(
+        withRelink('anon-6', 'ada', (client) =>
+          client.query("update solution_buffer set user_id = 'mallory'"),
+        ),
+      ).rejects.toThrow(/row-level security/i)
+    })
+
+    /** A relink to yourself is not an error, it is nothing. */
+    it('does nothing when the two ids are the same', async () => {
+      await seedWork('anon-5')
+      expect(await linkAnonymousWork('anon-5', 'anon-5')).toBe(0)
+    })
+
+    /**
+     * A real anonymous sign-in, through the actual HTTP handler, because the
+     * question "does a cookie isolate two people" cannot be answered by a stub.
+     */
+    it('mints a distinct anonymous identity per browser', async () => {
+      const auth = getAuth()
+      const first = await auth.api.signInAnonymous()
+      const second = await auth.api.signInAnonymous()
+      expect(first?.user.id).toBeTruthy()
+      expect(second?.user.id).toBeTruthy()
+      expect(first!.user.id).not.toBe(second!.user.id)
+
+      await seedWork(first!.user.id)
+      await seedWork(second!.user.id)
+      for (const who of [first!.user.id, second!.user.id]) {
+        const rows = await withRuntime(who, async (client) => {
+          const { rows } = await client.query<{ content: string }>('select content from solution_buffer')
+          return rows
+        })
+        expect(rows).toEqual([{ content: `${who} typed this` }])
+      }
+    })
+
+    it('flags an anonymous user as anonymous', async () => {
+      const auth = getAuth()
+      const signed = await auth.api.signInAnonymous()
+      // Read as the connecting user, not through a role. The vendor tables sit
+      // outside the `app_runtime`/`app_privileged` split on purpose: Better Auth
+      // owns them and talks to the pool directly, and neither app role holds any
+      // privilege on them — an application query has no business reading a
+      // session token or a password hash.
+      const flag = await asOwner(async (client) => {
+        const { rows } = await client.query<{ is_anonymous: boolean | null }>(
+          'select "isAnonymous" as is_anonymous from "user" where id = $1',
+          [signed!.user.id],
+        )
+        return rows[0]?.is_anonymous
+      })
+      expect(flag).toBe(true)
+    })
+  })
+})
+
+describe('authConfig', () => {
+  /**
+   * Neither defaulted. A secret generated at boot would invalidate every live
+   * session on every restart and differ between replicas; a secret hard-coded
+   * here would be the same on every deployment of this code, which is the same
+   * as having none at all.
+   */
+  it('demands a secret and a base URL', () => {
+    expect(() => authConfig({ AUTH_BASE_URL: 'http://x' })).toThrow(/AUTH_SECRET/)
+    expect(() => authConfig({ AUTH_SECRET: 's' })).toThrow(/AUTH_BASE_URL/)
+    expect(() => authConfig({ AUTH_SECRET: '', AUTH_BASE_URL: 'http://x' })).toThrow(/AUTH_SECRET/)
+    expect(authConfig({ AUTH_SECRET: 's', AUTH_BASE_URL: 'http://x' })).toEqual({
+      secret: 's',
+      baseURL: 'http://x',
     })
   })
 })

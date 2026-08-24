@@ -112,6 +112,47 @@ export function withPrivileged<T>(fn: (client: DbClient) => Promise<T>): Promise
   return inRole('app_privileged', null, fn)
 }
 
+/**
+ * A transaction that may move rows from one person to another, and do nothing
+ * else with them.
+ *
+ * The one legitimate case is an anonymous visitor registering: their work has
+ * to follow them onto the real account.
+ *
+ * It runs **as `from`**, with `app.relink_to` additionally set. Both are needed
+ * and neither alone is enough — see the long note in `schema.sql`, which records
+ * why, and which of the two obvious designs fail and how.
+ *
+ * The extra power this grants is therefore exact: it is the anonymous user's own
+ * session, plus permission to write one specific other id into `user_id`. A
+ * third person's rows are not visible to it and not writable by it, which is the
+ * property that matters. It can do nothing to `from`'s rows that `from`'s own
+ * session could not already do.
+ *
+ * One transaction, so a half-carried account is not a state that can exist.
+ */
+export async function withRelink<T>(
+  from: string,
+  to: string,
+  fn: (client: DbClient) => Promise<T>,
+): Promise<T> {
+  const client = await getPool().connect()
+  try {
+    await client.query('begin')
+    await client.query('set local role app_runtime')
+    await client.query("select set_config('app.user_id', $1, true)", [from])
+    await client.query("select set_config('app.relink_to', $1, true)", [to])
+    const result = await fn(client)
+    await client.query('commit')
+    return result
+  } catch (err) {
+    await client.query('rollback').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
 const here = dirname(fileURLToPath(import.meta.url))
 
 /** The schema, as text. Separate from applying it so a test can assert on it. */

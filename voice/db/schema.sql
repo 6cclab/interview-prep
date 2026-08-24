@@ -242,8 +242,34 @@ create index if not exists story_user_idx            on story (user_id, created_
 -- an unauthenticated connection sees zero rows instead of an error that a
 -- caller might be tempted to catch.
 
+-- `app.relink_to` in the WITH CHECK is the one door through that wall, and it is
+-- shaped like exactly one job: carrying an anonymous visitor's work onto their
+-- real account when they register.
+--
+-- `force row level security` applies to the table owner too — that is the point
+-- of `force` — so there is no role that could do this by being important enough,
+-- and nothing here is handed `bypassrls`.
+--
+-- It is one widened policy rather than a second `for update` policy beside it,
+-- and the `or` is in **both** clauses. That is the result of measurement, and
+-- of getting it wrong twice first:
+--
+--   * a separate `for update` policy with `app.user_id` unset moves zero rows,
+--     because SELECT policies gate the WHERE clause of an UPDATE;
+--   * widening only `with check` still fails — and it fails identically with
+--     `with check (true)`, which is what finally identified the cause. For a
+--     `FOR ALL` policy, the USING expression is applied to the *new* row as
+--     well as the old one, so USING is what was rejecting the new owner all
+--     along. The error message names the check, which sends you the wrong way.
+--
+-- It widens nothing for ordinary traffic: `app.relink_to` is unset on every
+-- normal request, `current_setting` returns null, and `user_id = null` is never
+-- true. It is set only by `withRelink`, for one transaction.
+
 do $$
 declare t text;
+declare own_rows text := '(user_id = current_setting(''app.user_id'', true)'
+                      || ' or user_id = current_setting(''app.relink_to'', true))';
 begin
   foreach t in array array[
     'solution_buffer', 'drill_log', 'transcript',
@@ -251,11 +277,11 @@ begin
   ] loop
     execute format('alter table %I enable row level security', t);
     execute format('alter table %I force row level security', t);
+    execute format('drop policy if exists %I on %I', t || '_relink', t);
     execute format('drop policy if exists %I on %I', t || '_own_rows', t);
     execute format(
-      'create policy %I on %I using (user_id = current_setting(''app.user_id'', true))'
-      || ' with check (user_id = current_setting(''app.user_id'', true))',
-      t || '_own_rows', t
+      'create policy %I on %I using %s with check %s',
+      t || '_own_rows', t, own_rows, own_rows
     );
   end loop;
 end $$;
