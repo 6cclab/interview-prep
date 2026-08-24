@@ -21,6 +21,36 @@ you directly in places.
 | Feature build | `feature/` | `/feature` | live |
 | Company prep | `local/companies/` | `/prep` | live |
 | Pairing | `problems/`, `solutions/` | `mock:web` `#/coach/<slug>` | live |
+| AI-assisted coding | `problems/`, `local/assisted/` | `mock:web` `#/assisted/<slug>` | live |
+
+### The AI-assisted track is the exception to the hint ladder
+
+Every other coding track here rations help one rung per ask, and that rationing
+is most of what they are. **`#/assisted/<slug>` rations nothing**, because the
+round it rehearses hands the candidate a coding agent — Talkspace's scheduling
+email, 2026-08-21, asks him to bring one. Rationing your help while he has
+unlimited help in the next window measures nothing.
+
+So the track scores something else: whether he framed the problem before
+delegating it, said what he expected back before reading it, verified instead of
+accepting, and can defend the code when pushed. See `prompts/assisted.md`.
+
+Two consequences worth knowing before changing anything here:
+
+- **The interviewer is not given the pattern.** Every other coding drill gets
+  `<pattern>` so it can serve rung 2. With no ladder there is no rung 2, so it
+  does not get the answer either.
+- **His working directory reaches the interviewer per turn, not through
+  `allowedPaths`.** That allowlist is read once at prompt-build time, before he
+  has written anything, so it cannot carry files that do not exist yet. The
+  directory arrives each turn via `assistedCue` — the same route `coach` uses,
+  for the same reason.
+
+**His own agent is not sandboxed by this repo.** A walk up the tree from
+`local/assisted/<slug>/` reaches `solutions/` and `patterns.md`. `seedAssistedDir`
+drops a `.claude/settings.json` denying those paths and an `AGENTS.md` asking it
+to stay put. The settings file is enforcement; the brief is advisory. Neither is
+proof, so an answer that arrives suspiciously whole is worth asking about.
 
 ### Past drills
 

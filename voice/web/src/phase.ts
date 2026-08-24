@@ -87,16 +87,22 @@ export function wallClock(date: Date): string {
 /**
  * A timed track's budget in minutes, for display before a session exists.
  *
- * Mirrors `DESIGN_BUDGET_MS` and `CODING_BUDGET_MS` in voice/context.ts, which
- * are the authority — the client cannot import server code. Both are 45, so one
- * constant covers them; if they ever diverge this has to become per-track rather
- * than quietly showing one track the other's number.
+ * Mirrors `DESIGN_BUDGET_MS`, `CODING_BUDGET_MS` and `ASSISTED_BUDGET_MS` in
+ * voice/context.ts, which are the authority — the client cannot import server
+ * code.
+ *
+ * This became per-track on 2026-08-21, which the single constant it replaced had
+ * already called: "if they ever diverge this has to become per-track rather than
+ * quietly showing one track the other's number." The assisted track runs 60
+ * minutes rather than 45, so they diverged.
  *
  * Display only: once a drill starts the countdown runs off the `budgetMs` the
  * server actually reported, so a drift here would show the wrong number on the
  * Idle screen and nowhere else.
  */
-export const TIMED_BUDGET_MINUTES = 45
+export function timedBudgetMinutes(view: string): number {
+  return view === 'assisted' ? 60 : 45
+}
 
 export interface ErrorCopy {
   title: string

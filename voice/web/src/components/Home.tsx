@@ -362,6 +362,7 @@ export function Home({ onChoose }: Props) {
   const mock = useProblems('mock');
   const coach = useProblems('coach');
   const debug = useProblems('debug');
+  const assisted = useProblems('assisted');
 
   // Any list failing to reach the server means the server is not there.
   const offline =
@@ -369,7 +370,8 @@ export function Home({ onChoose }: Props) {
     coding.failure === 'offline' ||
     mock.failure === 'offline' ||
     coach.failure === 'offline' ||
-    debug.failure === 'offline';
+    debug.failure === 'offline' ||
+    assisted.failure === 'offline';
 
   return (
     <main className="home">
@@ -431,6 +433,18 @@ export function Home({ onChoose }: Props) {
           offline={offline}
           buttonLabel="Debugging round"
           onStart={(problem) => onChoose({ view: 'debug', problem })}
+        />
+
+        <ProblemTrackCard
+          title="AI-assisted coding"
+          // The one track where help is unlimited on purpose, so the blurb has to
+          // say what is being scored instead — otherwise it reads as the coding
+          // drill with the difficulty turned down, which is the opposite of true.
+          blurb="Sixty minutes, spoken, timed. Bring your own coding agent and use it — nothing is rationed here. You work in local/assisted/<problem>/, and the interviewer sees that directory every turn. What gets scored is whether you framed the problem before delegating it, said what you expected back before reading it, verified instead of accepting, and can defend the code when pushed. Expect spoken algorithmic questions while your tool is working."
+          list={assisted}
+          offline={offline}
+          buttonLabel="Assisted round"
+          onStart={(problem) => onChoose({ view: 'assisted', problem })}
         />
 
         {/* Landing page only, and deliberately below the drills. A coaching link

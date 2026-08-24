@@ -27,6 +27,7 @@ beforeEach(() => {
   // The coding track needs its own command file and a problem README, so the
   // shared voice-mode assertions can cover all three tracks rather than two.
   seed('prompts/drill.md', 'DRILL COMMAND')
+  seed('prompts/assisted.md', 'ASSISTED COMMAND')
   seed('problems/two-pointers/container-with-most-water/README.md', 'Given heights, find the best pair.')
   // The debugging track: its command file and one exercise's bug report.
   seed('prompts/debug.md', 'DEBUG COMMAND')
@@ -322,6 +323,75 @@ describe('buildSystemPrompt on the coding track', () => {
 
   it.each(['../elimination', '/etc', 'Two-Pointers', ''])('refuses the pattern %j', (pattern) => {
     expect(() => allowedPaths('coding', 'container-with-most-water', pattern)).toThrow()
+  })
+
+  describe('the assisted track', () => {
+    it('reads its own prompt and the problem README, and nothing else', () => {
+      expect(allowedPaths('assisted', 'container-with-most-water', 'two-pointers')).toEqual([
+        'prompts/assisted.md',
+        'problems/two-pointers/container-with-most-water/README.md',
+      ])
+    })
+
+    // The working directory does NOT come through here. This allowlist is read
+    // once at prompt-build time, before he has written anything, so it cannot
+    // carry a file that does not exist yet — the directory reaches the
+    // interviewer per turn through `assistedCue` instead. Pinned because the
+    // obvious "just add the path" change would break on a valid slug:
+    // `buildSystemPrompt` throws on any allowed path missing from disk.
+    it('does not try to carry his working directory', () => {
+      const paths = allowedPaths('assisted', 'container-with-most-water', 'two-pointers')
+      expect(paths.some((path) => path.includes('local/'))).toBe(false)
+    })
+
+    it('refuses an assisted drill with no resolved pattern', () => {
+      expect(() => allowedPaths('assisted', 'container-with-most-water')).toThrow(/resolved pattern/i)
+    })
+
+    it.each(['../elimination', '/etc', 'Two-Pointers', ''])('refuses the pattern %j', (pattern) => {
+      expect(() => allowedPaths('assisted', 'container-with-most-water', pattern)).toThrow()
+    })
+
+    // The one instruction that separates this track from every other coding
+    // drill here. If it stops reaching the prompt the track quietly becomes the
+    // coding drill under a different name, and nothing in the UI would say so.
+    it('tells the interviewer there is no hint ladder', () => {
+      const prompt = buildSystemPrompt(root, 'assisted', 'container-with-most-water', 'two-pointers')
+      expect(prompt).toMatch(/NO HINT LADDER/i)
+      expect(prompt).toContain('ASSISTED COMMAND')
+    })
+
+    // Same reasoning as the coding track's own version of this test.
+    it('never reads meta.yaml or the test file', () => {
+      const prompt = buildSystemPrompt(root, 'assisted', 'container-with-most-water', 'two-pointers')
+      expect(prompt).toContain('largest container')
+      expect(prompt).not.toContain('title: Container')
+      expect(prompt).not.toContain('FIXTURE-RATIONALE-COMMENTS')
+    })
+
+    // The spoiler gate is a runtime invariant, not a convention, and a new track
+    // is exactly where an allowlist gets widened by mistake. Pinned directly
+    // rather than only through `buildSystemPrompt`, so a future edit that adds a
+    // path here fails on this line with the reason rather than somewhere downstream.
+    it('produces an allowlist the spoiler gate accepts', () => {
+      const paths = allowedPaths('assisted', 'container-with-most-water', 'two-pointers')
+      expect(() => assertNoSpoilers(paths)).not.toThrow()
+      expect(() => assertNoSpoilers([...paths, 'solutions/elimination/celebrity.md'])).toThrow()
+      expect(() => assertNoSpoilers([...paths, 'patterns.md'])).toThrow()
+    })
+
+    it('keeps the worked solution and the pattern notes out of the prompt', () => {
+      const prompt = buildSystemPrompt(root, 'assisted', 'container-with-most-water', 'two-pointers')
+      expect(prompt).not.toContain('THE ANSWER')
+    })
+
+    // No hint ladder means nothing to ration, so the interviewer has no reason to
+    // hold the answer. The coding track is given `<pattern>` precisely so it can
+    // serve rung 2; this track has no rung 2.
+    it('is not told the pattern', () => {
+      const prompt = buildSystemPrompt(root, 'assisted', 'container-with-most-water', 'two-pointers')
+      expect(prompt).not.toContain('<pattern>two-pointers</pattern>')
+    })
   })
 })
 

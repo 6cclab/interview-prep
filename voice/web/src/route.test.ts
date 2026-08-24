@@ -28,6 +28,13 @@ describe('parseRoute', () => {
     })
   })
 
+  it('parses an assisted route with its problem', () => {
+    expect(parseRoute('#/assisted/container-with-most-water')).toEqual({
+      view: 'assisted',
+      problem: 'container-with-most-water',
+    })
+  })
+
   // A hash is user-editable text that ends up naming a file on the server, so it
   // gets the same treatment as a request body: anything not a plain slug is not
   // a route. The server validates independently — this is about the client not
@@ -50,6 +57,14 @@ describe('parseRoute', () => {
     '#/coding/',
     '#/coding',
     '#/coding/a/b',
+    // The assisted track reaches the same `problems/` directory, and also names a
+    // directory under `local/` that gets created on disk — so a slug off this
+    // hash has one more place to go wrong, not fewer.
+    '#/assisted/../../patterns.md',
+    '#/assisted/Container',
+    '#/assisted/',
+    '#/assisted',
+    '#/assisted/a/b',
   ])('refuses to route %j anywhere but home', (hash) => {
     expect(parseRoute(hash).view).toBe('home')
   })
@@ -61,6 +76,7 @@ describe('routeHash', () => {
     [{ view: 'mock' } as Route, '#/mock'],
     [{ view: 'design', problem: 'notification-fanout' } as Route, '#/design/notification-fanout'],
     [{ view: 'coding', problem: 'celebrity' } as Route, '#/coding/celebrity'],
+    [{ view: 'assisted', problem: 'celebrity' } as Route, '#/assisted/celebrity'],
   ])('renders %j as %s', (route, hash) => {
     expect(routeHash(route)).toBe(hash)
   })

@@ -83,8 +83,8 @@ export interface StuckSession {
 
 /** Which drill a session runs. Mirrors the server's `Drill` (voice/session-store.ts). */
 export interface Drill {
-  track: 'mock' | 'design' | 'coding' | 'coach' | 'debug'
-  /** Required for `design` and `coding`, absent for `mock`. */
+  track: 'mock' | 'design' | 'coding' | 'coach' | 'debug' | 'assisted'
+  /** Required for every track except `mock`, which has no problem. */
   problem?: string
   /**
    * Behavioural track only: one competency slug to stay on. Absent means the
@@ -97,7 +97,7 @@ export interface Drill {
 }
 
 /** The tracks that have a problem to put on screen. */
-export type ProblemTrack = 'design' | 'coding' | 'mock' | 'coach' | 'debug'
+export type ProblemTrack = 'design' | 'coding' | 'mock' | 'coach' | 'debug' | 'assisted'
 
 /** A problem and its prompt, from `GET /api/problems/:problem?track=`. */
 export interface ProblemStatement {
