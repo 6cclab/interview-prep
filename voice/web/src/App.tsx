@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Button } from 'brutalkit/button'
 import { useVoiceSession } from './useVoiceSession'
 import { Header } from './components/Header'
 import { Dock } from './components/Dock'
@@ -15,6 +16,8 @@ import { HomeHeader } from './components/HomeHeader'
 import { ProblemPane } from './components/ProblemPane'
 import { CodingTools } from './components/CodingTools'
 import { DebugTools } from './components/DebugTools'
+import { SolutionEditor } from './components/SolutionEditor'
+import { useSolution, runAfterSave } from './useSolution'
 import { routeDrill, routeHash, useRoute, type Route } from './route'
 import { useTheme } from './theme'
 import {
@@ -194,6 +197,17 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   // A session exists to act on. Withheld before and after, because a live button
   // that 404s is worse than a disabled one.
   const live = phase !== 'idle' && phase !== 'ended'
+
+  // The browser editor, coding track only, and only once the drill said it is
+  // in `browser` mode — that is a property of the started session (`drill`),
+  // not of the route, because it is chosen at start (Task 4).
+  const editorMode = route.view === 'coding' ? drill?.editor : undefined
+  const solution = useSolution(problem, editorMode === 'browser')
+  const onRunTests = useCallback(() => {
+    void runAfterSave(editorMode, solution.save, async () => {
+      runTests()
+    })
+  }, [editorMode, solution.save, runTests])
 
   // The session clock ("8:34 session" in the header) is client-side display
   // only — the wire carries no session-duration field (see the handoff
@@ -542,6 +556,43 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
           )}
 
           <main className="main-column">
+            {/* Browser-editor mode only (Task 4 chooses it at start). `own` mode
+                keeps the candidate in their real editor against real types, so
+                there is nothing to render here — see `editorMode` above. */}
+            {editorMode === 'browser' && (
+              <div className="solution-editor-pane">
+                <SolutionEditor value={solution.text} onChange={solution.setText} readOnly={solution.status === 'loading'} />
+                {/* The conflict is a decision, not a dead end: autosave is
+                    suspended the moment this fires (see useSolution.ts's
+                    `isConflicted`), so neither of these two actions is
+                    optional decoration — one of them is the only way out.
+                    "Save again to overwrite it", the old copy, described an
+                    action that could not succeed: every autosave resent the
+                    same now-stale version and 409'd forever. */}
+                {solution.status === 'conflict' && (
+                  <div className="solution-editor-pane__status" role="alert">
+                    <p>
+                      solution.ts changed on disk since this loaded — someone else wrote to it (another tab, or your
+                      own editor). Your typed code is kept, but autosave is paused until you choose:
+                    </p>
+                    <div className="solution-editor-pane__conflict-actions">
+                      <Button variant="brand" size="sm" onClick={() => void solution.overwrite()}>
+                        Overwrite with what's on screen
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => void solution.reload()}>
+                        Discard what's on screen and reload the file
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {solution.status === 'error' && (
+                  <p className="solution-editor-pane__status" role="alert">
+                    Could not reach the drill server to save. Your typed code is kept locally; it will retry on the next
+                    change or Run tests.
+                  </p>
+                )}
+              </div>
+            )}
             <Transcript
               entries={entries}
               interimSentences={interimSentences}
@@ -576,7 +627,7 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
                 running={testsRunning}
                 hintRung={hintRung}
                 hintPending={hintPending}
-                onRun={live ? runTests : undefined}
+                onRun={live ? onRunTests : undefined}
                 onHint={live ? askForHint : undefined}
                 rationed={route.view === 'coding'}
               />
