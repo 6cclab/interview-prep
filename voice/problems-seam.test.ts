@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   findCodingProblem,
+  installProblemSource,
   listCodingProblems,
   problemSource,
+  type ProblemSource,
   resetProblemSource,
   resolveMode,
   stripPatternPaths,
@@ -84,16 +86,37 @@ describe('problemSource', () => {
   })
 
   /**
-   * `deployed` has no implementation yet, and the stub throws rather than
-   * falling through. An absent case that quietly used the filesystem would make
-   * the first deployment look like it worked.
+   * `deployed` mode serves from Postgres, and `main()` installs that source at
+   * startup. Until something does, the stub throws rather than falling through
+   * to the disk — an absent case that quietly read `problems/` would make a
+   * deployment whose startup half-failed look like it worked.
    */
   it('fails loudly in deployed mode instead of reading the disk', () => {
     const root = repoWith('sliding-window', 'longest-substring')
     process.env.VOICE_MODE = 'deployed'
     resetProblemSource()
-    expect(() => listCodingProblems(root)).toThrow(/not built yet/)
-    expect(() => findCodingProblem(root, 'longest-substring')).toThrow(/not built yet/)
+    expect(() => listCodingProblems(root)).toThrow(/startup has not installed/)
+    expect(() => findCodingProblem(root, 'longest-substring')).toThrow(/startup has not installed/)
+  })
+
+  /**
+   * The Postgres source is injected rather than imported, so that `pg` and the
+   * whole `voice/db` tree stay off the local path — every coding drill in the
+   * repo imports this module transitively. What is pinned here is that the
+   * injection actually takes effect, because the alternative failure is a
+   * deployed server silently serving the stub's throw forever.
+   */
+  it('serves whatever startup installs', () => {
+    const root = repoWith('sliding-window', 'longest-substring')
+    process.env.VOICE_MODE = 'deployed'
+    resetProblemSource()
+    const fake: ProblemSource = {
+      list: () => [{ slug: 'from-the-database', pattern: 'two-pointers', difficulty: 'medium' }],
+      find: () => null,
+    }
+    installProblemSource(fake)
+    expect(listCodingProblems(root).map((p) => p.slug)).toEqual(['from-the-database'])
+    expect(findCodingProblem(root, 'longest-substring')).toBeNull()
   })
 
   /**
