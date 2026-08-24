@@ -17,6 +17,7 @@ import { collectProblems, ingest } from './ingest'
 import { dbProblems, loadProblemCache, resetProblemCache } from '../problems-db'
 import { VENDOR_TABLES, applyAuthSchema, authConfig, getAuth, linkAnonymousWork, resetAuth } from './auth'
 import { dbWorkStore } from '../work-store-db'
+import { applyMigration, formatRejects, planMigration } from './migrate-local'
 
 /**
  * Everything in `voice/db`, against a real Postgres.
@@ -1057,6 +1058,205 @@ suite('voice/db against a real Postgres', () => {
     it('refuses to write for an unauthenticated request', async () => {
       await expect(dbWorkStore(null).appendDrillLog(row())).rejects.toThrow(/unauthenticated/)
       await expect(dbWorkStore(null).readHistory()).rejects.toThrow(/unauthenticated/)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+
+  describe('migrating the record that already exists', () => {
+    const roots: string[] = []
+
+    /**
+     * A `local/` tree with one of everything, plus the awkward cases: a note
+     * carrying an escaped pipe and a paragraph break, a drill of a problem that
+     * is not in the repo, and an attempt of one.
+     */
+    function localTree(): string {
+      const root = mkdtempSync(join(tmpdir(), 'voice-migrate-'))
+      roots.push(root)
+      const write = (rel: string, body: string) => {
+        mkdirSync(join(root, rel, '..'), { recursive: true })
+        writeFileSync(join(root, rel), body)
+      }
+      const problem = join(root, 'problems', 'two-pointers', 'valid-palindrome')
+      mkdirSync(problem, { recursive: true })
+      writeFileSync(join(problem, 'README.md'), '# valid-palindrome\n')
+      writeFileSync(join(problem, 'meta.yaml'), 'pattern: two-pointers\ndifficulty: warmup\n')
+
+      write(
+        'local/drill-log.md',
+        [
+          '| Date | Problem | Pattern | Solved | Hints | Time | Note |',
+          '|------|---------|---------|--------|-------|------|------|',
+          '| 2026-08-12 | valid-palindrome | two-pointers | yes | 0 | 12:30 | Clean. Then \\| a pipe \\| and more. |',
+          '| 2026-08-13 | valid-palindrome | two-pointers | partly | 2 | 20:00 | Named it, half-wrote it. |',
+          '| 2026-08-19 | max-temperature-rise | unknown | no | 0 | 45:00 | A real interview, not a repo problem. |',
+          '',
+        ].join('\n'),
+      )
+      write(
+        'local/coached.md',
+        [
+          '# Coached',
+          '',
+          '| Date | Problem | Pattern | Minutes |',
+          '|------|---------|---------|---------|',
+          '| 2026-08-10 | valid-palindrome | two-pointers | 33 |',
+          '| nonsense row that is not a pairing |',
+          '',
+        ].join('\n'),
+      )
+      write('local/attempts/valid-palindrome-2026-08-12-1626.ts', 'export function f() { return 1 }\n')
+      write('local/attempts/max-temperature-rise-2026-08-19-1046.ts', 'export function g() {}\n')
+      write('local/attempts/not-an-attempt.txt', 'ignored, wrong extension\n')
+      write('local/attempts/badly-named.ts', 'kept out, and said so\n')
+      write(
+        'local/stories.md',
+        [
+          '# Story Bank',
+          '',
+          '## Index — coverage by competency',
+          '',
+          'A table of contents this file keeps about itself.',
+          '',
+          '## Partner discount coverage gap',
+          '',
+          '**Answers:** Failure',
+          '**Situation:** It shipped half-wired.',
+          '**Watch for:** the pull toward "I found and fixed a bug".',
+          '',
+          '## Conflict',
+          '',
+          '**Story.** The one the app wrote.',
+          '',
+          '**What worked.** Naming it early.',
+          '',
+          '**Fix next time.** Sooner.',
+          '',
+        ].join('\n'),
+      )
+      return root
+    }
+
+    /**
+     * The tree, with its problems ingested — which is the state a real migration
+     * runs against. `pnpm ingest` comes first on a deploy, so the slugs a drill
+     * row names either resolve or genuinely no longer exist. Without this every
+     * row would look orphaned, and the orphan rules below would prove nothing.
+     */
+    async function migratable(): Promise<string> {
+      const root = localTree()
+      await ingest(root)
+      return root
+    }
+
+    afterAll(() => {
+      for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+    })
+
+    it('finds every kind of record, and rejects only what it cannot read', () => {
+      const plan = planMigration(localTree())
+      expect(plan.drills).toHaveLength(3)
+      expect(plan.attempts.map((a) => a.slug).sort()).toEqual(['max-temperature-rise', 'valid-palindrome'])
+      expect(plan.pairings).toHaveLength(1)
+      // The index section is not a story — it is a table of contents this file
+      // keeps about itself, and a row for it would mean nothing.
+      expect(plan.stories.map((s) => s.competency)).toEqual(['Failure', 'Conflict'])
+      expect(plan.rejected.map((r) => r.line)).toEqual(['badly-named.ts'])
+    })
+
+    /**
+     * The whole reason this is a two-pass migration. The record is small and
+     * irreplaceable, and the only moment anyone can see what would be dropped is
+     * before it is dropped.
+     */
+    it('a dry run writes nothing', async () => {
+      const plan = planMigration(localTree())
+      expect(plan.drills.length).toBeGreaterThan(0)
+      const before = await withRuntime('ada', async (client) => {
+        const { rowCount } = await client.query('select 1 from drill_log')
+        return rowCount
+      })
+      expect(before).toBe(0)
+    })
+
+    /**
+     * Verbatim, including the escaped pipe. The `Note` column is multi-paragraph
+     * prose with corrections and cross-references between rows; a migration that
+     * normalised it would be destroying the only copy of something to make it fit
+     * a schema.
+     */
+    it('carries the note across unchanged, pipes and all', async () => {
+      const plan = planMigration(await migratable())
+      await applyMigration('ada', plan)
+      const notes = await withRuntime('ada', async (client) => {
+        const { rows } = await client.query<{ note: string }>('select note from drill_log order by started_at')
+        return rows.map((r) => r.note)
+      })
+      expect(notes[0]).toBe('Clean. Then | a pipe | and more.')
+    })
+
+    it('keeps the three-valued reading of the solved column', async () => {
+      await applyMigration('ada', planMigration(await migratable()))
+      const solved = await withRuntime('ada', async (client) => {
+        const { rows } = await client.query<{ solved: string }>('select solved from drill_log order by started_at')
+        return rows.map((r) => r.solved)
+      })
+      expect(solved).toEqual(['solved', 'partial', 'unsolved'])
+    })
+
+    /**
+     * The two orphan rules, which are deliberately different. A drill of a
+     * problem that no longer resolves keeps its numbers, because they are real
+     * history and `/status` reads them. An attempt does not, because a page of
+     * code with nothing saying what question it answered is unreadable.
+     */
+    it('keeps an orphaned drill and drops an orphaned attempt', async () => {
+      const counts = await applyMigration('ada', planMigration(await migratable()))
+      expect(counts.orphanedDrills).toBe(1)
+      expect(counts.skippedAttempts).toBe(1)
+      const kept = await withRuntime('ada', async (client) => {
+        const drills = await client.query('select 1 from drill_log where problem_id is null')
+        const attempts = await client.query('select 1 from attempt_archive')
+        return { orphanDrills: drills.rowCount, attempts: attempts.rowCount }
+      })
+      expect(kept).toEqual({ orphanDrills: 1, attempts: 1 })
+    })
+
+    /**
+     * Both story shapes survive, and both survive whole. Parsing the
+     * hand-authored STAR blocks into `worked`/`fix` columns would mean guessing
+     * which field is which about the only copy of a story bank that took months
+     * of real interviews to write.
+     */
+    it('stores every story verbatim, in whichever shape it was written', async () => {
+      await applyMigration('ada', planMigration(await migratable()))
+      const stories = await withRuntime('ada', async (client) => {
+        const { rows } = await client.query<{ competency: string; story: string }>(
+          'select competency, story from story order by competency',
+        )
+        return rows
+      })
+      expect(stories.map((s) => s.competency)).toEqual(['Conflict', 'Failure'])
+      expect(stories.find((s) => s.competency === 'Failure')!.story).toContain('**Watch for:**')
+      expect(stories.find((s) => s.competency === 'Failure')!.story).toContain('## Partner discount coverage gap')
+      expect(stories.find((s) => s.competency === 'Conflict')!.story).toContain('**Fix next time.** Sooner.')
+    })
+
+    it('names the rejects rather than counting them', () => {
+      const text = formatRejects(planMigration(localTree()).rejected)
+      expect(text).toContain('badly-named.ts')
+      expect(text).toContain('the filename is not')
+    })
+
+    /** Migrated rows belong to their owner like any other, not to everybody. */
+    it('gives the migrated record to one person', async () => {
+      await applyMigration('ada', planMigration(await migratable()))
+      const graceSees = await withRuntime('grace', async (client) => {
+        const { rowCount } = await client.query('select 1 from drill_log')
+        return rowCount
+      })
+      expect(graceSees).toBe(0)
     })
   })
 })
