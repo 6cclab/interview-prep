@@ -297,15 +297,17 @@ export function History({ onGoHome }: { onGoHome(): void }) {
                       </span>
                       <span role="cell">
                         {row.note.trim() !== '' && (
-                          <button
+                          <Button
                             type="button"
+                            variant="outline"
+                            size="icon-xs"
                             className="history__toggle"
                             aria-expanded={open}
                             aria-label={open ? `Collapse note for ${row.problem}` : `Expand note for ${row.problem}`}
                             onClick={() => setOpenNote(open ? null : index)}
                           >
                             {open ? '−' : '+'}
-                          </button>
+                          </Button>
                         )}
                       </span>
                     </div>

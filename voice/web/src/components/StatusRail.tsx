@@ -1,3 +1,4 @@
+import { Button } from 'brutalkit/button'
 import type { RailState } from '../types'
 
 /**
@@ -48,14 +49,14 @@ export function StatusRail({
         <>
           <span>Transcription failed — the last answer did not reach the interviewer</span>
           {onRetryTranscription && (
-            <button type="button" onClick={onRetryTranscription}>
+            <Button type="button" variant="outline" size="sm" className="drill-rail-btn" onClick={onRetryTranscription}>
               Say it again
-            </button>
+            </Button>
           )}
           {onDismissTranscription && (
-            <button type="button" onClick={onDismissTranscription}>
+            <Button type="button" variant="outline" size="sm" className="drill-rail-btn" onClick={onDismissTranscription}>
               Dismiss
-            </button>
+            </Button>
           )}
         </>
       )}
@@ -68,14 +69,14 @@ export function StatusRail({
               optional decoration. */}
           <span>solution.ts changed on disk — your typed code is kept, autosave paused</span>
           {onOverwrite && (
-            <button type="button" onClick={onOverwrite}>
+            <Button type="button" variant="outline" size="sm" className="drill-rail-btn" onClick={onOverwrite}>
               Overwrite with what&rsquo;s on screen
-            </button>
+            </Button>
           )}
           {onReload && (
-            <button type="button" onClick={onReload}>
+            <Button type="button" variant="outline" size="sm" className="drill-rail-btn" onClick={onReload}>
               Discard and reload the file
-            </button>
+            </Button>
           )}
         </>
       )}
