@@ -1,7 +1,14 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { PROBLEM_SLUG } from './context'
-import { DIFFICULTIES, type CodingProblem, type Difficulty, type ProblemSource } from './problems'
+import { PROBLEM_SLUG, assertNoSpoilers } from './context'
+import {
+  DIFFICULTIES,
+  type CodingProblem,
+  type Difficulty,
+  type DocumentKind,
+  type ProblemLocation,
+  type ProblemSource,
+} from './problems'
 
 /**
  * The problem set as it exists on disk: `problems/<pattern>/<problem>/`.
@@ -72,7 +79,40 @@ export function findOnDisk(root: string, slug: string): CodingProblem | null {
   return listFromDisk(root).find((problem) => problem.slug === slug) ?? null
 }
 
+/**
+ * Which file on disk each servable document kind is.
+ *
+ * `stub` is `stub.ts` and `test` is `solution.test.ts`; neither is
+ * `solution.ts`, and this table is the one place that decides so. Spelled out
+ * rather than derived, because the mistake worth making impossible here is a
+ * one-word typo that seeds a candidate's browser workspace from the worked
+ * answer — which on a shared box is whatever the last person left there.
+ */
+const DOCUMENT_FILES: Record<DocumentKind, string> = {
+  readme: 'README.md',
+  stub: 'stub.ts',
+  test: 'solution.test.ts',
+}
+
+/**
+ * One of a problem's servable files, read from its directory.
+ *
+ * `assertNoSpoilers` still runs even though every path here is built from a
+ * fixed table and a directory that was resolved by scanning. That is the point:
+ * a guard that only runs where the author already believes it is unnecessary
+ * catches nothing, and this is the last place a path exists before it becomes
+ * bytes on a wire.
+ */
+function documentFromDisk(root: string, problem: ProblemLocation, kind: DocumentKind): string | null {
+  const relPath = `problems/${problem.pattern}/${problem.slug}/${DOCUMENT_FILES[kind]}`
+  assertNoSpoilers([relPath])
+  const full = join(root, relPath)
+  if (!existsSync(full)) return null
+  return readFileSync(full, 'utf8')
+}
+
 export const fsProblems: ProblemSource = {
   list: listFromDisk,
   find: findOnDisk,
+  document: documentFromDisk,
 }

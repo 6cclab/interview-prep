@@ -113,6 +113,7 @@ describe('problemSource', () => {
     const fake: ProblemSource = {
       list: () => [{ slug: 'from-the-database', pattern: 'two-pointers', difficulty: 'medium' }],
       find: () => null,
+      document: () => '# from the database',
     }
     installProblemSource(fake)
     expect(listCodingProblems(root).map((p) => p.slug)).toEqual(['from-the-database'])

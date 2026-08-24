@@ -280,6 +280,12 @@ grant usage, select on all sequences in schema public to app_runtime;
 -- The ingester writes definitions; the boot loader reads `pattern`. Neither
 -- touches per-user work, and that is enforced rather than assumed.
 grant select, insert, update, delete on problem, problem_document, problem_hint to app_privileged;
+-- The views as well, not only the tables underneath. The boot loader runs
+-- privileged because it needs `pattern`, but it reads the *documents* through
+-- the public view on purpose: it caches them for the browser, and a query
+-- written against the view can only ever fail to find something, where one
+-- against the base table could quietly cache the worked solution and serve it.
+grant select on problem_public, problem_document_public to app_privileged;
 grant usage, select on all sequences in schema public to app_privileged;
 revoke all on solution_buffer, drill_log, transcript, attempt_archive, pairing_log, story
   from app_privileged;
