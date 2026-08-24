@@ -51,6 +51,16 @@ export interface Drill {
 
 export interface StoredSession {
   id: string
+  /**
+   * Whose session this is, or `null` in local mode where there is only ever one
+   * person and no identity to attach.
+   *
+   * The one-session-at-a-time rule is per person on a deployed instance, and
+   * that is not a relaxation — it is the same rule. It always meant "you cannot
+   * be in two interviews at once", and the process-wide version of it only
+   * happened to be equivalent because there was only ever one candidate.
+   */
+  userId: string | null
   session: Session
   interviewer: Interviewer
   drill: Drill
@@ -75,13 +85,28 @@ export interface StoredSession {
 }
 
 export interface SessionStore {
-  create(session: Session, interviewer: Interviewer, startedAt: Date, scratchDir: string, drill: Drill): StoredSession
+  create(
+    session: Session,
+    interviewer: Interviewer,
+    startedAt: Date,
+    scratchDir: string,
+    drill: Drill,
+    userId?: string | null,
+  ): StoredSession
+  /**
+   * By id, without regard to owner.
+   *
+   * Deliberately global, and safe on its own terms: a session id is a
+   * `randomUUID`, so it is not something one person can arrive at by guessing at
+   * another's. Ownership is still checked above this, at the routes, because an
+   * unguessable id is a reason not to worry and not a reason to skip the check.
+   */
   get(id: string): StoredSession | undefined
   remove(id: string): void
-  /** True once any session is live — the web path allows exactly one at a time. */
-  hasActive(): boolean
-  /** The id of the one active session, if any — mirrors `hasActive`'s "at most one" invariant. */
-  activeId(): string | undefined
+  /** True once `userId` has a session live — the web path allows one each at a time. */
+  hasActive(userId?: string | null): boolean
+  /** The id of that person's one active session, if any. */
+  activeId(userId?: string | null): string | undefined
   touch(id: string, now: number): void
   /**
    * Sessions that are **orphaned** — idle past `idleMs` *and* with no browser
@@ -121,9 +146,10 @@ export function createSessionStore(
   const sessions = new Map<string, StoredSession>()
 
   return {
-    create(session, interviewer, startedAt, scratchDir, drill) {
+    create(session, interviewer, startedAt, scratchDir, drill, userId = null) {
       const stored: StoredSession = {
         id: idFactory(),
+        userId,
         session,
         interviewer,
         drill,
@@ -139,8 +165,14 @@ export function createSessionStore(
     remove: (id) => {
       sessions.delete(id)
     },
-    hasActive: () => sessions.size > 0,
-    activeId: () => sessions.keys().next().value,
+    // Filtered by owner rather than by count. One `Map` with a `userId` field
+    // and per-person predicates over it, not one store per person: `get`,
+    // `remove`, `touch` and `reapIdle` are all genuinely global — an idle
+    // session is idle whoever owns it — and N stores would mean four of the six
+    // methods having to search all of them.
+    hasActive: (userId = null) => [...sessions.values()].some((s) => s.userId === userId),
+    activeId: (userId = null) =>
+      [...sessions.values()].find((s) => s.userId === userId)?.id,
     touch(id, now) {
       const stored = sessions.get(id)
       if (stored) stored.lastActivity = now

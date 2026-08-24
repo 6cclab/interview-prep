@@ -754,7 +754,23 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       sendJson(res, 401, { error: 'unauthenticated' })
       return
     }
-    void userId
+
+    /**
+     * A session, but only if it belongs to whoever is asking.
+     *
+     * Every route below resolves through this rather than `store.get`, so the
+     * check cannot be the one a new route forgets. A session id is a
+     * `randomUUID` and so is not reachable by guessing — this is the belt to
+     * that brace, and it costs one comparison.
+     *
+     * Someone else's session is a 404, not a 403. A 403 would confirm that the
+     * id names a real session, which is a small thing to leak and a free one not
+     * to.
+     */
+    const owned = (id: string): StoredSession | undefined => {
+      const stored = store.get(id)
+      return stored && stored.userId === userId ? stored : undefined
+    }
 
     if (req.method === 'GET' && serveStatic(distDir, url.pathname, res)) return
 
@@ -805,7 +821,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     // instead of requiring one. There is at most one, per `hasActive`'s
     // invariant.
     if (req.method === 'DELETE' && url.pathname === '/api/session') {
-      const id = store.activeId()
+      const id = store.activeId(userId)
       if (!id) {
         sendJson(res, 404, { error: 'no active session' })
         return
@@ -1121,12 +1137,12 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         return
       }
 
-      if (store.hasActive()) {
+      if (store.hasActive(userId)) {
         // The 409 carries the stuck session's id and start time so the client
         // can offer both recoveries the design calls for: end it, or open it.
         // Without the id there was nothing to reopen and nothing honest to put
         // in the banner's "a session started at 07:12" — see ERROR_COPY.stuck.
-        const active = store.get(store.activeId()!)!
+        const active = store.get(store.activeId(userId)!)!
         sendJson(res, 409, {
           error: 'a session is already in progress',
           id: active.id,
@@ -1221,7 +1237,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
                 : () => timeCue(entryClock(), drill.budgetMs),
       })
       const scratchDir = mkdtempSync(join(tmpdir(), 'voice-web-'))
-      const stored = store.create(session, interviewer, new Date(), scratchDir, drill)
+      const stored = store.create(session, interviewer, new Date(), scratchDir, drill, userId)
       entryClocks.set(stored.id, entryClock)
       sendJson(res, 201, { id: stored.id, ...drill })
       return
@@ -1239,7 +1255,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     const readMatch = /^\/api\/session\/([^/]+)$/.exec(url.pathname)
     if (req.method === 'GET' && readMatch) {
       const id = readMatch[1]!
-      const stored = store.get(id)
+      const stored = owned(id)
       if (!stored) {
         notFound(res)
         return
@@ -1262,7 +1278,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     const streamMatch = /^\/api\/session\/([^/]+)\/stream$/.exec(url.pathname)
     if (req.method === 'GET' && streamMatch) {
       const id = streamMatch[1]!
-      const stored = store.get(id)
+      const stored = owned(id)
       if (!stored) {
         notFound(res)
         return
@@ -1368,7 +1384,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     const turnMatch = /^\/api\/session\/([^/]+)\/turn$/.exec(url.pathname)
     if (req.method === 'POST' && turnMatch) {
       const id = turnMatch[1]!
-      const stored = store.get(id)
+      const stored = owned(id)
       if (!stored) {
         notFound(res)
         return
@@ -1452,7 +1468,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     const retryMatch = /^\/api\/session\/([^/]+)\/turn\/retry$/.exec(url.pathname)
     if (req.method === 'POST' && retryMatch) {
       const id = retryMatch[1]!
-      const stored = store.get(id)
+      const stored = owned(id)
       if (!stored) {
         notFound(res)
         return
@@ -1506,7 +1522,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     const abandonMatch = /^\/api\/session\/([^/]+)\/turn\/abandon$/.exec(url.pathname)
     if (req.method === 'POST' && abandonMatch) {
       const id = abandonMatch[1]!
-      const stored = store.get(id)
+      const stored = owned(id)
       if (!stored) {
         notFound(res)
         return
@@ -1546,7 +1562,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     const hintMatch = /^\/api\/session\/([^/]+)\/hint$/.exec(url.pathname)
     if (req.method === 'POST' && hintMatch) {
       const id = hintMatch[1]!
-      const stored = store.get(id)
+      const stored = owned(id)
       if (!stored) {
         notFound(res)
         return
@@ -1631,7 +1647,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     const testsMatch = /^\/api\/session\/([^/]+)\/tests$/.exec(url.pathname)
     if (req.method === 'POST' && testsMatch) {
       const id = testsMatch[1]!
-      const stored = store.get(id)
+      const stored = owned(id)
       if (!stored) {
         notFound(res)
         return
@@ -1710,7 +1726,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     const endMatch = /^\/api\/session\/([^/]+)\/end$/.exec(url.pathname)
     if (req.method === 'POST' && endMatch) {
       const id = endMatch[1]!
-      const stored = store.get(id)
+      const stored = owned(id)
       if (!stored) {
         notFound(res)
         return

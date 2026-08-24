@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
+import { createSessionStore, type SessionStore } from './session-store'
 import { useCliBackend } from './test-helpers/backend-env'
 
 useCliBackend()
@@ -24,6 +25,12 @@ useCliBackend()
 let server: Server | undefined
 let root: string
 let port: number
+/**
+ * One store behind both servers, which is how a deployed instance actually
+ * works: one process, one `Map`, several people. Two stores would prove nothing
+ * about isolation — of course two separate maps do not see each other.
+ */
+let sharedStore: SessionStore
 
 function seed(): void {
   const write = (relPath: string, body: string) => {
@@ -62,6 +69,7 @@ function listen(auth: VoiceServerDeps['auth']): Promise<number> {
       },
     transcriber: { transcribe: async () => ({ text: '' }) },
     auth,
+    store: sharedStore,
   })
   return new Promise((resolve) => {
     server!.listen(0, '127.0.0.1', () => {
@@ -74,6 +82,7 @@ function listen(auth: VoiceServerDeps['auth']): Promise<number> {
 
 beforeEach(() => {
   seenByAuth.length = 0
+  sharedStore = createSessionStore()
   root = mkdtempSync(join(tmpdir(), 'voice-auth-gate-'))
   seed()
 })
@@ -148,6 +157,94 @@ describe('deployed mode with somebody signed in', () => {
     const res = await get('/api/problems?track=coding')
     expect(res.status).toBe(200)
     expect(await res.text()).toContain('valid-palindrome')
+  })
+})
+
+describe('one session each, not one session between everyone', () => {
+  /**
+   * The one-session-at-a-time rule is per person on a deployed instance, and
+   * that is the same rule it always was — "you cannot be in two interviews at
+   * once". It read as process-wide only because there had only ever been one
+   * candidate. Two people sharing one slot would mean the second person to open
+   * the app is told a session is already in progress and offered the chance to
+   * end somebody else's drill.
+   */
+  it('lets two people hold a session at the same time', async () => {
+    port = await listen(stubAuth('ada'))
+    const start = (path = '/api/session') =>
+      fetch(`http://127.0.0.1:${port}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ track: 'coding', problem: 'valid-palindrome' }),
+      })
+
+    const first = await start()
+    expect(first.status).toBe(201)
+
+    // Ada again: still one each, so this is the 409 the rule exists to give.
+    expect((await start()).status).toBe(409)
+
+    // Grace, on the same server. Her slot is her own.
+    server?.close()
+    const graceServer = createVoiceServer({
+      root,
+      createTransport: () =>
+        async function* () {
+          yield 'never reached'
+        },
+      transcriber: { transcribe: async () => ({ text: '' }) },
+      auth: stubAuth('grace'),
+      store: sharedStore,
+    })
+    await new Promise<void>((resolve) => graceServer.listen(0, '127.0.0.1', () => resolve()))
+    const address = graceServer.address()
+    if (address === null || typeof address === 'string') throw new Error('expected an AddressInfo')
+    const graceRes = await fetch(`http://127.0.0.1:${address.port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coding', problem: 'valid-palindrome' }),
+    })
+    expect(graceRes.status).toBe(201)
+    graceServer.close()
+  })
+
+  /**
+   * A session id is a `randomUUID`, so reaching someone else's takes knowing it
+   * rather than guessing. This is the belt to that brace — and a 404 rather than
+   * a 403, because a 403 confirms the id names a real session.
+   */
+  it('hides one person’s session from another', async () => {
+    port = await listen(stubAuth('ada'))
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coding', problem: 'valid-palindrome' }),
+    })
+    const { id } = (await created.json()) as { id: string }
+    expect(await (await fetch(`http://127.0.0.1:${port}/api/session/${id}`)).status).toBe(200)
+
+    server?.close()
+    const graceServer = createVoiceServer({
+      root,
+      createTransport: () =>
+        async function* () {
+          yield 'never reached'
+        },
+      transcriber: { transcribe: async () => ({ text: '' }) },
+      auth: stubAuth('grace'),
+      store: sharedStore,
+    })
+    await new Promise<void>((resolve) => graceServer.listen(0, '127.0.0.1', () => resolve()))
+    const address = graceServer.address()
+    if (address === null || typeof address === 'string') throw new Error('expected an AddressInfo')
+    for (const path of [
+      `/api/session/${id}`,
+      `/api/session/${id}/stream`,
+    ]) {
+      const res = await fetch(`http://127.0.0.1:${address.port}${path}`)
+      expect(`${path} -> ${res.status}`).toBe(`${path} -> 404`)
+    }
+    graceServer.close()
   })
 })
 
