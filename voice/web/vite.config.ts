@@ -23,6 +23,21 @@ const root = fileURLToPath(new URL('.', import.meta.url))
 const certs = fileURLToPath(new URL('../../local/certs/', import.meta.url))
 const apiIsHttps = existsSync(`${certs}cert.pem`) && existsSync(`${certs}key.pem`)
 
+// ...but the inference is only right when the API is *this* machine's `pnpm
+// dev:web:api`. Point the dev server at a deployed instance instead — a
+// container from `deploy/compose.yaml`, say, which cannot see `local/certs`
+// because `.dockerignore` excludes it and therefore serves plain HTTP — and
+// the same `local/certs` that makes the inference true here makes it wrong
+// there. The symptom is not a helpful one: every `/api` call fails with
+// `EPROTO ... packet length too long` from the proxy, and the app renders
+// "The prompt could not be loaded on screen", which reads as a server bug.
+//
+// So: inferred by default, overridden by being told. Same rule `VOICE_MODE`
+// follows — the guess is a convenience, never the only way to say it.
+//
+//   VOICE_API_ORIGIN=http://127.0.0.1:4173 pnpm dev:web
+const apiOrigin = process.env.VOICE_API_ORIGIN?.trim() || `${apiIsHttps ? 'https' : 'http'}://127.0.0.1:4173`
+
 export default defineConfig({
   root,
   // Tailwind is here only because Brutalkit peer-depends on it: its
@@ -41,7 +56,7 @@ export default defineConfig({
       // this does not replace — run `pnpm dev:web:api` alongside `pnpm
       // dev:web` and requests to /api/* are forwarded to it.
       '/api': {
-        target: `${apiIsHttps ? 'https' : 'http'}://127.0.0.1:4173`,
+        target: apiOrigin,
         changeOrigin: false,
         // mkcert signs with a locally-installed CA that Node does not trust by
         // default, so verification would reject a certificate the browser
