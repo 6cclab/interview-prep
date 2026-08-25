@@ -1560,25 +1560,25 @@ ol.md__list {
   border-bottom: 1px solid var(--border);
 }
 .drill-cm { height: var(--editor-height); overflow: auto; padding: 14px 18px; }
-.drill-cm .cm-editor { background: transparent; }
-.drill-cm .cm-editor.cm-focused { outline: none; }
-.drill-cm .cm-scroller { font-family: var(--drill-mono); font-size: var(--step-code); line-height: var(--lead-base); }
-.drill-cm .cm-gutters { background: transparent; border-right: none; color: var(--muted-foreground); }
-.drill-cm .cm-lineNumbers .cm-gutterElement { opacity: 0.45; padding-right: 14px; }
-.drill-cm .cm-activeLine,
-.drill-cm .cm-activeLineGutter { background: var(--muted); }
-.drill-cm .cm-activeLineGutter { opacity: 1; }
+.code-editor .cm-editor { background: transparent; }
+.code-editor .cm-editor.cm-focused { outline: none; }
+.code-editor .cm-scroller { font-family: var(--drill-mono); font-size: var(--step-code); line-height: var(--lead-base); }
+.code-editor .cm-gutters { background: transparent; border-right: none; color: var(--muted-foreground); }
+.code-editor .cm-lineNumbers .cm-gutterElement { opacity: 0.45; padding-right: 14px; }
+.code-editor .cm-activeLine,
+.code-editor .cm-activeLineGutter { background: var(--muted); }
+.code-editor .cm-activeLineGutter { opacity: 1; }
 /* The *native* caret, not CodeMirror's drawn one. `drawSelection()` is not in
    the extension list (see SolutionEditor.tsx), so no `.cm-cursor` element is
    ever rendered and a rule targeting one styles nothing. What actually shows
    is the browser's own caret, and CodeMirror's base theme sets it to `black` —
    invisible against this editor's near-black background, which is why the
    cursor appeared to be missing entirely rather than merely mis-coloured. */
-.drill-cm .cm-content { caret-color: var(--brand); }
+.code-editor .cm-content { caret-color: var(--brand); }
 /* `::selection` alone, for the same reason: without `drawSelection()` the
    selection is the browser's, not a `.cm-selectionBackground` element. */
-.drill-cm ::selection { background: color-mix(in oklab, var(--brand) 26%, transparent); }
-.drill-cm .cm-matchingBracket { background: color-mix(in oklab, var(--foreground) 14%, transparent); outline: none; }
+.code-editor ::selection { background: color-mix(in oklab, var(--brand) 26%, transparent); }
+.code-editor .cm-matchingBracket { background: color-mix(in oklab, var(--foreground) 14%, transparent); outline: none; }
 /* Syntax highlighting.
  *
  * The class names are `@lezer/highlight`'s `classHighlighter` output, wired in
@@ -1601,41 +1601,41 @@ ol.md__list {
  * off-white. */
 
 /* Blue: the words the language reserves. */
-.drill-cm .tok-keyword,
-.drill-cm .tok-operator { color: var(--chart-5); }
+.code-editor .tok-keyword,
+.code-editor .tok-operator { color: var(--chart-5); }
 
 /* Green: strings, the one literal with obvious edges. */
-.drill-cm .tok-string,
-.drill-cm .tok-url { color: var(--chart-4); }
+.code-editor .tok-string,
+.code-editor .tok-url { color: var(--chart-4); }
 
 /* Orange: the other literals. Numbers and booleans read as data rather than
    as language, and want to be findable at a glance in a drill where an
    off-by-one in a constant is a plausible bug. */
-.drill-cm .tok-number,
-.drill-cm .tok-bool,
-.drill-cm .tok-atom,
-.drill-cm .tok-literal { color: var(--chart-2); }
+.code-editor .tok-number,
+.code-editor .tok-bool,
+.code-editor .tok-atom,
+.code-editor .tok-literal { color: var(--chart-2); }
 
 /* Rust: the type layer. Distinct from the literals it sits next to in a
    signature — `s: string` should not read as one colour. */
-.drill-cm .tok-typeName,
-.drill-cm .tok-className,
-.drill-cm .tok-namespace { color: var(--chart-3); }
+.code-editor .tok-typeName,
+.code-editor .tok-className,
+.code-editor .tok-namespace { color: var(--chart-3); }
 
 /* Grey, and out of the way: punctuation and the comments a stub uses to
    explain itself. Italic as well as dim — a JSDoc block is often a third of
    the visible file, and hue alone does not separate it enough. */
-.drill-cm .tok-punctuation,
-.drill-cm .tok-meta { color: var(--muted-foreground); }
+.code-editor .tok-punctuation,
+.code-editor .tok-meta { color: var(--muted-foreground); }
 
-.drill-cm .tok-comment {
+.code-editor .tok-comment {
   color: var(--muted-foreground);
   font-style: italic;
 }
 
 /* The one thing that should be alarming. `tok-invalid` is what the parser
    emits where it could not make sense of the text at all. */
-.drill-cm .tok-invalid { color: var(--destructive); }
+.code-editor .tok-invalid { color: var(--destructive); }
 
 /* --- toolbar + hint ladder ------------------------------------- */
 .drill-toolbar {
@@ -2048,6 +2048,14 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
 }
 
 .practice-editor { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* Layout only. Appearance comes from `.code-editor`, which `SolutionEditor`
+   emits itself — see the comment there for why that split exists. Taller than
+   the drill's editor because this screen has no transcript competing for the
+   column, and practice is where you sit and write. */
+.practice-editor .code-editor {
+  height: clamp(320px, 46vh, 620px); overflow: auto;
+  border: 2px solid var(--border); padding: 14px 18px;
+}
 .practice-tools { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
 
 .practice-verdict { margin: 0; font-size: 14px; }

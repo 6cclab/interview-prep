@@ -112,7 +112,10 @@ describe('the solution editor', () => {
   // stylesheet has to override it — and the rule that used to be here targeted
   // `.cm-cursor`, an element that only exists when `drawSelection()` is loaded.
   it('overrides the caret colour, because the base theme’s black is invisible here', () => {
-    expect(styles).toMatch(/\.drill-cm \.cm-content \{[^}]*caret-color:/)
+    // `.code-editor`, not `.drill-cm`: the caret colour is appearance, and
+    // appearance moved onto the class the component emits so a second screen
+    // cannot render this editor without it.
+    expect(styles).toMatch(/\.code-editor \.cm-content \{[^}]*caret-color:/)
   })
 
   // `javascript()` supplies only the parser. Without a highlighter consuming
@@ -145,6 +148,23 @@ describe('the solution editor', () => {
     const styled = [...styles.matchAll(/\.(tok-[A-Za-z]+)/g)].map((m) => m[1]!)
     expect(styled.length).toBeGreaterThan(0)
     expect([...new Set(styled)].filter((c) => !emitted.has(c))).toEqual([])
+  })
+
+  /**
+   * The palette must hang off a class the editor emits itself.
+   *
+   * It used to be scoped to `.drill-cm`, which the *drill screen* wrapped the
+   * editor in. Practice rendered the same component without that wrapper and
+   * got a bare CodeMirror — no syntax colours, no caret colour, a different
+   * font. Nothing failed and no test noticed; it just looked like a different
+   * editor. Scoping appearance to what the component renders is what makes a
+   * third screen impossible to get wrong.
+   */
+  it('scopes the palette to a class SolutionEditor renders, not to one screen', () => {
+    expect(editor).toContain('className="code-editor"')
+    const scopes = [...styles.matchAll(/(\.[A-Za-z-]+) \.tok-/g)].map((m) => m[1]!)
+    expect(scopes.length).toBeGreaterThan(0)
+    expect([...new Set(scopes)]).toEqual(['.code-editor'])
   })
 
   // If `drawSelection()` is ever added, `.cm-cursor` and
