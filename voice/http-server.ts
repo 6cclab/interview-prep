@@ -348,7 +348,12 @@ function codingPattern(root: string, problem: string): string {
 function serveStatic(distDir: string, pathname: string, res: ServerResponse): boolean {
   const resolved = resolveStaticFile(distDir, pathname)
   if (!resolved) return false
-  res.writeHead(200, { 'content-type': resolved.contentType })
+  res.writeHead(200, {
+    'content-type': resolved.contentType,
+    // Decided in `static.ts`, next to the resolution, so the shell and the
+    // hashed assets cannot drift apart — they are one mechanism.
+    'cache-control': resolved.cacheControl,
+  })
   res.end(readStaticFile(resolved))
   return true
 }

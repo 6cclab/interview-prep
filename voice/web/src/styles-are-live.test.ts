@@ -424,6 +424,53 @@ describe('the working surface’s scale', () => {
  * disabled control with no busy signal reads as broken rather than working,
  * which is exactly what makes someone press it again.
  */
+/**
+ * "Nothing is recorded", meant literally.
+ *
+ * The screen said that in its header and then wrote the buffer to
+ * `localStorage` under `practice:<slug>`, where it outlived the visit, the tab
+ * and the browser restart. The copy and the behaviour disagreed, which is
+ * worse than either choice made honestly — and returning to a half-finished
+ * attempt you have no memory of writing is exactly what a mode premised on
+ * costing nothing to abandon should not do.
+ */
+describe('the practice buffer', () => {
+  const component = code(read('components/Practice.tsx'));
+
+  // The only permitted mention is the purge, which deletes — never writes.
+  it('is not persisted anywhere', () => {
+    expect(component).not.toMatch(/setItem/);
+    expect(component).not.toMatch(/getItem/);
+    expect(component).not.toMatch(/sessionStorage/);
+  });
+
+  /**
+   * And clears what the persisting version left behind. Dropping the write
+   * alone would leave every browser that ran the old build holding a
+   * `practice:<slug>` key of that person's code that nothing ever reads or
+   * removes again — the same defect, moved into the past.
+   */
+  it('deletes buffers the old build stored', () => {
+    expect(component).toContain('purgeStoredBuffers');
+    expect(component).toMatch(/removeItem/);
+  });
+
+  // The claim the absence of storage is there to make true.
+  it('still says so on screen', () => {
+    expect(component).toContain('nothing is recorded');
+  });
+
+  /**
+   * And still not `useSolution`, which writes the real
+   * `problems/<pattern>/<slug>/solution.ts`. That would let a practice session
+   * overwrite a drill attempt on the same problem, silently, with no undo —
+   * the reason this buffer was ever separate.
+   */
+  it('never reaches for the drill’s solution file', () => {
+    expect(component).not.toMatch(/useSolution/);
+  });
+});
+
 describe('the run-tests busy state', () => {
   const component = code(read('components/Practice.tsx'));
   const styles = code(read('styles.css'));

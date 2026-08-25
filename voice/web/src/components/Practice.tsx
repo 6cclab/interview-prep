@@ -18,52 +18,57 @@ import { SolutionEditor } from './SolutionEditor';
  * because there was nothing being kept.
  */
 
-/** Where a practice buffer lives. Never the drill's `solution.ts` — see `load`. */
-function storageKey(slug: string): string {
-  return `practice:${slug}`;
-}
-
 /**
- * The buffer, in `localStorage`, and *not* through `useSolution`.
+ * The buffer is React state and nothing else. Leaving the screen loses it, and
+ * that is the feature.
  *
- * `useSolution` writes to `/api/coding/:slug/solution`, which locally is the
- * real `problems/<pattern>/<slug>/solution.ts` and deployed is the row a coding
- * drill reads back. Practising a problem would therefore overwrite the attempt
- * you are mid-way through on the same problem — silently, with no undo, from a
- * mode whose entire premise is that it keeps no record and costs nothing to
+ * It used to live in `localStorage` under `practice:<slug>`, so that coming
+ * back to a problem restored what you had written. Two things were wrong with
+ * that. The header on this screen says *nothing is recorded*, and it was
+ * recording — the copy and the behaviour disagreed, which is worse than either
+ * choice made honestly. And a buffer that outlives the visit turns a scratch
+ * pad into a save file: you return to a half-finished attempt you have no
+ * memory of writing, in a mode whose whole premise is that it costs nothing to
  * abandon.
  *
- * So practice keeps its own scratch buffer, per browser. Losing it costs a
- * practice session; sharing the drill's would cost an attempt.
+ * So the stub seeds it and the screen owns it. A reload starts over, which is
+ * the price, and it is the same price the copy has always been promising.
+ *
+ * Note what it is deliberately *not*: `useSolution`, which writes to the real
+ * `problems/<pattern>/<slug>/solution.ts`. Practising a problem would
+ * otherwise overwrite a drill attempt on that same problem, silently and with
+ * no undo. That reasoning is why this was ever separate, and it still holds —
+ * separate, and now not stored at all.
+ *
+ * Cleared by unmounting rather than by a cleanup hook, on purpose: `StrictMode`
+ * mounts twice in development, so an effect that wiped the buffer on unmount
+ * would wipe it on first render. `session-boot.ts` documents the same trap.
  */
-function load(slug: string): string | null {
-  try {
-    return window.localStorage.getItem(storageKey(slug));
-  } catch {
-    // Private browsing, or storage disabled. Practice still works — it just
-    // starts from the stub each time, which is a worse session and not a broken
-    // one.
-    return null;
-  }
-}
-
-function save(slug: string, code: string): void {
-  try {
-    window.localStorage.setItem(storageKey(slug), code);
-  } catch {
-    /* see `load` */
-  }
-}
 
 /**
- * The verdict as one line, for the toolbar.
+ * Deletes buffers left behind by the version that persisted them.
  *
- * The toolbar is a fixed strip that stays put while the pane below it scrolls,
- * so this has to stay one line whatever happened — a seven-item failure list
- * lived here once and grew the strip until it pushed the editor around and
- * collided with the output. The list moved to `FailureList`, in the pane. What
- * belongs here is the answer to "what happened", visible without scrolling.
+ * Removing the write is not enough: every browser that ran the old build still
+ * holds a `practice:<slug>` key containing that person's code, and nothing
+ * would ever read or clear it again. It would sit there indefinitely,
+ * contradicting the "nothing is recorded" line on the screen above it — which
+ * is the exact defect this change exists to close, just moved into the past.
+ *
+ * One pass, on mount. Idempotent, so `StrictMode`'s double mount is harmless,
+ * and cheap enough not to be worth remembering it has run: after the first
+ * visit there is nothing left to match.
  */
+function purgeStoredBuffers(): void {
+  try {
+    const stale = Object.keys(window.localStorage).filter((key) =>
+      key.startsWith('practice:')
+    );
+    for (const key of stale) window.localStorage.removeItem(key);
+  } catch {
+    // Private browsing, or storage disabled. Nothing was stored to begin with.
+  }
+}
+
 function VerdictLine({ verdict }: { verdict: DrillVerdict }) {
   if (verdict.kind === 'green') {
     return (
@@ -219,16 +224,10 @@ export function Practice({
   codeRef.current = code;
   const chat = usePracticeChat(problem, () => codeRef.current, send);
 
-  // The stub seeds an empty buffer and nothing else. A saved buffer always wins:
-  // re-seeding from the stub on every visit would silently discard work.
+  // The stub, every visit. There is nothing saved to prefer over it.
   useEffect(() => {
     let cancelled = false;
-    const saved = load(problem);
-    if (saved !== null) {
-      setCode(saved);
-      setLoaded(true);
-      return;
-    }
+    purgeStoredBuffers();
     void (async () => {
       try {
         const res = await fetch(`/api/coding/${problem}/exercise`);
@@ -246,13 +245,9 @@ export function Practice({
     };
   }, [problem]);
 
-  const onChange = useCallback(
-    (next: string) => {
-      setCode(next);
-      save(problem, next);
-    },
-    [problem]
-  );
+  const onChange = useCallback((next: string) => {
+    setCode(next);
+  }, []);
 
   const onRun = useCallback(() => {
     if (running) return;

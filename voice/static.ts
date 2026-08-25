@@ -19,6 +19,42 @@ const CONTENT_TYPES: Record<string, string> = {
 export interface ResolvedStaticFile {
   path: string
   contentType: string
+  /** What to send as `cache-control`. See `cacheControlFor`. */
+  cacheControl: string
+}
+
+/**
+ * Vite's content-hashed output: `index-DuwZfKad.js`, `geist-sans-…-BOaIZNA2.woff2`.
+ *
+ * The hash is the whole point — the name changes when the bytes change, so the
+ * file at a given name can never change and may be cached forever. Matched
+ * rather than assumed from the directory, because an unhashed file living in
+ * `assets/` would otherwise be pinned in every browser for a year with no way
+ * to recall it.
+ */
+const HASHED = /-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/
+
+/**
+ * The `cache-control` for one file.
+ *
+ * The server sent no cache headers at all, which is not "no caching" — with no
+ * `Cache-Control` and no validator, a browser applies its own heuristic. Chrome
+ * duly cached `index.html`, and a rebuild then left the tab loading the *old*
+ * asset hashes across reloads. Deployed, that is worse than it sounds: the old
+ * hashes are gone from the new image, so a returning visitor gets 404s for
+ * every script on the page and renders a white screen rather than an error.
+ * Hit during development, which is the only reason it was noticed at all.
+ *
+ * So the shell is never stored and the hashed assets are stored forever. That
+ * pairing is the whole mechanism: the immutable files are safe precisely
+ * because the one mutable file that names them is always refetched.
+ */
+export function cacheControlFor(realPath: string): string {
+  if (extname(realPath) === '.html') return 'no-store'
+  if (HASHED.test(realPath)) return 'public, max-age=31536000, immutable'
+  // Everything else — `favicon.ico`, `robots.txt`, an unhashed asset. Cacheable
+  // but revalidated, so it can be replaced by a deploy without waiting a year.
+  return 'no-cache'
 }
 
 /**
@@ -72,7 +108,7 @@ export function resolveStaticFile(distRoot: string, pathname: string): ResolvedS
   if (real !== rootReal && !real.startsWith(rootReal + sep)) return null
 
   const contentType = CONTENT_TYPES[extname(real)] ?? 'application/octet-stream'
-  return { path: real, contentType }
+  return { path: real, contentType, cacheControl: cacheControlFor(real) }
 }
 
 export function readStaticFile(resolved: ResolvedStaticFile): Buffer {

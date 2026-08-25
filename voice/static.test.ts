@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveStaticFile } from './static'
+import { cacheControlFor, resolveStaticFile } from './static'
 
 let dirs: string[] = []
 
@@ -116,5 +116,56 @@ describe('resolveStaticFile', () => {
     mkdirSync(join(dist, 'assets'), { recursive: true })
     writeFileSync(join(dist, 'assets', 'placeholder.js'), 'x')
     expect(resolveStaticFile(dist, '/assets')).toBeNull()
+  })
+})
+
+/**
+ * Cache headers, which the server previously sent none of.
+ *
+ * "No `Cache-Control`" is not "do not cache" — with no header and no validator
+ * a browser applies its own heuristic, and Chrome duly cached `index.html`.
+ * A rebuild then left the tab loading the *old* asset hashes across reloads.
+ * Deployed that is worse: the old hashes are gone from the new image, so a
+ * returning visitor gets a 404 for every script on the page and renders a
+ * white screen rather than an error.
+ */
+describe('cacheControlFor', () => {
+  // The shell names the hashed assets, so it is the one file that must always
+  // be refetched. This is what makes pinning the others safe.
+  it('never stores the shell', () => {
+    expect(cacheControlFor('/dist/index.html')).toBe('no-store')
+  })
+
+  it.each([
+    'assets/index-DuwZfKad.js',
+    'assets/index-D7tTsWSc.css',
+    'assets/geist-sans-latin-400-normal-BOaIZNA2.woff2',
+  ])('pins %s forever, because its name changes when its bytes do', (name) => {
+    expect(cacheControlFor(`/dist/${name}`)).toBe('public, max-age=31536000, immutable')
+  })
+
+  /**
+   * Matched on the hash, not on the directory. An unhashed file that happened
+   * to live in `assets/` would otherwise be pinned in every browser for a year
+   * with no way to recall it — the one cache mistake that cannot be undone by
+   * deploying again.
+   */
+  it('does not pin an unhashed file just because of where it lives', () => {
+    expect(cacheControlFor('/dist/assets/logo.svg')).toBe('no-cache')
+    expect(cacheControlFor('/dist/favicon.ico')).toBe('no-cache')
+  })
+
+  // A short hash is not a content hash. Vite's are 8 characters.
+  it('does not mistake a hyphenated name for a hashed one', () => {
+    expect(cacheControlFor('/dist/assets/my-icon.svg')).toBe('no-cache')
+  })
+})
+
+describe('resolveStaticFile cache headers', () => {
+  it('carries the header alongside the content type', () => {
+    const root = mkdtempSync(join(tmpdir(), 'static-cache-'))
+    writeFileSync(join(root, 'index.html'), '<!doctype html>')
+    expect(resolveStaticFile(root, '/')?.cacheControl).toBe('no-store')
+    rmSync(root, { recursive: true, force: true })
   })
 })
