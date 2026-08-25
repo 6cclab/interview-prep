@@ -1919,14 +1919,17 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
 }
 .drill-stream-empty p { margin: 0; color: var(--muted-foreground); font-size: 15px; line-height: 23px; }
 
-/* The streaming caret, carried over from the old transcript. */
-.drill-caret {
+/* The streaming caret: something is still arriving. Shared, not the drill's —
+   the tutor's replies stream the same way the interviewer's do, and a second
+   invention for the same fact is how two screens end up disagreeing about what
+   "still going" looks like. */
+.workbench__caret {
   display: inline-block; width: 7px; height: 1em; margin-left: 3px;
   background: var(--brand); vertical-align: text-bottom;
   animation: drill-caret-blink 1s steps(1) infinite;
 }
 @keyframes drill-caret-blink { 50% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .drill-caret { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .workbench__caret { animation: none; } }
 
 .drill-toolbar__divider { width: 1px; height: 22px; background: var(--border); flex: none; }
 .drill-toolbar__spacer,
@@ -2028,6 +2031,13 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
   display: flex; flex-direction: column; gap: var(--gap-4);
 }
 .practice-chat-empty { margin: 0; font-size: var(--step-data); color: var(--muted-foreground); }
+
+/* "Thinking ▌" under the turn being answered. Muted and small: it is a status,
+   not content, and it is replaced by the answer the moment one arrives. */
+.practice-thinking {
+  margin: 0; display: flex; align-items: center; gap: 6px;
+  font-size: var(--step-data); color: var(--muted-foreground);
+}
 
 .practice-turn { font-size: var(--step-body); line-height: var(--lead-base); }
 .practice-turn p { margin: 0 0 8px; }

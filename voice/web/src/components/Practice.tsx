@@ -264,29 +264,56 @@ export function Practice({
         aside={
           <section className="practice-chat" aria-label="Ask the tutor">
             <WorkbenchHead>Ask</WorkbenchHead>
-            <div className="practice-chat-log" role="log" aria-live="polite">
+            <div
+              className="practice-chat-log"
+              role="log"
+              aria-live="polite"
+              aria-busy={chat.streaming}
+            >
               {chat.messages.length === 0 && (
                 <p className="practice-chat-empty">
                   Ask anything about this problem — what it is asking for, why a
                   test is failing, or how an approach works.
                 </p>
               )}
-              {chat.messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={
-                    message.role === 'assistant'
-                      ? 'practice-turn practice-turn--assistant'
-                      : 'practice-turn practice-turn--user'
-                  }
-                >
-                  {message.role === 'assistant' ? (
-                    <Markdown source={message.content} />
-                  ) : (
-                    <p>{message.content}</p>
-                  )}
-                </div>
-              ))}
+              {chat.messages.map((message, index) => {
+                // The turn currently being answered: the last one, when it is
+                // the tutor's and a reply is still in flight. `usePracticeChat`
+                // puts an empty assistant turn up the moment a question is
+                // sent, so without this the column shows the question and then
+                // nothing at all — which reads as the send having failed, and
+                // on a local model that silence can last several seconds.
+                const pending =
+                  chat.streaming &&
+                  message.role === 'assistant' &&
+                  index === chat.messages.length - 1;
+                return (
+                  <div
+                    key={index}
+                    className={
+                      message.role === 'assistant'
+                        ? 'practice-turn practice-turn--assistant'
+                        : 'practice-turn practice-turn--user'
+                    }
+                  >
+                    {message.role === 'assistant' ? (
+                      <Markdown source={message.content} />
+                    ) : (
+                      <p>{message.content}</p>
+                    )}
+                    {pending && (
+                      <p className="practice-thinking">
+                        {/* Named only while there is nothing to read yet. Once
+                            text is arriving the caret alone says "still going",
+                            and a "Thinking" label sitting under a half-written
+                            answer contradicts it. */}
+                        {message.content === '' && <span>Thinking</span>}
+                        <span className="workbench__caret" aria-hidden="true" />
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
             {/* Pinned below the log rather than scrolling with it: the box you
                 type into must not move when a reply streams in. */}

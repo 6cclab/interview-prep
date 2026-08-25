@@ -295,7 +295,7 @@ function SpeechEntry({
         <Bubble variant={them ? 'muted' : 'outline'}>
           <BubbleContent>
             <TurnBody text={text} />
-            {streaming && <span className="drill-caret" aria-hidden="true" />}
+            {streaming && <span className="workbench__caret" aria-hidden="true" />}
           </BubbleContent>
         </Bubble>
       </MessageContent>
