@@ -32,6 +32,30 @@ export interface TestOutcome {
 
 export interface SuiteResult {
   outcomes: TestOutcome[]
+  /** Whatever the candidate's code printed, in order, attributed to the test that was running. */
+  logs: RunLog[]
+}
+
+/**
+ * What the runner knows about a run that has not finished.
+ *
+ * Reported after each test, so that when the whole-suite ceiling fires the main
+ * thread knows which test was still in flight rather than only that *something*
+ * was. That difference is the whole point: a hung *cost* test is a working
+ * answer too slow to measure, which is a legitimate `cost-red` checkpoint; a
+ * hung *correctness* test is a loop that will not end. Reporting neither and
+ * calling both `errored` inverts the distinction the drill exists to make.
+ *
+ * Sent between tests, which is the only moment it can be: `runSuite` awaits
+ * each test, so the thread yields there and nowhere else. A test that spins
+ * synchronously posts nothing after itself, which is exactly how its identity
+ * survives as "the one still running".
+ */
+export interface SuiteProgress {
+  /** The test that has just been started and has not yet reported an outcome. */
+  running: FailedTest | null
+  /** Every test that has finished and failed so far. */
+  failed: FailedTest[]
 }
 
 /**
@@ -44,4 +68,22 @@ export interface SuiteResult {
 export interface FailedTest {
   suite: string
   title: string
+}
+
+/**
+ * One line the candidate's own code printed while the suite ran.
+ *
+ * Safe to surface, and for the same reason a thrown error is: it is *their*
+ * output. Nothing else writes to the console during a run — neither
+ * `test-utils/` nor any of the suites — so a captured line came from the code
+ * in the editor. That is what keeps this on the right side of the rule
+ * `TestOutcome.debugMessage` exists to enforce: a matcher's message quotes the
+ * fixture it compared against and must never leave the Worker; a `console.log`
+ * quotes whatever the candidate chose to print.
+ */
+export interface RunLog {
+  /** The test that was running, as `suite > title`. */
+  test: string
+  level: 'log' | 'info' | 'warn' | 'error' | 'debug'
+  text: string
 }

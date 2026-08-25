@@ -328,3 +328,31 @@ describe('keepStartChoices', () => {
     expect(keepStartChoices(parsed, { view: 'home' })).toEqual(parsed)
   })
 })
+
+/**
+ * Practice, which is a view without a drill.
+ *
+ * Every other problem-bearing view maps to something `start()` is called with.
+ * This one must not: it has no session, and a drill object here would be a
+ * `POST /api/session` waiting to happen.
+ */
+describe('the practice route', () => {
+  it('parses from the hash like any other problem view', () => {
+    expect(parseRoute('#/practice/two-sum')).toEqual({ view: 'practice', problem: 'two-sum' })
+  })
+
+  it('round-trips through routeHash', () => {
+    const route = { view: 'practice', problem: 'two-sum' } as const
+    expect(parseRoute(routeHash(route))).toEqual(route)
+  })
+
+  it('falls back to home when the slug is not a slug', () => {
+    expect(parseRoute('#/practice/../etc')).toEqual({ view: 'home' })
+  })
+
+  // The load-bearing one. `routeDrill` is what `start()` is called with, and
+  // practice has nothing to start.
+  it('has no drill, so nothing can start a session from it', () => {
+    expect(routeDrill({ view: 'practice', problem: 'two-sum' })).toBeNull()
+  })
+})

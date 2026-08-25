@@ -103,5 +103,17 @@ export function SolutionEditor({ value, onChange, readOnly = false }: Props) {
     instance.dispatch({ changes: { from: 0, to: current.length, insert: value } });
   }, [value]);
 
-  return <div ref={host} data-testid="solution-editor" />;
+  // `code-editor` is emitted by the component, never by the caller.
+  //
+  // Every editor style — the mono font, the gutters, the active line, the caret
+  // colour, the whole `tok-*` syntax palette — used to be scoped to `.workbench__cm`,
+  // a class the *drill screen* wrapped this in. So a second screen rendering
+  // this component got a bare CodeMirror: no palette, no caret colour, a
+  // different font. Nothing failed; it just looked like a different editor,
+  // which is exactly how long that kind of bug survives.
+  //
+  // Appearance belongs to the editor, so the editor emits the hook for it.
+  // Layout still belongs to the screen — see `.workbench__cm` and
+  // `.practice-editor`, which set height and nothing else.
+  return <div ref={host} className="code-editor" data-testid="solution-editor" />;
 }

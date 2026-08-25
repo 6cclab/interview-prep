@@ -8,8 +8,15 @@ import { readCandidateName, renderCandidate } from './candidate'
  * `allowedPaths` throws, and therefore so does `buildSystemPrompt`. Coaching
  * reads its files through `voice/coach.ts`, which explains why that is a separate
  * door rather than an exemption inside this one.
+ *
+ * `practice` is not a drill either, and is here for narrower reasons: it has no
+ * interviewer, no session and no record. What it has is a tutor the candidate
+ * types at, and that tutor needs a model — so it needs a row in `backend.ts`'s
+ * per-track table, which is keyed by this type. It reads its files through
+ * `voice/practice-chat.ts`, a third door, for the same reason coaching has a
+ * second one: its allowlist is neither a drill's nor a coach's.
  */
-export type Track = 'mock' | 'design' | 'coding' | 'coach' | 'debug' | 'assisted'
+export type Track = 'mock' | 'design' | 'coding' | 'coach' | 'debug' | 'assisted' | 'practice'
 
 /**
  * Paths the interviewer must never see. `prompts/rules/no-spoilers.md` states
@@ -63,6 +70,13 @@ export function allowedPaths(track: Track, problem?: string, pattern?: string): 
   // its callers" is the guard being wrong for one caller.
   if (track === 'coach') {
     throw new Error('The coach track does not use allowedPaths — see coachPaths in voice/coach.ts.')
+  }
+  // Same refusal, same reason. Practice reads the suite, which every drill in
+  // this function is deliberately denied — so it cannot share a list with one.
+  if (track === 'practice') {
+    throw new Error(
+      'Practice does not use allowedPaths — see practiceChatPaths in voice/practice-chat.ts.',
+    )
   }
   if (track === 'mock') {
     return [

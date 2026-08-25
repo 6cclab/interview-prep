@@ -103,10 +103,58 @@ const DEFAULT_HOST = 'http://127.0.0.1:11434'
  * seconds-per-token is the one the candidate experiences, and a reasoning model
  * loses on it even while winning the benchmark.
  *
- * Note the capital Q — `Qwen3.5:9b` is the tag as published and ollama tags are
- * case-sensitive, so `qwen3.5:9b` is a 404. Override with `OLLAMA_MODEL`.
+ * **The default is now `qwen3.8:latest` (17.7 GB on the box), by Andre's call.**
+ * Everything above is left standing because it is the record of why the 9B held
+ * the default for as long as it did, and because its standing lesson —
+ * tokens-per-turn times seconds-per-token, not tok/s — is the metric any future
+ * comparison has to use.
+ *
+ * **Re-measured on 2026-08-25**, four-turn behavioural mocks through the real
+ * `context.ts` prompt, `think: true`, `num_ctx: 32768`, two runs each, read off
+ * ollama's own `eval_count` / `eval_duration` rather than off a stopwatch:
+ *
+ * | | `Qwen3.5:9b` | `qwen3.8:latest` |
+ * |---|---|---|
+ * | Generation rate | 27.5, 27.4 tok/s | 13.8, 14.9 tok/s |
+ * | Tokens per turn | 2391, 1108 | **492, 1106** |
+ * | Seconds per turn | 86.8, 40.4 | 35.7, 74.4 |
+ * | Share of tokens that are deliberation | **0.93, 0.94** | 0.75, 0.74 |
+ * | Deliberation leaked into `content` | 0 of 8 | 0 of 8 |
+ * | Compounded "and" questions | 2, 1 of 4 | 1, 1 of 4 |
+ * | Cold load | — | 12.1s |
+ *
+ * **The standing lesson survives and sharpens.** `qwen3.8` runs at *half* the
+ * 9B's throughput and is no slower per turn, because it spends a third of the
+ * tokens getting to the answer. Throughput remains the wrong metric; the
+ * candidate waits through tokens-per-turn times seconds-per-token.
+ *
+ * **The leak is gone on both, and that is the `think: true` change, not the
+ * model.** Zero deliberation reached `content` in sixteen turns. The gate is
+ * still load-bearing for a server that ignores the flag — but on this server,
+ * with the flag honoured, it has nothing to catch.
+ *
+ * **Three quarters to nine tenths of every generated token is deliberation the
+ * reader never sees.** That is not waste to be optimised away — it is what
+ * bought the clean `content` — but it is the entire latency story, and it is
+ * why the practice tutor needed `VOICE_MODEL_PRACTICE` rather than a faster
+ * transport. See `voice/backend.ts`.
+ *
+ * **Compounding two questions with "and" is still a prompt problem.** Both
+ * models do it on one to two turns in four, which is what the 2026-08-10 note
+ * said and what a naive `?`-counter still misses.
+ *
+ * **Caveat on all of the above: n=2, and the variance is larger than the
+ * difference.** Tokens per turn moved by more than 2x between runs of the
+ * *same* model, so the per-turn seconds here separate nothing. Only the
+ * generation rate (stable to 0.4%) and the deliberation share (stable to 0.01)
+ * are tight enough to lean on. A decision that turns on wall clock needs more
+ * runs than this.
+ *
+ * Tags are case-sensitive: `Qwen3.5:9b` is published with a capital Q and
+ * `qwen3.5:9b` is a 404, whereas `qwen3.8:latest` is lowercase. Override either
+ * with `OLLAMA_MODEL`.
  */
-export const DEFAULT_OLLAMA_MODEL = 'Qwen3.5:9b'
+export const DEFAULT_OLLAMA_MODEL = 'qwen3.8:latest'
 
 /**
  * Big enough that a full-length design drill does not silently truncate.
@@ -207,16 +255,30 @@ export function normaliseHost(raw: string | undefined): string {
 export function ollamaChatBody(
   system: string,
   messages: Message[],
-  opts: { model: string; numCtx: number; keepAlive: string },
+  opts: { model: string; numCtx: number; keepAlive: string; think: boolean },
 ): Record<string, unknown> {
   return {
     model: opts.model,
     stream: true,
     keep_alive: opts.keepAlive,
-    // Honoured by newer servers, which then return deliberation in
-    // `message.thinking` instead of `message.content`. Ignored by 0.24.0,
-    // which is why `createThinkGate` cannot be replaced by this flag.
-    think: false,
+    // Ask for deliberation in `message.thinking` rather than `message.content`.
+    //
+    // This used to be hard `false`, on the reasoning that 0.24.0 ignored it and
+    // so the gate had to do the work anyway. That was true and it was also the
+    // wrong default, because a reasoning model told not to use a thinking
+    // channel does not stop reasoning — it reasons in prose, in `content`,
+    // untagged, where the gate cannot see it. Measured on `qwen3.8:latest` via
+    // ollama 0.32.15, same question either way:
+    //
+    //   think: false -> 1350+ chars of "Wait — there's a subtler problem",
+    //                   a bug asserted then walked back, answer wrong
+    //   think: true  -> 3097 chars into `thinking`, 432 into `content`,
+    //                   three sentences, no narration, answer right
+    //
+    // `createThinkGate` stays: a server that ignores the flag, or a model that
+    // emits `</think>` into content, are both still real. The flag makes the
+    // clean case clean; the gate covers the rest.
+    think: opts.think,
     options: { num_ctx: opts.numCtx },
     messages: [
       { role: 'system', content: `${system}\n\n${UNTRUSTED_NOTICE}` },
@@ -285,6 +347,18 @@ export async function preloadOllama(opts: OllamaOptions = {}): Promise<string> {
   }
 }
 
+/**
+ * Does this error mean the model has no thinking channel?
+ *
+ * ollama answers `think: true` for a non-reasoning model with HTTP 400 and
+ * `"llama3.1:8b" does not support thinking` — measured on 0.32.15. That is a
+ * fact about the model, not about the request, so it is worth one silent retry
+ * with the flag off rather than surfacing as a failed drill.
+ */
+export function isThinkingUnsupported(reason: string): boolean {
+  return /does not support thinking/i.test(reason)
+}
+
 export function ollamaStream(opts: OllamaOptions = {}): StreamFn {
   const host = normaliseHost(opts.host ?? process.env.OLLAMA_HOST)
   const model = opts.model ?? process.env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL
@@ -293,6 +367,10 @@ export function ollamaStream(opts: OllamaOptions = {}): StreamFn {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const apiKey = opts.apiKey ?? process.env.OLLAMA_API_KEY
   const doFetch = opts.fetchImpl ?? fetch
+  // Whether this model accepts `think`. Assumed until the server says no, then
+  // remembered for the life of this stream function — the model cannot change
+  // underneath it, so one discovery is enough.
+  let thinkSupported = true
 
   return async function* (system, messages) {
     const controller = new AbortController()
@@ -310,26 +388,43 @@ export function ollamaStream(opts: OllamaOptions = {}): StreamFn {
 
     try {
       arm()
-      let res: Response
-      try {
-        res = await doFetch(`${host}/api/chat`, {
-          method: 'POST',
-          headers: ollamaHeaders(apiKey),
-          body: JSON.stringify(ollamaChatBody(system, messages, { model, numCtx, keepAlive })),
-          signal: controller.signal,
-        })
-      } catch (error) {
-        if (timedOut) throw new OllamaTimeoutError(timeoutMs, host, model)
-        const detail = error instanceof Error ? error.message : String(error)
-        throw new Error(`could not reach ollama at ${host}: ${detail}`)
+      const send = async (think: boolean): Promise<Response> => {
+        try {
+          return await doFetch(`${host}/api/chat`, {
+            method: 'POST',
+            headers: ollamaHeaders(apiKey),
+            body: JSON.stringify(
+              ollamaChatBody(system, messages, { model, numCtx, keepAlive, think }),
+            ),
+            signal: controller.signal,
+          })
+        } catch (error) {
+          if (timedOut) throw new OllamaTimeoutError(timeoutMs, host, model)
+          const detail = error instanceof Error ? error.message : String(error)
+          throw new Error(`could not reach ollama at ${host}: ${detail}`)
+        }
       }
 
+      let res = await send(thinkSupported)
       if (!res.ok) {
         // ollama puts the reason in a JSON body — "model not found" for an
         // unpulled model, which is the mistake worth naming precisely.
         const body = await res.text().catch(() => '')
         const reason = extractOllamaError(safeParse(body)) ?? body.trim()
-        throw new Error(`ollama returned HTTP ${res.status}${reason ? `: ${reason}` : ''}`)
+        // A model with no thinking channel refuses the flag outright. Retry
+        // once without it and remember, so the second turn does not pay for
+        // the same discovery. Remembered per stream function, not globally:
+        // the model is fixed for the life of one of these.
+        if (thinkSupported && isThinkingUnsupported(reason)) {
+          thinkSupported = false
+          res = await send(false)
+        }
+        if (!res.ok) {
+          const retryBody = res.bodyUsed ? '' : await res.text().catch(() => '')
+          const retryReason = extractOllamaError(safeParse(retryBody)) ?? retryBody.trim() ?? ''
+          const said = thinkSupported ? reason : retryReason || reason
+          throw new Error(`ollama returned HTTP ${res.status}${said ? `: ${said}` : ''}`)
+        }
       }
       if (!res.body) throw new Error('ollama returned no response body')
 

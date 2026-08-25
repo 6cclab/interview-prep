@@ -491,6 +491,20 @@ export function Home({ onChoose }: Props) {
             onStart={(problem) => onChoose({ view: 'assisted', problem })}
           />
 
+          {/* Below the drills for the same reason Pairing is: it is help, and
+              help chosen before you start is a different decision from help
+              reached for while stuck. Practice reuses the coding problem set —
+              the same problems, with the interview taken off them. */}
+          <TrackRow
+            name="Practice"
+            meta="Untimed · nothing recorded"
+            blurb="Just the editor and the tests, with a tutor you can ask anything. No interviewer, no clock, no hint ladder — and nothing written to your record, so it costs nothing to abandon."
+            list={coding}
+            offline={offline}
+            buttonLabel="Practice"
+            onStart={(problem) => onChoose({ view: 'practice', problem })}
+          />
+
           {/* Last, and deliberately below the drills. A coaching link on the drill
               screen is exactly the leak the hint ladder exists to prevent —
               starting one has to be a decision made before you begin, not an

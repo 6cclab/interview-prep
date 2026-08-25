@@ -5,7 +5,10 @@ import {
   describeBackend,
   modelFor,
   transportLabel,
+  TRACK_MODEL_VARS,
+  TRACK_VARS,
 } from './backend'
+import { DEFAULT_OLLAMA_MODEL } from './ollama'
 
 describe('chooseBackend', () => {
   it('refuses to guess when nothing is set', () => {
@@ -99,6 +102,7 @@ describe('backendSummary', () => {
       coding: 'cli',
       coach: 'cli',
       assisted: 'cli',
+      practice: 'cli',
     })
   })
 
@@ -168,4 +172,78 @@ it('names each backend its own model variable', () => {
 
 it('says what an openai drill spends', () => {
   expect(describeBackend('openai', 'gpt-4.1')).toMatch(/credits/)
+})
+
+/**
+ * The model knob, per track.
+ *
+ * The backend was already per track, because the tracks are not equally
+ * forgiving of a weaker model. The model was not, which left a gap with a real
+ * cost: two tracks on ollama had to share one ollama model, so the only way to
+ * give the practice tutor something faster than the drills' 17GB reasoning
+ * model was to move it off ollama entirely. That is what made a tutor reply
+ * take ~78 seconds.
+ */
+describe('per-track model overrides', () => {
+  it('prefers the track’s model over the backend’s global one', () => {
+    expect(
+      modelFor('ollama', { OLLAMA_MODEL: 'big:70b', VOICE_MODEL_PRACTICE: 'small:4b' }, 'practice'),
+    ).toBe('small:4b')
+  })
+
+  it('leaves every other track on the global one', () => {
+    const env = { OLLAMA_MODEL: 'big:70b', VOICE_MODEL_PRACTICE: 'small:4b' }
+    expect(modelFor('ollama', env, 'coding')).toBe('big:70b')
+    expect(modelFor('ollama', env, 'mock')).toBe('big:70b')
+  })
+
+  it('falls back to the built-in default when neither is set', () => {
+    expect(modelFor('ollama', {}, 'practice')).toBe(DEFAULT_OLLAMA_MODEL)
+  })
+
+  // Matches `chooseBackend`, so `VOICE_MODEL_PRACTICE= pnpm mock:web` clears an
+  // inherited export rather than asking ollama for a model named "".
+  it.each(['', '   '])('treats %j as unset rather than as a model name', (value) => {
+    expect(modelFor('ollama', { OLLAMA_MODEL: 'big:70b', VOICE_MODEL_PRACTICE: value }, 'practice')).toBe(
+      'big:70b',
+    )
+  })
+
+  it('applies to every backend, not only ollama', () => {
+    expect(modelFor('cli', { VOICE_MODEL_COACH: 'claude-haiku-4-5-20251001' }, 'coach')).toBe(
+      'claude-haiku-4-5-20251001',
+    )
+    expect(modelFor('openai', { VOICE_MODEL_MOCK: 'gpt-4.1-mini' }, 'mock')).toBe('gpt-4.1-mini')
+  })
+
+  // Two callers legitimately have a backend and no track: the per-backend help
+  // text, and the global resolution itself.
+  it('is unchanged when no track is given', () => {
+    expect(modelFor('ollama', { OLLAMA_MODEL: 'big:70b', VOICE_MODEL_PRACTICE: 'small:4b' })).toBe(
+      'big:70b',
+    )
+  })
+
+  /**
+   * A transcript is the only artifact left after a drill. It has to name the
+   * model *that session* ran on — recording the backend's default while the
+   * track actually ran on an override is the same class of bug that made a
+   * third-person drill unattributable on 2026-08-10.
+   */
+  it('is what the transcript header records', () => {
+    expect(
+      transportLabel('practice', {
+        VOICE_BACKEND: 'ollama',
+        OLLAMA_MODEL: 'big:70b',
+        VOICE_MODEL_PRACTICE: 'small:4b',
+      }),
+    ).toBe('ollama / small:4b')
+  })
+
+  // One per track, like the backend table, rather than "one per track except
+  // the ones that were added later".
+  it('has a variable for every track', () => {
+    expect(TRACK_MODEL_VARS).toHaveLength(TRACK_VARS.length)
+    expect(new Set(TRACK_MODEL_VARS).size).toBe(TRACK_MODEL_VARS.length)
+  })
 })

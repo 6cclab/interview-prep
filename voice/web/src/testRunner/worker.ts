@@ -21,7 +21,14 @@ const ctx = self as unknown as {
 
 ctx.onmessage = async (event): Promise<void> => {
   try {
-    ctx.postMessage({ ok: true, failed: await executeSuite(event.data) })
+    // Posted between tests, so the main thread knows which test is in flight if
+    // it has to `terminate()` this one. Cheap — a suite is tens of tests, not
+    // thousands — and it is the only way the ceiling can tell a slow cost test
+    // from a loop that will not end. See `SuiteProgress`.
+    const { failed, logs } = await executeSuite(event.data, (progress) =>
+      ctx.postMessage({ ok: 'progress', ...progress }),
+    )
+    ctx.postMessage({ ok: true, failed, logs })
   } catch (error) {
     // The candidate's own syntax or runtime error, which is theirs to see —
     // unlike a matcher's message, which would quote the fixture it compared
