@@ -109,11 +109,46 @@ const DEFAULT_HOST = 'http://127.0.0.1:11434'
  * tokens-per-turn times seconds-per-token, not tok/s — is the metric any future
  * comparison has to use.
  *
- * What has **not** been re-measured against `qwen3.8`: the four-turn multi-turn
- * cost, the deliberation-leak rate, and question quality. Those are the three
- * numbers that reversed the single-turn benchmark last time, so treat the table
- * above as history rather than as a comparison that includes the current
- * default. `createThinkGate` stays load-bearing either way.
+ * **Re-measured on 2026-08-25**, four-turn behavioural mocks through the real
+ * `context.ts` prompt, `think: true`, `num_ctx: 32768`, two runs each, read off
+ * ollama's own `eval_count` / `eval_duration` rather than off a stopwatch:
+ *
+ * | | `Qwen3.5:9b` | `qwen3.8:latest` |
+ * |---|---|---|
+ * | Generation rate | 27.5, 27.4 tok/s | 13.8, 14.9 tok/s |
+ * | Tokens per turn | 2391, 1108 | **492, 1106** |
+ * | Seconds per turn | 86.8, 40.4 | 35.7, 74.4 |
+ * | Share of tokens that are deliberation | **0.93, 0.94** | 0.75, 0.74 |
+ * | Deliberation leaked into `content` | 0 of 8 | 0 of 8 |
+ * | Compounded "and" questions | 2, 1 of 4 | 1, 1 of 4 |
+ * | Cold load | — | 12.1s |
+ *
+ * **The standing lesson survives and sharpens.** `qwen3.8` runs at *half* the
+ * 9B's throughput and is no slower per turn, because it spends a third of the
+ * tokens getting to the answer. Throughput remains the wrong metric; the
+ * candidate waits through tokens-per-turn times seconds-per-token.
+ *
+ * **The leak is gone on both, and that is the `think: true` change, not the
+ * model.** Zero deliberation reached `content` in sixteen turns. The gate is
+ * still load-bearing for a server that ignores the flag — but on this server,
+ * with the flag honoured, it has nothing to catch.
+ *
+ * **Three quarters to nine tenths of every generated token is deliberation the
+ * reader never sees.** That is not waste to be optimised away — it is what
+ * bought the clean `content` — but it is the entire latency story, and it is
+ * why the practice tutor needed `VOICE_MODEL_PRACTICE` rather than a faster
+ * transport. See `voice/backend.ts`.
+ *
+ * **Compounding two questions with "and" is still a prompt problem.** Both
+ * models do it on one to two turns in four, which is what the 2026-08-10 note
+ * said and what a naive `?`-counter still misses.
+ *
+ * **Caveat on all of the above: n=2, and the variance is larger than the
+ * difference.** Tokens per turn moved by more than 2x between runs of the
+ * *same* model, so the per-turn seconds here separate nothing. Only the
+ * generation rate (stable to 0.4%) and the deliberation share (stable to 0.01)
+ * are tight enough to lean on. A decision that turns on wall clock needs more
+ * runs than this.
  *
  * Tags are case-sensitive: `Qwen3.5:9b` is published with a capital Q and
  * `qwen3.5:9b` is a 404, whereas `qwen3.8:latest` is lowercase. Override either
