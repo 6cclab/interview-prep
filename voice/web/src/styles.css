@@ -2008,3 +2008,101 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
    into four lines inside a 76px row. */
 .drill-dock .dock__detail--sub { display: none; }
 .drill-dock-copy { flex: 1; max-width: 520px; font-size: 14px; line-height: 21px; color: var(--muted-foreground); text-wrap: pretty; margin: 0; }
+
+/* ── Practice ───────────────────────────────────────────────────────────────
+   The editor, the suite and a tutor, on one screen with no drill chrome.
+
+   Every class here is emitted by `components/Practice.tsx`. That is worth
+   stating because the opposite has already happened three times in this file —
+   rules targeting class names nothing rendered, which look like design rather
+   than breakage. `styles-are-live.test.ts` holds the pairing. */
+.practice { display: flex; flex-direction: column; gap: 20px; padding: 0 24px 32px; }
+
+.practice-header { display: flex; align-items: center; gap: 16px; }
+.practice-header h1 {
+  font-family: var(--drill-mono); font-size: 20px; margin: 0;
+}
+.practice-kicker {
+  margin: 2px 0 0; font-size: 13px; color: var(--muted-foreground);
+}
+
+/* Three columns on a wide screen, stacked below it. The editor is the widest
+   because it is the thing being used; the tutor is narrowest because it is
+   prose and a long measure is harder to read, not easier. */
+.practice-body {
+  display: grid; gap: 20px; align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 1100px) {
+  .practice-body { grid-template-columns: 320px minmax(0, 1fr) 360px; }
+}
+
+.practice-editor { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.practice-tools { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+
+.practice-verdict { margin: 0; font-size: 14px; }
+.practice-verdict ul { margin: 6px 0 0; padding-left: 18px; }
+.practice-verdict--green { color: var(--chart-4); }
+/* The two reds are different colours on purpose. A wrong answer and a correct
+   answer that costs too much are opposite next moves, and the drill's whole
+   verdict taxonomy exists to keep them apart — rendering both in one red would
+   undo that at the last step. */
+.practice-verdict--wrong { color: var(--destructive); }
+.practice-verdict--cost { color: var(--chart-2); }
+.practice-verdict--errored { color: var(--muted-foreground); }
+
+.practice-chat {
+  display: flex; flex-direction: column; gap: 12px; min-width: 0;
+  border: 2px solid var(--border); padding: 16px;
+}
+.practice-chat h2 {
+  font-family: var(--drill-mono); font-size: 12.5px; margin: 0;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground);
+}
+.practice-chat-log {
+  display: flex; flex-direction: column; gap: 14px;
+  max-height: 48vh; overflow-y: auto;
+}
+.practice-chat-empty { margin: 0; font-size: 13px; color: var(--muted-foreground); }
+
+.practice-turn { font-size: 14px; line-height: 21px; }
+.practice-turn p { margin: 0 0 8px; }
+/* The learner's own turns sit in a tinted block so a long conversation still
+   reads as a conversation when scrolled back through. The tutor's replies are
+   unboxed: they are the content, and a border around every one of them turns a
+   column of prose into a column of cards. */
+.practice-turn--user {
+  background: var(--muted); padding: 8px 10px; font-weight: 500;
+}
+/* Code fences are the tutor's most useful output and the one thing that will
+   overflow a 360px column. It scrolls itself rather than widening the page. */
+.practice-turn pre { overflow-x: auto; max-width: 100%; }
+
+.practice-ask { display: flex; flex-direction: column; gap: 8px; }
+/* `transparent`, not a surface token, and that is the fix rather than a dodge.
+   Measured: `:root` carries the *dark* palette (`--card` is oklch(19%),
+   `--background` oklch(13%)) while this page renders light — the light values
+   are scoped to another element. So any surface token read from the root paints
+   a black box on a light panel, which is exactly what `--background` and then
+   `--card` both did. Transparent takes whatever the panel is actually painted,
+   in either theme, and the border is what makes it a field. */
+.practice-ask textarea {
+  width: 100%; resize: vertical; font: inherit; padding: 8px 10px;
+  border: 2px solid var(--border); background: transparent; color: inherit;
+}
+
+/* `ProblemPane` inside practice's grid column. Same override the drill screen
+   needs for the same reason: the pane centres on `--measure`, which overflows a
+   320px column and ran the statement under the editor. */
+.practice-problem { min-width: 0; }
+.practice-problem .problem-pane { max-width: none; margin: 0; }
+/* The pane caps its body at 32vh and scrolls it, which is right above a
+   transcript and wrong in a column with room to spare — it clipped the
+   constraints list mid-line while the page below sat empty. */
+.practice-problem .problem-pane__body { max-height: none; overflow: visible; }
+
+/* CodeMirror scrolls itself rather than widening the column. Without this the
+   grid's `1fr` is sized by the longest line and the editor pushes under the
+   chat panel. */
+.practice-editor .cm-editor { max-width: 100%; }
+.practice-editor .cm-scroller { overflow-x: auto; }

@@ -1,0 +1,256 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Button } from 'brutalkit/button'
+import type { DrillVerdict } from '../../../drill-verdict'
+import { computeVerdictInBrowser } from '../testRunner/clientVerdict'
+import { usePracticeChat, type ChatSend } from '../usePracticeChat'
+import { Markdown } from './Markdown'
+import { ProblemPane } from './ProblemPane'
+import { SolutionEditor } from './SolutionEditor'
+
+/**
+ * Practice: the editor, the suite, and a tutor.
+ *
+ * Not a drill screen, and deliberately not a variant of one. There is no
+ * interviewer, no session, no clock, no hint ladder and no record — so none of
+ * `useVoiceSession`'s machinery is here, and nothing on this screen can start a
+ * session. It is the one mode you can leave halfway through and lose nothing,
+ * because there was nothing being kept.
+ */
+
+/** Where a practice buffer lives. Never the drill's `solution.ts` — see `load`. */
+function storageKey(slug: string): string {
+  return `practice:${slug}`
+}
+
+/**
+ * The buffer, in `localStorage`, and *not* through `useSolution`.
+ *
+ * `useSolution` writes to `/api/coding/:slug/solution`, which locally is the
+ * real `problems/<pattern>/<slug>/solution.ts` and deployed is the row a coding
+ * drill reads back. Practising a problem would therefore overwrite the attempt
+ * you are mid-way through on the same problem — silently, with no undo, from a
+ * mode whose entire premise is that it keeps no record and costs nothing to
+ * abandon.
+ *
+ * So practice keeps its own scratch buffer, per browser. Losing it costs a
+ * practice session; sharing the drill's would cost an attempt.
+ */
+function load(slug: string): string | null {
+  try {
+    return window.localStorage.getItem(storageKey(slug))
+  } catch {
+    // Private browsing, or storage disabled. Practice still works — it just
+    // starts from the stub each time, which is a worse session and not a broken
+    // one.
+    return null
+  }
+}
+
+function save(slug: string, code: string): void {
+  try {
+    window.localStorage.setItem(storageKey(slug), code)
+  } catch {
+    /* see `load` */
+  }
+}
+
+function VerdictLine({ verdict }: { verdict: DrillVerdict }) {
+  if (verdict.kind === 'green') {
+    return <p className="practice-verdict practice-verdict--green">All tests passed.</p>
+  }
+  if (verdict.kind === 'errored') {
+    return <p className="practice-verdict practice-verdict--errored">{verdict.message}</p>
+  }
+  // The two reds are kept apart here for the same reason the whole repo keeps
+  // them apart: a wrong answer and a correct-but-too-slow answer call for
+  // opposite next moves, and collapsing them into "tests failed" is the one
+  // mistake that makes the suite actively misleading.
+  const correctness = verdict.kind === 'correctness-red'
+  // Written out rather than interpolated, and that is not style. A class name
+  // built from a template literal cannot be found by grepping for the class,
+  // which is precisely how three stylesheet rules in this app came to target
+  // names nothing emitted. `styles-are-live.test.ts` reads this file as text.
+  const tone = correctness ? 'practice-verdict--wrong' : 'practice-verdict--cost'
+  return (
+    <div className={`practice-verdict ${tone}`}>
+      <p>{correctness ? 'Wrong answer.' : 'Right answer, too expensive.'}</p>
+      <ul>
+        {verdict.failed.map((name) => (
+          <li key={name}>{name}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+interface Props {
+  problem: string
+  onGoHome(): void
+  /** Test seams. The screen is otherwise untestable without a Worker and a server. */
+  send?: ChatSend
+  runTests?: typeof computeVerdictInBrowser
+}
+
+export function Practice({ problem, onGoHome, send, runTests = computeVerdictInBrowser }: Props) {
+  const [code, setCode] = useState('')
+  const [loaded, setLoaded] = useState(false)
+  const [verdict, setVerdict] = useState<DrillVerdict | null>(null)
+  const [running, setRunning] = useState(false)
+  const [question, setQuestion] = useState('')
+
+  // Read at send time rather than captured, so the tutor is asked about the
+  // buffer as it is now and not as it was when the handler was created.
+  const codeRef = useRef('')
+  codeRef.current = code
+  const chat = usePracticeChat(problem, () => codeRef.current, send)
+
+  // The stub seeds an empty buffer and nothing else. A saved buffer always wins:
+  // re-seeding from the stub on every visit would silently discard work.
+  useEffect(() => {
+    let cancelled = false
+    const saved = load(problem)
+    if (saved !== null) {
+      setCode(saved)
+      setLoaded(true)
+      return
+    }
+    void (async () => {
+      try {
+        const res = await fetch(`/api/coding/${problem}/exercise`)
+        if (!res.ok) throw new Error('no exercise')
+        const body = (await res.json()) as { stub: string }
+        if (!cancelled) setCode(body.stub)
+      } catch {
+        // An empty editor is a worse start than a stub and still a usable one.
+      } finally {
+        if (!cancelled) setLoaded(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [problem])
+
+  const onChange = useCallback(
+    (next: string) => {
+      setCode(next)
+      save(problem, next)
+    },
+    [problem],
+  )
+
+  const onRun = useCallback(() => {
+    if (running) return
+    setRunning(true)
+    // Cleared rather than left showing: a stale green above a running suite
+    // reads as the new run having passed already.
+    setVerdict(null)
+    void (async () => {
+      try {
+        setVerdict(await runTests(problem, codeRef.current))
+      } finally {
+        setRunning(false)
+      }
+    })()
+  }, [problem, running, runTests])
+
+  return (
+    <div className="practice">
+      <header className="practice-header">
+        <Button variant="ghost" size="sm" onClick={onGoHome}>
+          ← All problems
+        </Button>
+        <div>
+          <h1>{problem}</h1>
+          {/* Says what this is, because the screen looks like a drill and is not
+              one. Nothing here is timed, graded or written down. */}
+          <p className="practice-kicker">Practice · nothing is recorded</p>
+        </div>
+      </header>
+
+      <div className="practice-body">
+        {/* Wrapped, because `ProblemPane` styles itself for a full-width slot:
+            it caps at `--measure` and centres on an auto margin. Inside a 320px
+            grid column both are wrong, and the overflow ran the statement
+            underneath the editor. The drill screen solves it the same way — see
+            `.drill-problem` — the pane keeps its markup, the column owns its
+            width. */}
+        <div className="practice-problem">
+          <ProblemPane problem={problem} track="coding" />
+        </div>
+
+        <section className="practice-editor" aria-label="Your code">
+          {loaded ? <SolutionEditor value={code} onChange={onChange} /> : <p>Loading…</p>}
+          <div className="practice-tools">
+            <Button variant="brand" onClick={onRun} disabled={running} aria-busy={running}>
+              {running ? 'Running…' : 'Run tests'}
+            </Button>
+            {verdict && <VerdictLine verdict={verdict} />}
+          </div>
+        </section>
+
+        <section className="practice-chat" aria-label="Ask the tutor">
+          <h2>Ask</h2>
+          <div className="practice-chat-log" role="log" aria-live="polite">
+            {chat.messages.length === 0 && (
+              <p className="practice-chat-empty">
+                Ask anything about this problem — what it is asking for, why a test is failing, or
+                how an approach works.
+              </p>
+            )}
+            {chat.messages.map((message, index) => (
+              <div
+                key={index}
+                className={
+                  message.role === 'assistant'
+                    ? 'practice-turn practice-turn--assistant'
+                    : 'practice-turn practice-turn--user'
+                }
+              >
+                {message.role === 'assistant' ? (
+                  <Markdown source={message.content} />
+                ) : (
+                  <p>{message.content}</p>
+                )}
+              </div>
+            ))}
+          </div>
+          <form
+            className="practice-ask"
+            onSubmit={(event) => {
+              event.preventDefault()
+              chat.ask(question)
+              setQuestion('')
+            }}
+          >
+            <textarea
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              // Enter sends, Shift+Enter breaks the line. A chat box that needs
+              // a mouse to send is a chat box people stop using.
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault()
+                  chat.ask(question)
+                  setQuestion('')
+                }
+              }}
+              placeholder="Ask the tutor…"
+              rows={3}
+              aria-label="Your question"
+            />
+            {chat.streaming ? (
+              <Button type="button" variant="outline" onClick={chat.stop}>
+                Stop
+              </Button>
+            ) : (
+              <Button type="submit" variant="secondary" disabled={question.trim() === ''}>
+                Ask
+              </Button>
+            )}
+          </form>
+        </section>
+      </div>
+    </div>
+  )
+}

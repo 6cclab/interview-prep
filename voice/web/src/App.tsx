@@ -9,6 +9,7 @@ import { LiveRegions } from './components/LiveRegions'
 import { MicCheck } from './components/MicCheck'
 import { DeviceSettings } from './components/DeviceSettings'
 import { Home } from './components/Home'
+import { Practice } from './components/Practice'
 import { History } from './components/History'
 import { HomeHeader } from './components/HomeHeader'
 import { ProblemPane } from './components/ProblemPane'
@@ -86,6 +87,22 @@ export default function App() {
       </div>
     )
   }
+  // Before `DrillScreen`, because practice is not one — no session, no voice,
+  // no transcript. Keyed by problem so switching problems remounts rather than
+  // carrying the previous buffer and conversation across.
+  if (route.view === 'practice') {
+    return (
+      // `app-root`, the same shell home and history use. It is the element that
+      // paints `var(--background)`; a `.app` class exists in no stylesheet, so
+      // this screen had no background at all and fell through to the browser's
+      // white — under a dark theme, which put black text on dark surfaces.
+      <div className="app-root">
+        <HomeHeader dark={dark} onToggleTheme={toggleTheme} />
+        <Practice key={route.problem} problem={route.problem} onGoHome={() => navigate({ view: 'home' })} />
+      </div>
+    )
+  }
+
   return <DrillScreen key={routeHash(route)} route={route} dark={dark} onToggleTheme={toggleTheme} onGoHome={() => navigate({ view: 'home' })} />
 }
 
@@ -225,6 +242,11 @@ const TRACK: Record<Route['view'], TrackConfig> = {
     budgetMinutes: 60,
     paneTrack: 'assisted',
   },
+  // Present for the type, and read by nothing: practice has its own screen and
+  // never reaches `DrillScreen`. A row rather than an exception, so the table
+  // stays "every view has one" and the next reader does not have to find out
+  // why one is missing.
+  practice: { ...UNTRACKED, title: 'Practice', kicker: 'Write code · nothing recorded' },
   home: { ...UNTRACKED, title: 'Mock interview', kicker: 'Behavioral · voice' },
   history: { ...UNTRACKED, title: 'Past drills', kicker: 'Coding drill log' },
 }

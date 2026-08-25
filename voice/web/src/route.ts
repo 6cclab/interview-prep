@@ -43,12 +43,23 @@ export type Route =
    * there is no hint ladder. See `prompts/assisted.md`.
    */
   | { view: 'assisted'; problem: string }
+  /**
+   * Practice: the browser editor, the test runner, and a tutor to type at.
+   *
+   * Not a drill screen, despite looking like one. There is no interviewer, no
+   * session, no clock and no record — so `routeDrill` returns null for it, the
+   * same as `home` and `history`, and nothing here ever calls `start()`.
+   */
+  | { view: 'practice'; problem: string }
   /** Past drills. Not a drill screen — it is read between them. */
   | { view: 'history' }
 
 /** The route's drill, or `null` on `home`. What `start()` is called with. */
 export function routeDrill(route: Route): Drill | null {
-  if (route.view === 'home' || route.view === 'history') return null
+  // `practice` joins them: it has no session to start, which is the whole
+  // point of it. A drill object here would be a `POST /api/session` waiting to
+  // happen.
+  if (route.view === 'home' || route.view === 'history' || route.view === 'practice') return null
   if (route.view === 'mock') {
     // Omitted rather than sent as undefined: the server treats an absent
     // competency as the interviewer's choice, and a key present with no value is
@@ -83,7 +94,7 @@ export function parseRoute(hash: string): Route {
   if (path === '' || path === 'home') return { view: 'home' }
   if (path === 'mock') return { view: 'mock' }
   if (path === 'history') return { view: 'history' }
-  const withProblem = /^(design|coding|coach|debug|assisted|mock)\/([^/]+)$/.exec(path)
+  const withProblem = /^(design|coding|coach|debug|assisted|practice|mock)\/([^/]+)$/.exec(path)
   if (withProblem) {
     let slug: string
     try {
@@ -93,7 +104,14 @@ export function parseRoute(hash: string): Route {
       return { view: 'home' }
     }
     if (PROBLEM_SLUG.test(slug)) {
-      const view = withProblem[1] as 'design' | 'coding' | 'coach' | 'debug' | 'assisted' | 'mock'
+      const view = withProblem[1] as
+        | 'design'
+        | 'coding'
+        | 'coach'
+        | 'debug'
+        | 'assisted'
+        | 'practice'
+        | 'mock'
       return view === 'mock' ? { view: 'mock', competency: slug } : { view, problem: slug }
     }
     // A segment that is not a slug falls through to `home` below, the same as a

@@ -157,3 +157,70 @@ describe('the solution editor', () => {
     expect(styles).not.toContain('.cm-selectionBackground')
   })
 })
+
+/**
+ * Practice's stylesheet, against the component that renders it.
+ *
+ * The same check as the `tok-*` one above, for the same reason: this file has
+ * three times carried rules for class names nothing emitted, and a rule that
+ * matches nothing renders as plausible design rather than as breakage. The
+ * caret, the syntax palette and two `tok-` selectors all reached main that way.
+ */
+describe('the practice screen', () => {
+  const component = code(read('components/Practice.tsx'))
+  const styles = code(read('styles.css'))
+
+  it('styles only classes the component actually renders', () => {
+    const styled = [...styles.matchAll(/\.(practice[A-Za-z-]*)/g)].map((m) => m[1]!)
+    expect(styled.length).toBeGreaterThan(0)
+    const dead = [...new Set(styled)].filter((name) => !component.includes(name))
+    expect(dead).toEqual([])
+  })
+
+  /**
+   * The two reds must not collapse into one colour.
+   *
+   * `correctness-red` and `cost-red` are the repo's central distinction — a
+   * wrong answer and a working answer that costs too much call for opposite
+   * next moves. The verdict survives `drill-verdict.ts` byte-identical only to
+   * be flattened at the last step if these share a swatch.
+   */
+  it('keeps a wrong answer and an expensive one visually apart', () => {
+    const wrong = /\.practice-verdict--wrong\s*\{[^}]*color:\s*var\((--[a-z0-9-]+)\)/.exec(styles)
+    const cost = /\.practice-verdict--cost\s*\{[^}]*color:\s*var\((--[a-z0-9-]+)\)/.exec(styles)
+    expect(wrong?.[1]).toBeTruthy()
+    expect(cost?.[1]).toBeTruthy()
+    expect(wrong?.[1]).not.toBe(cost?.[1])
+  })
+
+  it('is the design system’s Button here too', () => {
+    expect(component).toContain("from 'brutalkit/button'")
+    expect(component).not.toMatch(/<button\b/)
+  })
+})
+
+/**
+ * The shell class, which is a class name and therefore the same trap.
+ *
+ * `.app-root` is the element that paints `var(--background)`. Practice was
+ * written with `className="app"`, which no stylesheet defines — so the screen
+ * had no background, fell through to the browser's white, and rendered black
+ * text on dark-theme surfaces. Nothing failed; it just looked wrong.
+ */
+describe('the practice screen’s shell', () => {
+  const app = code(read('App.tsx'))
+  const styles = code(read('styles.css'))
+
+  it('uses a shell class the stylesheet actually defines', () => {
+    const shells = [...app.matchAll(/className="(app[A-Za-z-]*)"/g)].map((m) => m[1]!)
+    expect(shells).toContain('app-root')
+    for (const shell of new Set(shells)) {
+      // A word boundary, not `includes`. `.app-root` *contains* `.app`, so a
+      // substring check reports the undefined class `.app` as defined — this
+      // guard passed against the very regression it was written for until the
+      // regression was planted and watched.
+      const defined = new RegExp(`\\.${shell}(?![\\w-])`).test(styles)
+      expect(defined, `no stylesheet rule defines .${shell}`).toBe(true)
+    }
+  })
+})
