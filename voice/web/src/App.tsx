@@ -12,7 +12,7 @@ import { Home } from './components/Home'
 import { Practice } from './components/Practice'
 import { History } from './components/History'
 import { HomeHeader } from './components/HomeHeader'
-import { ProblemPane } from './components/ProblemPane'
+import { ProblemColumn } from './components/ProblemColumn'
 import { SolutionEditor } from './components/SolutionEditor'
 import { useSolution, runAfterSave } from './useSolution'
 import { routeDrill, routeHash, useRoute, type Route } from './route'
@@ -781,12 +781,14 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
 
         <div className="drill-body">
           {track.paneTrack !== null && (
-            <div className="drill-problem">
-              {/* No cast: `paneTrack` is already a `ProblemTrack`, where
-                  `route.view` had to be asserted down to one because it can
-                  also be `home` or `history`. */}
-              <ProblemPane problem={problem} track={track.paneTrack} />
-            </div>
+            /* No cast: `paneTrack` is already a `ProblemTrack`, where
+               `route.view` had to be asserted down to one because it can also
+               be `home` or `history`. */
+            <ProblemColumn
+              problem={problem}
+              track={track.paneTrack}
+              className="drill-problem"
+            />
           )}
 
           <main className="drill-main">

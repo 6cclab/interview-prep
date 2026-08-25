@@ -635,112 +635,21 @@ body {
 /* The timed tracks' problem statement (ProblemPane). Sits between the header
    and the transcript, capped so a long prompt scrolls inside itself rather than
    pushing the conversation off screen. */
-/*
- * The drill body: the problem statement and the conversation.
- *
- * Stacked by default, which is what this always was. Given the width, they fold
- * out side by side instead — the prompt is meant to stay readable for the whole
- * drill, and stacking it above the transcript made those two compete for the same
- * vertical space, so on a wide window the prompt was squeezed into a third of the
- * screen while a third of the width sat empty.
- */
-.drill-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
+/* The pre-redesign drill layout lived here: a `.drill-body` that stacked by
+   default and folded into `.drill-body--split` / `.problem-pane-slot` /
+   `.main-column` above 62rem.
 
-/* 62rem, not a device width: the threshold is the point at which two columns each
-   still clear a readable measure. Below it, stacked is genuinely better. */
-@media (min-width: 62rem) {
-  /*
-   * One knob for the whole split screen. Everything below the columns — the dock,
-   * the error banner, the pacing bar, the drill tools — is capped with
-   * `--measure`, so rebinding it here lines all of them up with the two columns
-   * instead of centring them on the viewport. Measured before this: the body sat
-   * at 499..2899 while the dock sat at 1039..2359, sharing an edge with neither
-   * column.
-   */
-  .app-root--split {
-    --measure: var(--measure-split);
-  }
+   Deleted, because the redesign stopped emitting all four class names and
+   nothing has rendered them since — confirmed against a live drill, where
+   `document.querySelector('.problem-pane-slot')` is null. What survived was a
+   hundred lines of measured commentary about viewport widths, describing a
+   layout that no longer runs, and a `.drill-body { flex-direction: column }`
+   that the live rule below had to out-specify with `.drill` to defeat. That
+   scoping is now unnecessary and has gone too.
 
-  .drill-body--split {
-    flex-direction: row;
-    align-items: stretch;
-    /*
-     * Beyond this the two columns stop growing and the window's extra width
-     * becomes margin. Measured, not guessed: on a 3398px viewport an uncapped
-     * split put a 608px prompt and a 1320px transcript against 1470px of dead
-     * space, all of it on one side. Whitespace at that size is unavoidable — the
-     * choice is whether it reads as deliberate margin or as a broken column.
-     */
-    max-width: var(--measure-split);
-    margin-inline: auto;
-    width: 100%;
-  }
+   The live layout is `.drill-body` / `.drill-problem` / `.drill-main`, further
+   down. */
 
-  .drill-body--split .problem-pane-slot {
-    /* Basis, not a fixed width: it gives up space to the transcript first, since
-       the prompt is a fixed amount of text and the conversation only grows. The
-       bounds keep it legible at 62rem and stop it becoming a banner at 150rem. */
-    flex: 0 1 34%;
-    min-width: 22rem;
-    max-width: 44rem;
-    border-bottom: none;
-    border-right: 2px solid var(--border);
-    /* The column itself does not scroll — only the prompt inside it does. Letting
-       the whole slot scroll carried the "Problem" summary out of the top with the
-       text, which is the button that collapses the pane, so it became unreachable
-       exactly when a long prompt made collapsing it useful. */
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .drill-body--split .problem-pane {
-    max-width: none;
-    /*
-     * Reset, not inherited. The stacked layout centres this with `margin: 0 auto`,
-     * and an auto margin on a flex item's cross axis *disables the stretch* — so
-     * the pane sized itself to its content (652px) and overflowed a 476px column,
-     * which `overflow: hidden` then clipped. `min-width: 0` alone could not fix it,
-     * because the box was never being asked to shrink in the first place.
-     */
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    /* Both, and for different axes: `min-height` lets it scroll inside the column,
-       `min-width` lets it narrow to the column instead of being clipped by it. */
-    min-width: 0;
-    flex: 1;
-  }
-
-  /* The prompt takes the whole column below the summary, so the stacked layout's
-     viewport-fraction caps — there to stop it pushing the transcript off screen —
-     no longer apply. `min-height: 0` is what actually lets it scroll inside a
-     flex column rather than growing past it. */
-  .drill-body--split .problem-pane__body,
-  .drill-body--split .problem-pane-slot--roomy .problem-pane__body {
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: none;
-    overflow-y: auto;
-  }
-
-  .drill-body--split .main-column {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-
-  /* Left-aligned rather than centred once it is a column of its own: a centred
-     transcript inside a right-hand column reads as drifting away from the prompt. */
-  .drill-body--split .main-column {
-    justify-content: flex-start;
-  }
-}
 
 
 
@@ -786,17 +695,23 @@ body {
   color: var(--muted-foreground);
 }
 
-.problem-pane-slot--roomy .problem-pane__body {
-  /* Not higher: past this the transcript's empty state gets clipped behind the
-     dock, which reads as a rendering bug rather than as a roomy prompt. */
-  max-height: 52vh;
-}
-
 .problem-pane__body {
   max-height: 32vh;
   overflow-y: auto;
   padding-bottom: 16px;
 }
+
+/* The pane in a column that already has a width and already scrolls — every
+   drill screen and the practice screen. Emitted by `ProblemColumn.tsx`, which
+   is the only way either gets it; the comment there says why it is a component
+   rather than two copies of this block. Four undos of decisions the pane makes
+   for a full-width slot: don't re-measure inside a measured column, don't
+   centre inside a column that is already the width it wants to be, don't pad
+   inside a column that pads itself, and don't open a second scrollbar inside
+   one that scrolls. */
+.problem-column { min-width: 0; }
+.problem-column .problem-pane { max-width: none; margin: 0; padding: 0; }
+.problem-column .problem-pane__body { max-height: none; overflow: visible; padding-bottom: 0; }
 
 /* The rendered problem statement (Markdown.tsx). Prose in the body face, code in
    the mono one — the prompt was previously one undifferentiated monospace block,
@@ -1519,12 +1434,12 @@ ol.md__list {
 
 
 /* --- body: problem | editor + stream --------------------------- */
-/* Scoped, and `flex-direction` stated rather than inherited.
-   The pre-redesign stylesheet has its own `.drill-body` a thousand lines up
-   which sets `flex-direction: column` — appending this at equal specificity
-   would let that declaration survive and stack the problem pane above the
-   editor, which is the one thing this layout exists to stop doing. */
-.drill .drill-body { flex: 1; display: flex; flex-direction: row; min-height: 0; }
+/* Unscoped. This used to be `.drill .drill-body`, written that way purely to
+   out-specify a pre-redesign `.drill-body { flex-direction: column }` a
+   thousand lines up. That rule is gone, so the extra `.drill` is too — a
+   selector carrying a workaround for something that no longer exists reads as
+   a specificity requirement rather than as scar tissue. */
+.drill-body { flex: 1; display: flex; flex-direction: row; min-height: 0; }
 
 .drill-problem {
   width: 560px; flex: none;          /* 62ch measure, not four words */
@@ -1534,7 +1449,10 @@ ol.md__list {
   display: flex; flex-direction: column; gap: var(--gap-5);
   transition: opacity 140ms linear;
 }
-.drill-problem[data-collapsed] { width: 34px; padding: 0; overflow: hidden; }
+/* No `[data-collapsed]` rule. There was one, sizing this column to a 34px
+   spine, and nothing has ever set the attribute — collapsing is the pane's own
+   `__toggle`, which hides the body and leaves the summary. Same species as the
+   dead layout deleted further up: a rule that reads as a feature. */
 .drill-problem h2 { margin: 0; font-size: var(--step-title); line-height: 26px; font-weight: 500; letter-spacing: -0.01em; }
 .drill-problem p { margin: 0; text-wrap: pretty; }
 .drill-problem code {
@@ -1993,14 +1911,10 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
   letter-spacing: 0.1em; text-transform: uppercase;
 }
 
-/* The problem pane, rehomed.
-   `ProblemPane` was written for a full-width slot above the transcript: it
-   centres itself on `--measure` and its body caps at 32vh with a scrollbar of
-   its own. Inside a 560px column that owns its own scrolling, both are wrong —
-   the cap truncated the statement mid-section and the measure clipped the prose
-   horizontally. The pane keeps its markup; the column keeps the scrolling. */
-.drill-problem .problem-pane { max-width: none; margin: 0; padding: 0; }
-.drill-problem .problem-pane__body { max-height: none; overflow: visible; padding-bottom: 0; }
+/* Only the drill's. The pane's own renormalisation lives on `.problem-column`,
+   near the pane itself — see there. This one is drill-specific: the drill
+   column pads itself, so the summary starting flush with that padding is what
+   lines it up with `SOLUTION.TS` across the divider. */
 .drill-problem .problem-pane__summary { padding-top: 0; }
 
 /* Dock copy: the design gives the status its own 190px block and the sentence
@@ -2109,15 +2023,10 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
   border: 2px solid var(--border); background: transparent; color: inherit;
 }
 
-/* `ProblemPane` inside practice's grid column. Same override the drill screen
-   needs for the same reason: the pane centres on `--measure`, which overflows a
-   320px column and ran the statement under the editor. */
-.practice-problem { min-width: 0; }
-.practice-problem .problem-pane { max-width: none; margin: 0; }
-/* The pane caps its body at 32vh and scrolls it, which is right above a
-   transcript and wrong in a column with room to spare — it clipped the
-   constraints list mid-line while the page below sat empty. */
-.practice-problem .problem-pane__body { max-height: none; overflow: visible; }
+/* Nothing here for the pane itself: practice renders `ProblemColumn`, so it
+   gets the same renormalisation the drill does from `.problem-column`. This
+   column has no width or padding of its own — the grid gives it 320px and the
+   grid's own gap is the gutter. */
 
 /* CodeMirror scrolls itself rather than widening the column. Without this the
    grid's `1fr` is sized by the longest line and the editor pushes under the

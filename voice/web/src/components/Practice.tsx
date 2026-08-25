@@ -5,7 +5,7 @@ import { runExerciseInBrowser } from '../testRunner/clientVerdict'
 import type { RunLog } from '../testRunner/types'
 import { usePracticeChat, type ChatSend } from '../usePracticeChat'
 import { Markdown } from './Markdown'
-import { ProblemPane } from './ProblemPane'
+import { ProblemColumn } from './ProblemColumn'
 import { SolutionEditor } from './SolutionEditor'
 
 /**
@@ -220,15 +220,10 @@ export function Practice({ problem, onGoHome, send, runTests = runExerciseInBrow
       </header>
 
       <div className="practice-body">
-        {/* Wrapped, because `ProblemPane` styles itself for a full-width slot:
-            it caps at `--measure` and centres on an auto margin. Inside a 320px
-            grid column both are wrong, and the overflow ran the statement
-            underneath the editor. The drill screen solves it the same way — see
-            `.drill-problem` — the pane keeps its markup, the column owns its
-            width. */}
-        <div className="practice-problem">
-          <ProblemPane problem={problem} track="coding" />
-        </div>
+        {/* `ProblemColumn`, not `ProblemPane`: the pane styles itself for a
+            full-width slot and needs the same four undos here that the drill
+            screen needs. They live in one place now — see the component. */}
+        <ProblemColumn problem={problem} track="coding" className="practice-problem" />
 
         <section className="practice-editor" aria-label="Your code">
           {loaded ? <SolutionEditor value={code} onChange={onChange} /> : <p>Loading…</p>}

@@ -244,3 +244,51 @@ describe('the practice screen’s shell', () => {
     }
   })
 })
+
+/**
+ * The problem column, which is the same duplication seen from the other side.
+ *
+ * `ProblemPane` styles itself for a full-width slot — `--measure`, an auto
+ * margin, 28px of padding, a 32vh scrolling body. Every screen that puts it in
+ * a narrow column beside an editor has to undo all four, and for a while the
+ * two that do each wrote their own copy. They had already drifted: the drill
+ * zeroed the pane's padding and its body's bottom padding, practice did not, so
+ * the identical pane sat inset on one screen and flush on the other because
+ * nobody chose either. `ProblemColumn` is the one copy.
+ */
+describe('the problem column', () => {
+  const styles = code(read('styles.css'))
+  const column = code(read('components/ProblemColumn.tsx'))
+
+  it('is emitted by the component the rules are written for', () => {
+    expect(column).toContain('problem-column')
+    expect(styles).toMatch(/\.problem-column(?![\w-])/)
+  })
+
+  /**
+   * The regression this replaced, stated as a rule: only `.problem-column` may
+   * cancel what the pane decides about its own width and scrolling. A screen
+   * writing its own copy is how the two drifted, and a third screen forgetting
+   * to write one at all is the other half of the same bug — that one renders as
+   * a statement running underneath the editor.
+   */
+  it('is the only thing that cancels the pane’s own measure and scrolling', () => {
+    const rules = [...styles.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    const cancels = rules.filter(
+      ([, selector, body]) =>
+        /\.problem-pane/.test(selector!) && /max-(width|height):\s*none/.test(body!),
+    )
+    expect(cancels.length).toBeGreaterThan(0)
+    for (const [, selector] of cancels) {
+      expect(selector!.trim().startsWith('.problem-column')).toBe(true)
+    }
+  })
+
+  // Both screens reach the pane through the column. Importing `ProblemPane`
+  // directly is exactly how a screen ends up without the undos.
+  it.each(['App.tsx', 'components/Practice.tsx'])('is how %s reaches the pane', (file) => {
+    const source = code(read(file))
+    expect(source).toContain('ProblemColumn')
+    expect(source).not.toMatch(/<ProblemPane\b/)
+  })
+})
