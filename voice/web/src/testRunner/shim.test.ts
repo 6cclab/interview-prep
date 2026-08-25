@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import {
   describe as d,
   expect as e,
@@ -156,5 +156,104 @@ describe('nested describe > it produces vitest-shaped ancestorTitles', () => {
       kind: 'correctness-red',
       failed: ['initOrder — correctness > puts a dependency before the library that needs it'],
     })
+  })
+})
+
+/**
+ * Console capture.
+ *
+ * The point of the feature: a `console.log` in the candidate's code has to
+ * reach the screen, attributed to the test that was running. The point of
+ * these tests is the ways that can go wrong — capture outliving a run, output
+ * from a throwing test being lost, and a log inside a hot loop filling the tab.
+ */
+describe('captured output', () => {
+  beforeEach(() => resetRegistry())
+
+  it('attributes a line to the test that printed it', async () => {
+    d('adds — correctness', () => {
+      t('handles zero', () => {
+        console.log('seen', 1)
+      })
+    })
+    const { logs } = await runSuite()
+    expect(logs).toHaveLength(1)
+    expect(logs[0]?.test).toBe('adds — correctness > handles zero')
+    expect(logs[0]?.text).toBe('seen 1')
+    expect(logs[0]?.level).toBe('log')
+  })
+
+  // A failing test is the one you most want the output of.
+  it('keeps output from a test that then threw', async () => {
+    t('throws after printing', () => {
+      console.log('got here')
+      throw new Error('boom')
+    })
+    const { logs, outcomes } = await runSuite()
+    expect(outcomes[0]?.status).toBe('failed')
+    expect(logs[0]?.text).toBe('got here')
+  })
+
+  /**
+   * The console must be the real one again after a run.
+   *
+   * A capture left installed would swallow every later `console.log` in the
+   * Worker — including, on a second run, the previous run's collector, which
+   * holds a reference to an array nothing reads. Silent, and permanent for the
+   * life of the Worker.
+   */
+  it('restores the console even when a test throws', async () => {
+    const before = console.log
+    t('throws', () => {
+      throw new Error('boom')
+    })
+    await runSuite()
+    expect(console.log).toBe(before)
+  })
+
+  it('records the level, so a warning is not shown as a log', async () => {
+    t('warns', () => {
+      console.warn('careful')
+      console.error('bad')
+    })
+    const { logs } = await runSuite()
+    expect(logs.map((l) => l.level)).toEqual(['warn', 'error'])
+  })
+
+  it('renders objects rather than printing [object Object]', async () => {
+    t('logs an object', () => {
+      console.log({ left: 0, right: 3 })
+    })
+    const { logs } = await runSuite()
+    expect(logs[0]?.text).toBe('{"left":0,"right":3}')
+  })
+
+  // Their object, their problem — but it must not take the run down.
+  it('survives a value that cannot be serialised', async () => {
+    t('logs something circular', () => {
+      const circular: Record<string, unknown> = {}
+      circular.self = circular
+      console.log(circular)
+    })
+    const { logs, outcomes } = await runSuite()
+    expect(outcomes[0]?.status).toBe('passed')
+    expect(logs).toHaveLength(1)
+  })
+
+  /**
+   * A log inside the loop a scale test hammers prints at the rate of the loop.
+   * Uncapped, the debugging aid becomes a way to lock up the tab: every line is
+   * structured-cloned out of the Worker and then rendered.
+   */
+  it('caps runaway output and says that it did', async () => {
+    t('prints far too much', () => {
+      for (let i = 0; i < 5_000; i++) console.log('line', i)
+    })
+    const { logs } = await runSuite()
+    expect(logs.length).toBeLessThan(5_000)
+    expect(logs.at(-1)?.text).toMatch(/output stopped after/)
+    // Kept from the start: the first prints say what the loop is doing; the
+    // five-thousandth is the same line again.
+    expect(logs[0]?.text).toBe('line 0')
   })
 })

@@ -1,7 +1,7 @@
 import { classifyFailures } from '../../../drill-verdict'
 import type { DrillVerdict } from '../../../drill-verdict'
 import type { Exercise } from './execute'
-import type { FailedTest } from './types'
+import type { FailedTest, RunLog } from './types'
 
 /**
  * What the Worker posts back. A thrown error carries the candidate's own
@@ -9,7 +9,7 @@ import type { FailedTest } from './types'
  * a fixture's expected value.
  */
 export type WorkerReply =
-  | { ok: true; failed: FailedTest[] }
+  | { ok: true; failed: FailedTest[]; logs: RunLog[] }
   | { ok: false; message: string }
 
 /** The slice of `Worker` this needs, so a test can supply one. */
@@ -61,18 +61,32 @@ export const SUITE_TIMEOUT_MS = 30_000
  * Returns the same `DrillVerdict` the server's `runDrillTests` returns, so the
  * UI renders a browser-run drill and a server-run one through one path.
  */
+/**
+ * A finished run: the verdict, and whatever the candidate's code printed.
+ *
+ * `logs` is empty on every path that is not a completed run — a timeout kills
+ * the Worker with `terminate()`, and a terminated Worker posts nothing back.
+ * That is a real limit rather than an oversight: the case where logs would help
+ * most (a loop that never ends) is the one case they cannot be recovered from,
+ * because the thread holding them never yields.
+ */
+export interface WorkerRun {
+  verdict: DrillVerdict
+  logs: RunLog[]
+}
+
 export function runInWorker(
   exercise: Exercise,
   spawn: () => RunnerWorker,
   timeoutMs: number = SUITE_TIMEOUT_MS,
   setTimer: typeof setTimeout = setTimeout,
   clearTimer: typeof clearTimeout = clearTimeout,
-): Promise<DrillVerdict> {
+): Promise<WorkerRun> {
   return new Promise((resolve) => {
     const worker = spawn()
     let settled = false
 
-    const finish = (verdict: DrillVerdict): void => {
+    const finish = (verdict: DrillVerdict, logs: RunLog[] = []): void => {
       if (settled) return
       settled = true
       clearTimer(timer)
@@ -80,7 +94,7 @@ export function runInWorker(
       // after a drill holds its heap for the rest of the session, and a
       // candidate re-runs the suite dozens of times in one sitting.
       worker.terminate()
-      resolve(verdict)
+      resolve({ verdict, logs })
     }
 
     const timer = setTimer(() => {
@@ -97,7 +111,10 @@ export function runInWorker(
 
     worker.onmessage = (event): void => {
       const reply = event.data
-      finish(reply.ok ? classifyFailures(reply.failed) : { kind: 'errored', message: reply.message })
+      finish(
+        reply.ok ? classifyFailures(reply.failed) : { kind: 'errored', message: reply.message },
+        reply.ok ? reply.logs : [],
+      )
     }
 
     // A Worker that dies outright — a parse failure in the candidate's code

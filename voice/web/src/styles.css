@@ -2016,7 +2016,17 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
    stating because the opposite has already happened three times in this file —
    rules targeting class names nothing rendered, which look like design rather
    than breakage. `styles-are-live.test.ts` holds the pairing. */
-.practice { display: flex; flex-direction: column; gap: 20px; padding: 0 24px 32px; }
+/* `.app-root` is a fixed-height flex column with `overflow: hidden` — right for
+   the drill screen, where the transcript and the problem pane each scroll
+   themselves. Practice is one long page instead, so it has to own the scrolling
+   or its content is simply unreachable: measured at 1739px of content in a
+   757px box, with the test output entirely below the fold and no way to reach
+   it. `min-height: 0` is the load-bearing half — without it a flex child
+   refuses to shrink below its content and `overflow-y` never engages. */
+.practice {
+  display: flex; flex-direction: column; gap: 20px; padding: 0 24px 32px;
+  flex: 1; min-height: 0; overflow-y: auto;
+}
 
 .practice-header { display: flex; align-items: center; gap: 16px; }
 .practice-header h1 {
@@ -2106,3 +2116,27 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
    chat panel. */
 .practice-editor .cm-editor { max-width: 100%; }
 .practice-editor .cm-scroller { overflow-x: auto; }
+
+/* Console output from the candidate's own code. Monospace, because it is
+   program output and column alignment is often the thing being read. */
+.practice-output { display: flex; flex-direction: column; gap: 10px; }
+.practice-output h2 {
+  font-family: var(--drill-mono); font-size: 12.5px; margin: 0;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground);
+}
+.practice-output-group { display: flex; flex-direction: column; gap: 2px; }
+/* Which test was running. Muted, because it labels the output rather than being
+   it — the same relationship a `describe` name has to a failure list. */
+.practice-output-test {
+  margin: 0; font-size: 12px; color: var(--muted-foreground);
+  font-family: var(--drill-mono);
+}
+.practice-output-lines {
+  margin: 0; padding: 8px 10px; background: var(--muted);
+  font-family: var(--drill-mono); font-size: 12.5px; line-height: 19px;
+  overflow-x: auto; max-height: 40vh; overflow-y: auto;
+  white-space: pre; tab-size: 2;
+}
+.practice-output-line { display: block; }
+.practice-output-line--warn { color: var(--chart-2); }
+.practice-output-line--error { color: var(--destructive); }

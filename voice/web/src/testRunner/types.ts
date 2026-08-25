@@ -32,6 +32,8 @@ export interface TestOutcome {
 
 export interface SuiteResult {
   outcomes: TestOutcome[]
+  /** Whatever the candidate's code printed, in order, attributed to the test that was running. */
+  logs: RunLog[]
 }
 
 /**
@@ -44,4 +46,22 @@ export interface SuiteResult {
 export interface FailedTest {
   suite: string
   title: string
+}
+
+/**
+ * One line the candidate's own code printed while the suite ran.
+ *
+ * Safe to surface, and for the same reason a thrown error is: it is *their*
+ * output. Nothing else writes to the console during a run — neither
+ * `test-utils/` nor any of the suites — so a captured line came from the code
+ * in the editor. That is what keeps this on the right side of the rule
+ * `TestOutcome.debugMessage` exists to enforce: a matcher's message quotes the
+ * fixture it compared against and must never leave the Worker; a `console.log`
+ * quotes whatever the candidate chose to print.
+ */
+export interface RunLog {
+  /** The test that was running, as `suite > title`. */
+  test: string
+  level: 'log' | 'info' | 'warn' | 'error' | 'debug'
+  text: string
 }

@@ -1,4 +1,4 @@
-import type { RegisteredTest, SuiteResult, TestOutcome } from './types'
+import type { RegisteredTest, RunLog, SuiteResult, TestOutcome } from './types'
 
 /**
  * `describe`/`it` collection and execution.
@@ -42,9 +42,58 @@ export function resetRegistry(): void {
  * return value is a no-op, so one code path covers both without inspecting
  * the function first.
  */
+/**
+ * Caps on captured output.
+ *
+ * A `console.log` inside the loop a scale test is hammering produces output at
+ * the rate of the loop — hundreds of thousands of lines, every one of which
+ * would be structured-cloned out of the Worker and then rendered. The cap is
+ * not tidiness; without it the debugging aid is a way to lock up the tab.
+ *
+ * Lines are kept from the *start* rather than the end: the first few prints of
+ * a loop are what tell you what it is doing, and the hundred-thousandth is the
+ * same line again.
+ */
+const MAX_LOG_LINES = 200
+const MAX_LINE_CHARS = 2_000
+
+const LEVELS = ['log', 'info', 'warn', 'error', 'debug'] as const
+
+/** `console.log(a, b)` the way a console shows it, without pulling in a formatter. */
+function render(args: unknown[]): string {
+  return args
+    .map((arg) => {
+      if (typeof arg === 'string') return arg
+      try {
+        return JSON.stringify(arg) ?? String(arg)
+      } catch {
+        // Circular, or something with a throwing getter. Their object, their
+        // problem — but it must not take the run down with it.
+        return String(arg)
+      }
+    })
+    .join(' ')
+}
+
 export async function runSuite(): Promise<SuiteResult> {
   const outcomes: TestOutcome[] = []
+  const logs: RunLog[] = []
+  let truncated = false
+
+  const console_ = globalThis.console
+  const original = LEVELS.map((level) => [level, console_[level]] as const)
+
   for (const test of tests) {
+    const name = [...test.ancestorTitles, test.title].join(' > ')
+    for (const level of LEVELS) {
+      console_[level] = (...args: unknown[]): void => {
+        if (logs.length >= MAX_LOG_LINES) {
+          truncated = true
+          return
+        }
+        logs.push({ test: name, level, text: render(args).slice(0, MAX_LINE_CHARS) })
+      }
+    }
     try {
       await test.fn()
       outcomes.push({ ancestorTitles: test.ancestorTitles, title: test.title, status: 'passed' })
@@ -55,8 +104,23 @@ export async function runSuite(): Promise<SuiteResult> {
         status: 'failed',
         debugMessage: error instanceof Error ? error.message : String(error),
       })
+    } finally {
+      // Restored inside the loop, not after it: a test that throws must not
+      // leave the next one's output going into a stale capture, and a suite
+      // that throws during registration must not leave the Worker's console
+      // permanently replaced.
+      for (const [level, fn] of original) console_[level] = fn
     }
   }
+
+  if (truncated) {
+    logs.push({
+      test: '',
+      level: 'warn',
+      text: `… output stopped after ${MAX_LOG_LINES} lines.`,
+    })
+  }
+
   resetRegistry()
-  return { outcomes }
+  return { outcomes, logs }
 }

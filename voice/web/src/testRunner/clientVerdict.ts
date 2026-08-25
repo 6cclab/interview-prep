@@ -1,5 +1,5 @@
 import type { DrillVerdict } from '../../../drill-verdict'
-import { runInWorker, type RunnerWorker } from './runner'
+import { runInWorker, type RunnerWorker, type WorkerRun } from './runner'
 
 /** What `GET /api/coding/<slug>/exercise` returns. */
 interface ExerciseResponse {
@@ -28,21 +28,39 @@ function spawnWorker(): RunnerWorker {
  * quietly went green because the network dropped is worse than one that says it
  * could not run — the candidate would take a false green as a solve.
  */
-export async function computeVerdictInBrowser(
+export async function runExerciseInBrowser(
   slug: string,
   /** The editor buffer. The stub is only ever the seed for an empty one. */
   solution: string,
   fetchFn: typeof fetch = fetch,
   spawn: () => RunnerWorker = spawnWorker,
-): Promise<DrillVerdict> {
+): Promise<WorkerRun> {
   let exercise: ExerciseResponse
   try {
     const res = await fetchFn(`/api/coding/${slug}/exercise`)
-    if (!res.ok) return { kind: 'errored', message: 'could not load the exercise' }
+    if (!res.ok) {
+      return { verdict: { kind: 'errored', message: 'could not load the exercise' }, logs: [] }
+    }
     exercise = (await res.json()) as ExerciseResponse
   } catch {
-    return { kind: 'errored', message: 'could not reach the drill server' }
+    return { verdict: { kind: 'errored', message: 'could not reach the drill server' }, logs: [] }
   }
 
   return runInWorker({ test: exercise.test, utils: exercise.utils, solution }, spawn)
+}
+
+/**
+ * The verdict alone, for the drill path.
+ *
+ * A coding drill feeds its verdict to the interviewer and shows nothing else;
+ * printed output has no slot there and no meaning in a spoken round. Practice
+ * calls `runExerciseInBrowser` directly and renders both.
+ */
+export async function computeVerdictInBrowser(
+  slug: string,
+  solution: string,
+  fetchFn: typeof fetch = fetch,
+  spawn: () => RunnerWorker = spawnWorker,
+): Promise<DrillVerdict> {
+  return (await runExerciseInBrowser(slug, solution, fetchFn, spawn)).verdict
 }

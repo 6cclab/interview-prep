@@ -2,6 +2,7 @@ import { transform } from 'sucrase'
 import { describe, it, resetRegistry, runSuite } from './registry'
 import { expect } from './expect'
 import { toFailedTests } from './shim'
+import type { RunLog } from './types'
 import type { FailedTest } from './types'
 
 /**
@@ -48,7 +49,13 @@ function toCjs(src: string): string {
  * `voice/drill-tests.ts` states: a message quotes the fixture it compared
  * against, and the fixture is part of the answer.
  */
-export async function executeSuite(exercise: Exercise): Promise<FailedTest[]> {
+/** What one run produced: which tests failed, and what the candidate's code printed. */
+export interface SuiteRun {
+  failed: FailedTest[]
+  logs: RunLog[]
+}
+
+export async function executeSuite(exercise: Exercise): Promise<SuiteRun> {
   const modules = new Map<string, unknown>()
 
   const require = (specifier: string): unknown => {
@@ -75,5 +82,10 @@ export async function executeSuite(exercise: Exercise): Promise<FailedTest[]> {
   resetRegistry()
   new Function('require', 'module', 'exports', toCjs(exercise.test))(require, { exports: {} }, {})
 
-  return toFailedTests(await runSuite())
+  const result = await runSuite()
+  // Names only, and the candidate's own printed output. `toFailedTests` drops
+  // the matcher messages — those quote the fixture they compared against.
+  // `logs` are not covered by that rule: nothing but the code in the editor
+  // writes to the console during a run.
+  return { failed: toFailedTests(result), logs: result.logs }
 }

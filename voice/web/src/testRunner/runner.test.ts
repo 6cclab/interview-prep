@@ -34,15 +34,15 @@ describe('runInWorker', () => {
   it('classifies a passing run as green', async () => {
     const worker = fakeWorker()
     const verdict = runInWorker(EXERCISE, () => worker)
-    reply(worker, { ok: true, failed: [] })
-    expect((await verdict).kind).toBe('green')
+    reply(worker, { ok: true, failed: [], logs: [] })
+    expect((await verdict).verdict.kind).toBe('green')
   })
 
   it('classifies failures through the same logic the server uses', async () => {
     const worker = fakeWorker()
     const verdict = runInWorker(EXERCISE, () => worker)
-    reply(worker, { ok: true, failed: [{ suite: 'twoSum — correctness', title: 'finds a pair' }] })
-    expect((await verdict).kind).not.toBe('green')
+    reply(worker, { ok: true, failed: [{ suite: 'twoSum — correctness', title: 'finds a pair' }], logs: [] })
+    expect((await verdict).verdict.kind).not.toBe('green')
   })
 
   // The reason a Worker is used at all. A spinning thread ignores every
@@ -64,7 +64,7 @@ describe('runInWorker', () => {
       (() => {}) as unknown as typeof clearTimeout,
     )
     fire?.()
-    expect((await verdict).kind).toBe('errored')
+    expect((await verdict).verdict.kind).toBe('errored')
     expect(worker.terminated).toBe(1)
   })
 
@@ -72,7 +72,7 @@ describe('runInWorker', () => {
     const worker = fakeWorker()
     const verdict = runInWorker(EXERCISE, () => worker)
     worker.onerror?.({})
-    expect((await verdict).kind).toBe('errored')
+    expect((await verdict).verdict.kind).toBe('errored')
     expect(worker.terminated).toBe(1)
   })
 
@@ -81,7 +81,7 @@ describe('runInWorker', () => {
   it('kills the thread on a normal finish too, not only on timeout', async () => {
     const worker = fakeWorker()
     const verdict = runInWorker(EXERCISE, () => worker)
-    reply(worker, { ok: true, failed: [] })
+    reply(worker, { ok: true, failed: [], logs: [] })
     await verdict
     expect(worker.terminated).toBe(1)
   })
@@ -89,7 +89,7 @@ describe('runInWorker', () => {
   it('ignores a late reply after it has already settled', async () => {
     const worker = fakeWorker()
     const verdict = runInWorker(EXERCISE, () => worker)
-    reply(worker, { ok: true, failed: [] })
+    reply(worker, { ok: true, failed: [], logs: [] })
     await verdict
     reply(worker, { ok: false, message: 'too late' })
     expect(worker.terminated).toBe(1)

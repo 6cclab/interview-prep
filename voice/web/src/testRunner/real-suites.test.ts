@@ -64,7 +64,7 @@ describe('every authored suite runs through the browser runner', () => {
   })
 
   it.each(problems)('$pattern/$slug executes and reports against a stub', async ({ pattern, slug }) => {
-    const failed = await executeSuite(asExercise(pattern, slug))
+    const { failed } = await executeSuite(asExercise(pattern, slug))
     // Every `it` in the suite must fail, because a stub throws in all of them.
     // Asserting the count rather than "more than none" is the point: a suite
     // that died on import also reports a failure, and that is exactly the
@@ -90,7 +90,9 @@ describe('every authored suite runs through the browser runner', () => {
     const exercise = asExercise(pattern, slug)
     const before = await executeSuite(exercise)
     const after = await executeSuite({ ...exercise, test: stripSuiteComments(exercise.test) })
-    expect(after.map((f) => `${f.suite} > ${f.title}`)).toEqual(before.map((f) => `${f.suite} > ${f.title}`))
+    const names = (run: { failed: { suite: string; title: string }[] }) =>
+      run.failed.map((f) => `${f.suite} > ${f.title}`)
+    expect(names(after)).toEqual(names(before))
   })
 
   /**
@@ -187,6 +189,6 @@ describe('every authored suite runs through the browser runner', () => {
     const first = asExercise(problems[0]!.pattern, problems[0]!.slug)
     await executeSuite(first)
     const again = await executeSuite(first)
-    expect(again).toHaveLength((first.test.match(/\bit\(/g) ?? []).length)
+    expect(again.failed).toHaveLength((first.test.match(/\bit\(/g) ?? []).length)
   })
 })

@@ -21,7 +21,8 @@ const ctx = self as unknown as {
 
 ctx.onmessage = async (event): Promise<void> => {
   try {
-    ctx.postMessage({ ok: true, failed: await executeSuite(event.data) })
+    const { failed, logs } = await executeSuite(event.data)
+    ctx.postMessage({ ok: true, failed, logs })
   } catch (error) {
     // The candidate's own syntax or runtime error, which is theirs to see —
     // unlike a matcher's message, which would quote the fixture it compared

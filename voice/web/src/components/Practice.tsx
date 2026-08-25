@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from 'brutalkit/button'
 import type { DrillVerdict } from '../../../drill-verdict'
-import { computeVerdictInBrowser } from '../testRunner/clientVerdict'
+import { runExerciseInBrowser } from '../testRunner/clientVerdict'
+import type { RunLog } from '../testRunner/types'
 import { usePracticeChat, type ChatSend } from '../usePracticeChat'
 import { Markdown } from './Markdown'
 import { ProblemPane } from './ProblemPane'
@@ -83,18 +84,65 @@ function VerdictLine({ verdict }: { verdict: DrillVerdict }) {
   )
 }
 
+/**
+ * What the candidate's code printed, grouped by the test that was running.
+ *
+ * Grouped rather than a flat stream because the same line printed from inside
+ * six different tests is six different facts, and a flat log makes them look
+ * like one loop. Vitest groups the same way, for the same reason.
+ *
+ * Only rendered when there is something to show: an empty "Output" heading on
+ * every run trains you to ignore the area where the output will be.
+ */
+function RunOutput({ logs }: { logs: RunLog[] }) {
+  const groups: { test: string; lines: RunLog[] }[] = []
+  for (const line of logs) {
+    const last = groups.at(-1)
+    if (last && last.test === line.test) last.lines.push(line)
+    else groups.push({ test: line.test, lines: [line] })
+  }
+  return (
+    <section className="practice-output" aria-label="Console output">
+      <h2>Output</h2>
+      {groups.map((group, index) => (
+        <div key={index} className="practice-output-group">
+          {group.test !== '' && <p className="practice-output-test">{group.test}</p>}
+          <pre className="practice-output-lines">
+            {group.lines.map((line, lineIndex) => (
+              <span
+                key={lineIndex}
+                className={
+                  line.level === 'error'
+                    ? 'practice-output-line practice-output-line--error'
+                    : line.level === 'warn'
+                      ? 'practice-output-line practice-output-line--warn'
+                      : 'practice-output-line'
+                }
+              >
+                {line.text}
+                {'\n'}
+              </span>
+            ))}
+          </pre>
+        </div>
+      ))}
+    </section>
+  )
+}
+
 interface Props {
   problem: string
   onGoHome(): void
   /** Test seams. The screen is otherwise untestable without a Worker and a server. */
   send?: ChatSend
-  runTests?: typeof computeVerdictInBrowser
+  runTests?: typeof runExerciseInBrowser
 }
 
-export function Practice({ problem, onGoHome, send, runTests = computeVerdictInBrowser }: Props) {
+export function Practice({ problem, onGoHome, send, runTests = runExerciseInBrowser }: Props) {
   const [code, setCode] = useState('')
   const [loaded, setLoaded] = useState(false)
   const [verdict, setVerdict] = useState<DrillVerdict | null>(null)
+  const [logs, setLogs] = useState<RunLog[]>([])
   const [running, setRunning] = useState(false)
   const [question, setQuestion] = useState('')
 
@@ -145,9 +193,12 @@ export function Practice({ problem, onGoHome, send, runTests = computeVerdictInB
     // Cleared rather than left showing: a stale green above a running suite
     // reads as the new run having passed already.
     setVerdict(null)
+    setLogs([])
     void (async () => {
       try {
-        setVerdict(await runTests(problem, codeRef.current))
+        const run = await runTests(problem, codeRef.current)
+        setVerdict(run.verdict)
+        setLogs(run.logs)
       } finally {
         setRunning(false)
       }
@@ -187,6 +238,7 @@ export function Practice({ problem, onGoHome, send, runTests = computeVerdictInB
             </Button>
             {verdict && <VerdictLine verdict={verdict} />}
           </div>
+          {logs.length > 0 && <RunOutput logs={logs} />}
         </section>
 
         <section className="practice-chat" aria-label="Ask the tutor">
