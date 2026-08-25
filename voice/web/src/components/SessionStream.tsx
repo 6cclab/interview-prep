@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from 'brutalkit/button'
+import { Bubble, BubbleContent } from 'brutalkit/bubble'
+import { Message, MessageContent, MessageGroup, MessageHeader } from 'brutalkit/message'
 import type { CostMeasurement, DebugVerdict, DrillVerdict } from '../types'
 import { liveIndex, type StreamEntry } from '../stream'
 import { Markdown } from './Markdown'
@@ -246,6 +248,61 @@ function emptyCopy(partner: string): string {
     : 'The interviewer asks out loud. Press once to answer, once when you are done.'
 }
 
+/**
+ * One spoken turn, as the design system's `Message`.
+ *
+ * `align` is what makes a transcript read as a conversation rather than as a
+ * log: the interviewer sits left, the candidate right. Both are kept — the
+ * candidate's own words are half the record, and the thing scrolled back to
+ * weeks later is usually what *they* said, not what they were asked.
+ *
+ * `data-live` stays on the outer `Message` and keeps doing what it did: the
+ * most recent interviewer turn is `--foreground` at `--step-live` while
+ * everything above it sits at `--muted-foreground`. That contrast is what makes
+ * a wall of prose readable as a conversation with a current position in it, so
+ * it survives the move to `Message` rather than being traded for it.
+ */
+function SpeechEntry({
+  speaker,
+  text,
+  meta,
+  partner,
+  live,
+  streaming = false,
+}: {
+  speaker: 'andre' | 'interviewer'
+  text: string
+  meta?: string
+  partner: string
+  live: boolean
+  streaming?: boolean
+}) {
+  const them = speaker === 'interviewer'
+  return (
+    <Message align={them ? 'start' : 'end'} data-live={live ? '' : undefined} className="drill-message">
+      <MessageContent>
+        <MessageHeader>
+          {them ? partner : 'You'}
+          {meta ? ` · ${meta}` : ''}
+        </MessageHeader>
+        {/* Both variants are neutral, and that is a constraint rather than a
+            missed opportunity. Colour on this screen is spoken for: red means
+            the answer is wrong, ochre means it is right and too expensive, and
+            those two readings are the ones `drill.md` is most insistent about
+            not blurring. A tinted "your turn" bubble would put a third colour
+            in the same column and spend it on which of two people was talking.
+            Filled against outlined separates them without any. */}
+        <Bubble variant={them ? 'muted' : 'outline'}>
+          <BubbleContent>
+            <TurnBody text={text} />
+            {streaming && <span className="drill-caret" aria-hidden="true" />}
+          </BubbleContent>
+        </Bubble>
+      </MessageContent>
+    </Message>
+  )
+}
+
 export function SessionStream({
   stream,
   interimSentences,
@@ -327,43 +384,49 @@ export function SessionStream({
           </div>
         )}
 
-        {stream.map((entry, i) => (
-          <div
-            className="drill-entry"
-            key={`${entry.kind}-${entry.at}-${i}`}
-            data-kind={entry.kind}
-            data-live={i === live ? '' : undefined}
-          >
-            <time>{meta[i] ?? ''}</time>
-            {entry.kind === 'speech' && <TurnBody text={entry.text} />}
-            {entry.kind === 'verdict' && <DrillVerdictEntry verdict={entry.verdict} hintRung={hintRung} />}
-            {entry.kind === 'debug-verdict' && <DebugVerdictEntry verdict={entry.verdict} />}
-            {entry.kind === 'hint' && (
-              <div className="drill-hint-entry">
-                <header className="drill-label">
-                  Rung {entry.rung} of 4 spent
-                </header>
-                <p>
-                  The interviewer gave rung {entry.rung}. {4 - entry.rung}{' '}
-                  {4 - entry.rung === 1 ? 'rung' : 'rungs'} left.
-                </p>
-              </div>
-            )}
-          </div>
-        ))}
+        <MessageGroup className="drill-messages">
+        {stream.map((entry, i) =>
+          entry.kind === 'speech' ? (
+            <SpeechEntry
+              key={`${entry.kind}-${entry.at}-${i}`}
+              speaker={entry.speaker}
+              text={entry.text}
+              meta={meta[i] ?? ''}
+              partner={partner}
+              live={i === live}
+            />
+          ) : (
+            // Not messages, and deliberately not rendered as any. A verdict is
+            // a measurement the suite produced and a hint is a fact about the
+            // round; neither was said by anyone, and giving them a speaker and
+            // a side would be the screen claiming something happened that did
+            // not. They keep the timestamped-gutter shape.
+            <div className="drill-entry" key={`${entry.kind}-${entry.at}-${i}`} data-kind={entry.kind}>
+              <time>{meta[i] ?? ''}</time>
+              {entry.kind === 'verdict' && <DrillVerdictEntry verdict={entry.verdict} hintRung={hintRung} />}
+              {entry.kind === 'debug-verdict' && <DebugVerdictEntry verdict={entry.verdict} />}
+              {entry.kind === 'hint' && (
+                <div className="drill-hint-entry">
+                  <header className="drill-label">
+                    Rung {entry.rung} of 4 spent
+                  </header>
+                  <p>
+                    The interviewer gave rung {entry.rung}. {4 - entry.rung}{' '}
+                    {4 - entry.rung === 1 ? 'rung' : 'rungs'} left.
+                  </p>
+                </div>
+              )}
+            </div>
+          ),
+        )}
 
         {/* The in-progress reply. Rendered as a live entry rather than appended
             to the record, because it is not a turn until the server says so —
             the `entry` SSE event is what makes it one. */}
         {interimSentences.length > 0 && (
-          <div className="drill-entry" data-live="" data-kind="speech">
-            <time>{partner}</time>
-            <p>
-              {interimSentences.join(' ')}
-              {streaming && <span className="drill-caret" aria-hidden="true" />}
-            </p>
-          </div>
+          <SpeechEntry speaker="interviewer" text={interimSentences.join(' ')} partner={partner} live streaming={streaming} />
         )}
+        </MessageGroup>
       </div>
 
       {!pinned && (

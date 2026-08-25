@@ -3,8 +3,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 /**
- * The primary action uses the design system's `Button`, and the editor's
- * caret is visible.
+ * Styles that are actually reachable, and components that come from the design
+ * system rather than from here.
  *
  * Both guards exist because of the same failure, twice. `styles.css` carried
  * rules for class names nothing emitted, and the app rendered a black
@@ -64,6 +64,42 @@ describe('the primary action', () => {
   it('keeps the busy indicator, since Button has no variant for one', () => {
     expect(component).toContain('primary-wait')
     expect(styles).toMatch(/\.primary-wait::after \{[^}]*animation:/)
+  })
+})
+
+describe('the session stream', () => {
+  const stream = code(read('components/SessionStream.tsx'))
+
+  // A transcript is a conversation, and the design system has a component for
+  // one. Hand-rolling it is how the primary action ended up invisible.
+  it('renders spoken turns with the design system’s Message', () => {
+    expect(stream).toContain("from 'brutalkit/message'")
+    expect(stream).toMatch(/<Message\b/)
+    expect(stream).toMatch(/<MessageContent\b/)
+  })
+
+  // Left and right is the whole reason this reads as a conversation rather
+  // than a log, and it is `Message`'s own prop rather than a class here.
+  it('gives the two speakers opposite sides', () => {
+    expect(stream).toMatch(/align=\{.*'start'.*'end'.*\}/)
+  })
+
+  // Colour on this screen is spoken for: red means the answer is wrong, ochre
+  // means right and too expensive. A tinted bubble would put a third colour in
+  // the same column and spend it on which of two people was talking.
+  it('keeps the bubbles neutral, because colour here means a verdict', () => {
+    const variants = [...stream.matchAll(/<Bubble variant=\{[^}]*\}/g)].map((m) => m[0]!)
+    expect(variants.length).toBeGreaterThan(0)
+    for (const v of variants) {
+      expect(v).not.toMatch(/'(destructive|default|tinted)'/)
+    }
+  })
+
+  // Verdicts and hints were said by nobody. Giving them a speaker and a side
+  // would be the screen claiming something happened that did not.
+  it('does not render verdicts or hints as messages', () => {
+    const verdictBranch = /entry\.kind === 'verdict'[\s\S]{0,400}/.exec(stream)?.[0] ?? ''
+    expect(verdictBranch).not.toMatch(/<Message\b/)
   })
 })
 
