@@ -5,6 +5,7 @@ import {
   normaliseHost,
   ollamaChatBody,
   ollamaHeaders,
+  isThinkingUnsupported,
   ollamaStream,
   preloadOllama,
 } from './ollama'
@@ -75,6 +76,7 @@ describe('ollamaChatBody', () => {
     model: 'qwen3:30b-a3b',
     numCtx: 32768,
     keepAlive: '30m',
+    think: true,
   })
 
   it('sends the system prompt as a system-role message ahead of the turns', () => {
@@ -322,5 +324,95 @@ describe('gateway authentication', () => {
     await expect(drain(stream('SYSTEM', []))).rejects.toThrow(
       expect.not.stringContaining('secret-token') as unknown as string,
     )
+  })
+})
+
+/**
+ * Asking for a thinking channel, and coping when there isn't one.
+ *
+ * `think` was hard `false` until this. The reasoning was that ollama 0.24.0
+ * ignored the flag, so the gate had to do the work regardless — true, and the
+ * wrong conclusion: a reasoning model told not to use a thinking channel does
+ * not stop reasoning. It reasons in prose, into `content`, untagged, where the
+ * gate cannot see it. Measured on `qwen3.8:latest` via ollama 0.32.15, the same
+ * question answered in 1350 rambling characters with the flag off and 432 clean
+ * ones with it on, the deliberation going to `thinking` where it belongs.
+ */
+describe('the thinking channel', () => {
+  it('asks for one', () => {
+    const body = ollamaChatBody('S', [{ role: 'user', content: 'hi' }], {
+      model: 'm',
+      numCtx: 8192,
+      keepAlive: '30m',
+      think: true,
+    })
+    expect(body.think).toBe(true)
+  })
+
+  // ollama 0.32.15 answers `think: true` for a non-reasoning model with HTTP
+  // 400 and this exact sentence. It is a fact about the model, not the request.
+  it('recognises a model that has no thinking channel', () => {
+    expect(isThinkingUnsupported('"llama3.1:8b" does not support thinking')).toBe(true)
+    expect(isThinkingUnsupported('model "ghost" not found')).toBe(false)
+  })
+
+  it('retries without the flag rather than failing the turn', async () => {
+    const calls: Array<{ think: unknown }> = []
+    const impl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? 'null')) as { think: unknown }
+      calls.push({ think: body.think })
+      if (body.think === true) {
+        return new Response(JSON.stringify({ error: '"m" does not support thinking' }), {
+          status: 400,
+        })
+      }
+      return new Response(`${contentLine('the answer')}\n`, { status: 200 })
+    }) as unknown as typeof fetch
+
+    const stream = ollamaStream({ host: 'http://box:11434', model: 'm', fetchImpl: impl })
+    expect((await drain(stream('S', [{ role: 'user', content: 'hi' }]))).join('')).toContain(
+      'the answer',
+    )
+    expect(calls.map((c) => c.think)).toEqual([true, false])
+  })
+
+  /**
+   * And remembers. Rediscovering this on every turn costs a wasted round trip
+   * per turn for the whole drill — the model cannot change under a stream
+   * function, so one refusal settles it.
+   */
+  it('does not re-ask a model that has already refused', async () => {
+    const calls: unknown[] = []
+    const impl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? 'null')) as { think: unknown }
+      calls.push(body.think)
+      if (body.think === true) {
+        return new Response(JSON.stringify({ error: '"m" does not support thinking' }), {
+          status: 400,
+        })
+      }
+      return new Response(`${contentLine('ok')}\n`, { status: 200 })
+    }) as unknown as typeof fetch
+
+    const stream = ollamaStream({ host: 'http://box:11434', model: 'm', fetchImpl: impl })
+    await drain(stream('S', [{ role: 'user', content: 'one' }]))
+    await drain(stream('S', [{ role: 'user', content: 'two' }]))
+    expect(calls).toEqual([true, false, false])
+  })
+
+  // Any other 400 is a real failure and must still surface — a retry loop that
+  // swallows "model not found" would turn a typo into a silent empty reply.
+  it('does not retry an unrelated failure', async () => {
+    const calls: unknown[] = []
+    const impl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      calls.push(JSON.parse(String(init?.body ?? 'null')).think)
+      return new Response(JSON.stringify({ error: 'model "ghost" not found' }), { status: 404 })
+    }) as unknown as typeof fetch
+
+    const stream = ollamaStream({ host: 'http://box:11434', model: 'ghost', fetchImpl: impl })
+    await expect(drain(stream('S', [{ role: 'user', content: 'hi' }]))).rejects.toThrow(
+      /not found/,
+    )
+    expect(calls).toEqual([true])
   })
 })
