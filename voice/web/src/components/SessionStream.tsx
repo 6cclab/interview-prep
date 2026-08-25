@@ -363,7 +363,7 @@ export function SessionStream({
           and it is inside the wrap, above the scroller, so appearing costs the
           stream height rather than moving the editor above it. */}
       {!pinned && (
-        <div className="drill-stream-head drill-label">
+        <div className="drill-stream-head workbench__label">
           Scrolled up{behindBy > 0 && ` · ${behindBy} newer ${behindBy === 1 ? 'entry' : 'entries'}`}
         </div>
       )}
@@ -407,7 +407,7 @@ export function SessionStream({
               {entry.kind === 'debug-verdict' && <DebugVerdictEntry verdict={entry.verdict} />}
               {entry.kind === 'hint' && (
                 <div className="drill-hint-entry">
-                  <header className="drill-label">
+                  <header className="workbench__label">
                     Rung {entry.rung} of 4 spent
                   </header>
                   <p>

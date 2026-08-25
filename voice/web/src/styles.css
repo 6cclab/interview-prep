@@ -635,7 +635,7 @@ body {
 /* The timed tracks' problem statement (ProblemPane). Sits between the header
    and the transcript, capped so a long prompt scrolls inside itself rather than
    pushing the conversation off screen. */
-/* The pre-redesign drill layout lived here: a `.drill-body` that stacked by
+/* The pre-redesign drill layout lived here: a `.workbench` that stacked by
    default and folded into `.drill-body--split` / `.problem-pane-slot` /
    `.main-column` above 62rem.
 
@@ -643,11 +643,11 @@ body {
    nothing has rendered them since — confirmed against a live drill, where
    `document.querySelector('.problem-pane-slot')` is null. What survived was a
    hundred lines of measured commentary about viewport widths, describing a
-   layout that no longer runs, and a `.drill-body { flex-direction: column }`
+   layout that no longer runs, and a `.workbench { flex-direction: column }`
    that the live rule below had to out-specify with `.drill` to defeat. That
    scoping is now unnecessary and has gone too.
 
-   The live layout is `.drill-body` / `.drill-problem` / `.drill-main`, further
+   The live layout is `.workbench` / `.workbench__problem` / `.workbench__main`, further
    down. */
 
 
@@ -1328,7 +1328,7 @@ ol.md__list {
 
    Reconciliation with the stylesheet above, which the handoff flagged as the
    first implementation step: of the thirty-one `.drill-*` classes it defines,
-   exactly one already existed — `.drill-body` — and it named the same thing.
+   exactly one already existed — `.workbench` — and it named the same thing.
    That one is scoped and made explicit below. Every other selector is new, so
    the rest is appended as authored.
 
@@ -1349,6 +1349,20 @@ ol.md__list {
    agree. Labels are 10.5/14 — exactly half the body rhythm — so
    a label plus one line of content always measures 36px.
 --------------------------------------------------------------- */
+/* The working surface's scale, on every screen that has one.
+ *
+ * This block used to be scoped to `.drill`, and that single fact was why the
+ * practice screen "didn't match any of our other layouts". Practice is not
+ * inside `.drill`, so `--drill-mono`, every `--step-*`, every `--gap-*` and
+ * every `--lead-*` resolved to nothing there — which does not fail loudly, it
+ * silently falls back to the browser's defaults. The same markup and the same
+ * class names therefore rendered in a different font at a different size on a
+ * different spacing grid, and the screen read as a different app.
+ *
+ * It lives on the two shells instead. `.drill` is the drill screen's root;
+ * `.app-root` is every other screen's. A third screen gets the scale by being
+ * one of them, which is the only way it should ever be possible to get it. */
+.app-root,
 .drill {
   --drill-sans: 'Geist Sans', system-ui, sans-serif;
   --drill-mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -1372,7 +1386,13 @@ ol.md__list {
   --gap-4: 16px; --gap-5: 20px; --gap-6: 26px;
 
   --editor-height: 352px;  /* ~16 lines; fixed, code starts at top */
+}
 
+/* The drill screen's own box. Deliberately *not* merged into the block above:
+   these are what the drill root is, not what the scale is, and `height: 100vh`
+   or a 14.5px body on `.app-root` would resize the chooser and the history
+   table — screens that share the tokens and must not share the box. */
+.drill {
   font-family: var(--drill-sans);
   font-size: var(--step-body);
   line-height: var(--lead-base);
@@ -1383,7 +1403,17 @@ ol.md__list {
   flex-direction: column;
 }
 
-.drill-label {
+/* The working surface carries the drill's body type wherever it is used, so a
+   practice screen and a drill screen set prose and code identically. The
+   chooser and the history table keep `.app-root`'s 16px — they are reading
+   surfaces, not working ones. */
+.workbench {
+  font-family: var(--drill-sans);
+  font-size: var(--step-body);
+  line-height: var(--lead-base);
+}
+
+.workbench__label {
   font-family: var(--drill-mono);
   font-size: var(--step-label);
   line-height: var(--lead-tight);
@@ -1434,14 +1464,14 @@ ol.md__list {
 
 
 /* --- body: problem | editor + stream --------------------------- */
-/* Unscoped. This used to be `.drill .drill-body`, written that way purely to
-   out-specify a pre-redesign `.drill-body { flex-direction: column }` a
+/* Unscoped. This used to be `.drill .workbench`, written that way purely to
+   out-specify a pre-redesign `.workbench { flex-direction: column }` a
    thousand lines up. That rule is gone, so the extra `.drill` is too — a
    selector carrying a workaround for something that no longer exists reads as
    a specificity requirement rather than as scar tissue. */
-.drill-body { flex: 1; display: flex; flex-direction: row; min-height: 0; }
+.workbench { flex: 1; display: flex; flex-direction: row; min-height: 0; }
 
-.drill-problem {
+.workbench__problem {
   width: 560px; flex: none;          /* 62ch measure, not four words */
   padding: var(--gap-5) var(--gap-6) 30px;
   overflow: auto;
@@ -1453,31 +1483,31 @@ ol.md__list {
    spine, and nothing has ever set the attribute — collapsing is the pane's own
    `__toggle`, which hides the body and leaves the summary. Same species as the
    dead layout deleted further up: a rule that reads as a feature. */
-.drill-problem h2 { margin: 0; font-size: var(--step-title); line-height: 26px; font-weight: 500; letter-spacing: -0.01em; }
-.drill-problem p { margin: 0; text-wrap: pretty; }
-.drill-problem code {
+.workbench__problem h2 { margin: 0; font-size: var(--step-title); line-height: 26px; font-weight: 500; letter-spacing: -0.01em; }
+.workbench__problem p { margin: 0; text-wrap: pretty; }
+.workbench__problem code {
   font-family: var(--drill-mono); font-size: var(--step-code);
   background: var(--muted); padding: 1px 4px;
 }
-.drill-problem pre {
+.workbench__problem pre {
   margin: 0; background: var(--muted); border: 1px solid var(--border);
   padding: var(--gap-3) 14px; overflow-x: auto;
   font-family: var(--drill-mono); font-size: var(--step-data); line-height: var(--lead-data);
 }
 
-.drill-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.workbench__main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 /* --- editor --------------------------------------------------
    Fixed height, code starts at the top. CodeMirror's own DOM is
    untouched: container, gutter and theme tokens only.
 --------------------------------------------------------------- */
-.drill-editor { flex: none; display: flex; flex-direction: column; transition: opacity 140ms linear; }
-.drill-editor-head {
+.workbench__editor { flex: none; display: flex; flex-direction: column; transition: opacity 140ms linear; }
+.workbench__editor-head {
   flex: none; height: 30px; display: flex; align-items: center;
   justify-content: space-between; padding: 0 18px;
   border-bottom: 1px solid var(--border);
 }
-.drill-cm { height: var(--editor-height); overflow: auto; padding: 14px 18px; }
+.workbench__cm { height: var(--editor-height); overflow: auto; padding: 14px 18px; }
 .code-editor .cm-editor { background: transparent; }
 .code-editor .cm-editor.cm-focused { outline: none; }
 .code-editor .cm-scroller { font-family: var(--drill-mono); font-size: var(--step-code); line-height: var(--lead-base); }
@@ -1556,7 +1586,7 @@ ol.md__list {
 .code-editor .tok-invalid { color: var(--destructive); }
 
 /* --- toolbar + hint ladder ------------------------------------- */
-.drill-toolbar {
+.workbench__toolbar {
   flex: none; display: flex; align-items: center; gap: 14px;
   padding: var(--gap-3) 18px; border-top: 1px solid var(--border);
 }
@@ -1570,7 +1600,7 @@ ol.md__list {
  * hover, sizing) comes from the component, which is the point: those are the
  * parts that were being hand-maintained and drifting.
  */
-.drill-btn {
+.workbench__btn {
   font-family: var(--drill-mono); font-size: 11px; letter-spacing: 0.1em;
   text-transform: uppercase; height: auto; padding: 9px 15px;
   border: 2px solid var(--foreground); background: var(--card);
@@ -1596,11 +1626,11 @@ ol.md__list {
 /* Dashed rather than merely faded: a rationed control that has run out is a
    different state from one that is momentarily busy, and opacity alone reads
    as the second. */
-.drill-btn:disabled { border-style: dashed; }
+.workbench__btn:disabled { border-style: dashed; }
 /* No hover lift on any drill-screen button — nothing moves during a timed
    rehearsal. Brutalkit puts lift on filled actions, so it is turned off here
    rather than avoided by not using the component. */
-.drill-btn:hover:not(:disabled) { background: var(--accent); transform: none; }
+.workbench__btn:hover:not(:disabled) { background: var(--accent); transform: none; }
 
 /*
  * The rail's buttons inherit the rail's colour rather than carrying their own.
@@ -1752,23 +1782,23 @@ ol.md__list {
    between the three moments, so the code never reflows under the
    cursor and the eye is never chased.
 --------------------------------------------------------------- */
-.drill[data-moment="interviewer-speaking"] .drill-editor  { opacity: 0.55; }
-.drill[data-moment="interviewer-speaking"] .drill-problem { opacity: 0.70; }
+.drill[data-moment="interviewer-speaking"] .workbench__editor  { opacity: 0.55; }
+.drill[data-moment="interviewer-speaking"] .workbench__problem { opacity: 0.70; }
 .drill[data-moment="interviewer-speaking"] .drill-stream  { opacity: 1; }
 .drill[data-moment="interviewer-speaking"] .drill-dot     { background: var(--foreground); }
 .drill[data-moment="interviewer-speaking"] .drill-wave    { opacity: 1; }
 .drill[data-moment="interviewer-speaking"] .drill-turn    { background: transparent; color: var(--muted-foreground); }
 
 /* talking while typing is the normal case — the editor is not dimmed for it */
-.drill[data-moment="candidate-speaking"] .drill-editor  { opacity: 1; }
-.drill[data-moment="candidate-speaking"] .drill-problem { opacity: 1; }
+.drill[data-moment="candidate-speaking"] .workbench__editor  { opacity: 1; }
+.drill[data-moment="candidate-speaking"] .workbench__problem { opacity: 1; }
 .drill[data-moment="candidate-speaking"] .drill-stream  { opacity: 0.65; }
 .drill[data-moment="candidate-speaking"] .drill-dot     { background: var(--brand); }
 .drill[data-moment="candidate-speaking"] .drill-wave    { opacity: 1; }
 .drill[data-moment="candidate-speaking"] .drill-turn    { background: var(--brand); color: var(--brand-foreground); }
 
-.drill[data-moment="writing"] .drill-editor  { opacity: 1; }
-.drill[data-moment="writing"] .drill-problem { opacity: 1; }
+.drill[data-moment="writing"] .workbench__editor  { opacity: 1; }
+.drill[data-moment="writing"] .workbench__problem { opacity: 1; }
 .drill[data-moment="writing"] .drill-stream  { opacity: 0.55; }
 
 /* --- light mode ----------------------------------------------
@@ -1812,7 +1842,7 @@ html:not(.dark) .drill-rail[data-state="transcription-failed"] { background: col
 html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand) 7%, var(--card)); }
 
 /* file label states — a paused autosave cannot be dismissed and forgotten */
-.drill-editor-head [data-autosave="paused"] { color: var(--destructive); }
+.workbench__editor-head [data-autosave="paused"] { color: var(--destructive); }
 
 /* --- scrolled back off live ----------------------------------- */
 .drill-stream[data-behind] { opacity: 0.72; }
@@ -1885,7 +1915,7 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
 .drill-dock-spacer { flex: 1; }
 
 /* The problem pane wraps an existing component that brings its own padding. */
-.drill-problem > * { min-width: 0; }
+.workbench__problem > * { min-width: 0; }
 
 /* The four interrupting errors sit between the body and the dock. They are
    `flex: none`, so they shorten the stream rather than pushing the dock off
@@ -1915,7 +1945,7 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
    near the pane itself — see there. This one is drill-specific: the drill
    column pads itself, so the summary starting flush with that padding is what
    lines it up with `SOLUTION.TS` across the divider. */
-.drill-problem .problem-pane__summary { padding-top: 0; }
+.workbench__problem .problem-pane__summary { padding-top: 0; }
 
 /* Dock copy: the design gives the status its own 190px block and the sentence
    its own 520px one. Collapsing them into the narrow block wrapped a paragraph
@@ -1924,55 +1954,34 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
 .drill-dock-copy { flex: 1; max-width: 520px; font-size: 14px; line-height: 21px; color: var(--muted-foreground); text-wrap: pretty; margin: 0; }
 
 /* ── Practice ───────────────────────────────────────────────────────────────
-   The editor, the suite and a tutor, on one screen with no drill chrome.
+   What fills the workbench's main pane when the screen is a practice session
+   rather than a drill: the test output and the tutor, where the transcript is.
+
+   The *layout* is not here. It used to be — a `.practice` scroller, a
+   `.practice-header`, and a `.practice-body` three-column grid of bordered
+   cards with 24px of page padding. That produced a screen with the same parts
+   as the drill in a visibly different design language, because the drill's
+   whole type scale (`--drill-mono`, every `--step-*`, `--gap-*` and `--lead-*`)
+   was scoped to `.drill`, which practice was not inside. Undefined custom
+   properties do not fail; they fall back. So the same class names rendered in
+   a different font at a different size on a different grid, and it read as a
+   different application. See the scale block above, and `Workbench.tsx`.
 
    Every class here is emitted by `components/Practice.tsx`. That is worth
    stating because the opposite has already happened three times in this file —
    rules targeting class names nothing rendered, which look like design rather
    than breakage. `styles-are-live.test.ts` holds the pairing. */
-/* `.app-root` is a fixed-height flex column with `overflow: hidden` — right for
-   the drill screen, where the transcript and the problem pane each scroll
-   themselves. Practice is one long page instead, so it has to own the scrolling
-   or its content is simply unreachable: measured at 1739px of content in a
-   757px box, with the test output entirely below the fold and no way to reach
-   it. `min-height: 0` is the load-bearing half — without it a flex child
-   refuses to shrink below its content and `overflow-y` never engages. */
-.practice {
-  display: flex; flex-direction: column; gap: 20px; padding: 0 24px 32px;
-  flex: 1; min-height: 0; overflow-y: auto;
+
+/* The transcript's slot and the transcript's behaviour: the one thing in the
+   main pane that scrolls, so the editor and the toolbar above it never move. */
+.practice-pane {
+  flex: 1; min-height: 0; overflow: auto;
+  border-top: 1px solid var(--border);
+  padding: var(--gap-4) 18px 18px;
+  display: flex; flex-direction: column; gap: var(--gap-4);
 }
 
-.practice-header { display: flex; align-items: center; gap: 16px; }
-.practice-header h1 {
-  font-family: var(--drill-mono); font-size: 20px; margin: 0;
-}
-.practice-kicker {
-  margin: 2px 0 0; font-size: 13px; color: var(--muted-foreground);
-}
-
-/* Three columns on a wide screen, stacked below it. The editor is the widest
-   because it is the thing being used; the tutor is narrowest because it is
-   prose and a long measure is harder to read, not easier. */
-.practice-body {
-  display: grid; gap: 20px; align-items: start;
-  grid-template-columns: minmax(0, 1fr);
-}
-@media (min-width: 1100px) {
-  .practice-body { grid-template-columns: 320px minmax(0, 1fr) 360px; }
-}
-
-.practice-editor { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-/* Layout only. Appearance comes from `.code-editor`, which `SolutionEditor`
-   emits itself — see the comment there for why that split exists. Taller than
-   the drill's editor because this screen has no transcript competing for the
-   column, and practice is where you sit and write. */
-.practice-editor .code-editor {
-  height: clamp(320px, 46vh, 620px); overflow: auto;
-  border: 2px solid var(--border); padding: 14px 18px;
-}
-.practice-tools { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-
-.practice-verdict { margin: 0; font-size: 14px; }
+.practice-verdict { margin: 0; font-size: var(--step-data); }
 .practice-verdict ul { margin: 6px 0 0; padding-left: 18px; }
 .practice-verdict--green { color: var(--chart-4); }
 /* The two reds are different colours on purpose. A wrong answer and a correct
@@ -1983,21 +1992,19 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
 .practice-verdict--cost { color: var(--chart-2); }
 .practice-verdict--errored { color: var(--muted-foreground); }
 
+/* No border and no padding. It is not a card sitting on a page — it is what
+   this pane is for, the way the transcript is on a drill, and boxing it made
+   the screen read as a dashboard of widgets. `.practice-pane` already supplies
+   the rule above it and the gutter around it. */
 .practice-chat {
-  display: flex; flex-direction: column; gap: 12px; min-width: 0;
-  border: 2px solid var(--border); padding: 16px;
-}
-.practice-chat h2 {
-  font-family: var(--drill-mono); font-size: 12.5px; margin: 0;
-  letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground);
+  display: flex; flex-direction: column; gap: var(--gap-3); min-width: 0;
 }
 .practice-chat-log {
-  display: flex; flex-direction: column; gap: 14px;
-  max-height: 48vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: var(--gap-4);
 }
-.practice-chat-empty { margin: 0; font-size: 13px; color: var(--muted-foreground); }
+.practice-chat-empty { margin: 0; font-size: var(--step-data); color: var(--muted-foreground); }
 
-.practice-turn { font-size: 14px; line-height: 21px; }
+.practice-turn { font-size: var(--step-body); line-height: var(--lead-base); }
 .practice-turn p { margin: 0 0 8px; }
 /* The learner's own turns sit in a tinted block so a long conversation still
    reads as a conversation when scrolled back through. The tutor's replies are
@@ -2007,10 +2014,15 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
   background: var(--muted); padding: 8px 10px; font-weight: 500;
 }
 /* Code fences are the tutor's most useful output and the one thing that will
-   overflow a 360px column. It scrolls itself rather than widening the page. */
-.practice-turn pre { overflow-x: auto; max-width: 100%; }
+   overflow the pane. It scrolls itself rather than widening the page. */
+.practice-turn pre {
+  overflow-x: auto; max-width: 100%; margin: 0;
+  background: var(--muted); border: 1px solid var(--border);
+  padding: var(--gap-3) 14px;
+  font-family: var(--drill-mono); font-size: var(--step-data); line-height: var(--lead-data);
+}
 
-.practice-ask { display: flex; flex-direction: column; gap: 8px; }
+.practice-ask { display: flex; flex-direction: column; gap: var(--gap-2); align-items: flex-start; }
 /* `transparent`, not a surface token, and that is the fix rather than a dodge.
    Measured: `:root` carries the *dark* palette (`--card` is oklch(19%),
    `--background` oklch(13%)) while this page renders light — the light values
@@ -2018,39 +2030,35 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
    a black box on a light panel, which is exactly what `--background` and then
    `--card` both did. Transparent takes whatever the panel is actually painted,
    in either theme, and the border is what makes it a field. */
+/* 1px, matching every other rule on this screen. The 2px border came from the
+   card grid, where a panel had to read as a raised object; here it is a field
+   on a flat surface and the heavier weight made it the loudest thing in the
+   pane. Capped at the prose measure rather than stretched: a full-width
+   single-line input next to a 560px column of prose reads as a search bar. */
 .practice-ask textarea {
-  width: 100%; resize: vertical; font: inherit; padding: 8px 10px;
-  border: 2px solid var(--border); background: transparent; color: inherit;
+  width: 100%; max-width: 68ch; resize: vertical; font: inherit;
+  padding: var(--gap-2) 10px;
+  border: 1px solid var(--border); background: transparent; color: inherit;
 }
-
-/* Nothing here for the pane itself: practice renders `ProblemColumn`, so it
-   gets the same renormalisation the drill does from `.problem-column`. This
-   column has no width or padding of its own — the grid gives it 320px and the
-   grid's own gap is the gutter. */
-
-/* CodeMirror scrolls itself rather than widening the column. Without this the
-   grid's `1fr` is sized by the longest line and the editor pushes under the
-   chat panel. */
-.practice-editor .cm-editor { max-width: 100%; }
-.practice-editor .cm-scroller { overflow-x: auto; }
 
 /* Console output from the candidate's own code. Monospace, because it is
    program output and column alignment is often the thing being read. */
-.practice-output { display: flex; flex-direction: column; gap: 10px; }
-.practice-output h2 {
-  font-family: var(--drill-mono); font-size: 12.5px; margin: 0;
-  letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground);
-}
+.practice-output { display: flex; flex-direction: column; gap: var(--gap-2); }
+/* Both section headings are `.workbench__label` — the same mono uppercase rule
+   `SOLUTION.TS` uses, rather than a second definition of it that had already
+   drifted to 12.5px and 0.1em. This is only the margin reset. */
+.practice-pane h2 { margin: 0; }
 .practice-output-group { display: flex; flex-direction: column; gap: 2px; }
 /* Which test was running. Muted, because it labels the output rather than being
    it — the same relationship a `describe` name has to a failure list. */
 .practice-output-test {
-  margin: 0; font-size: 12px; color: var(--muted-foreground);
-  font-family: var(--drill-mono);
+  margin: 0; font-size: var(--step-label); color: var(--muted-foreground);
+  font-family: var(--drill-mono); letter-spacing: var(--track-label);
 }
 .practice-output-lines {
-  margin: 0; padding: 8px 10px; background: var(--muted);
-  font-family: var(--drill-mono); font-size: 12.5px; line-height: 19px;
+  margin: 0; padding: var(--gap-2) 10px; background: var(--muted);
+  border: 1px solid var(--border);
+  font-family: var(--drill-mono); font-size: var(--step-data); line-height: var(--lead-data);
   overflow-x: auto; max-height: 40vh; overflow-y: auto;
   white-space: pre; tab-size: 2;
 }

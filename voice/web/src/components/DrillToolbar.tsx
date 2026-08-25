@@ -61,12 +61,12 @@ export function DrillToolbar({
   const noRungsLeft = hintsExhausted || hintRung >= MAX_RUNG
 
   return (
-    <div className="drill-toolbar">
+    <div className="workbench__toolbar">
       {/* `outline`, not `brand`: the design is explicit that nothing in the
           toolbar competes with the dock's primary action. The mono/uppercase
-          treatment comes from `.drill-btn`, which is now a *modifier* on the
+          treatment comes from `.workbench__btn`, which is now a *modifier* on the
           design system's button rather than a replacement for it. */}
-      <Button type="button" variant="outline" className="drill-btn" onClick={onRun} disabled={!onRun || running}>
+      <Button type="button" variant="outline" className="workbench__btn" onClick={onRun} disabled={!onRun || running}>
         {running ? 'Running…' : runLabel}
       </Button>
 
@@ -76,7 +76,7 @@ export function DrillToolbar({
           <Button
             type="button"
             variant="ghost"
-            className="drill-btn drill-btn--quiet"
+            className="workbench__btn drill-btn--quiet"
             onClick={onHint}
             disabled={!onHint || hintPending || noRungsLeft}
           >
@@ -88,7 +88,7 @@ export function DrillToolbar({
               <span key={i} data-spent={i < hintRung ? '' : undefined} />
             ))}
           </span>
-          <span className="drill-hint-count drill-label" data-spent={spent ? '' : undefined}>
+          <span className="drill-hint-count workbench__label" data-spent={spent ? '' : undefined}>
             {counterText(hintRung)}
           </span>
         </>
@@ -97,7 +97,7 @@ export function DrillToolbar({
       {!rationed && (
         <>
           <span className="drill-toolbar__spacer" />
-          <span className="drill-hint-count drill-label">Nothing is rationed here — ask out loud</span>
+          <span className="drill-hint-count workbench__label">Nothing is rationed here — ask out loud</span>
         </>
       )}
     </div>
