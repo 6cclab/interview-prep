@@ -382,3 +382,47 @@ describe('the working surface’s scale', () => {
     }
   });
 });
+
+/**
+ * Running the suite, as a state you can see.
+ *
+ * A browser run can take up to `SUITE_TIMEOUT_MS` — 30 seconds — and for that
+ * whole time the only feedback was the word "Running…" on a dashed-border
+ * disabled button, with the pane below still reading "Nothing run yet". A
+ * disabled control with no busy signal reads as broken rather than working,
+ * which is exactly what makes someone press it again.
+ */
+describe('the run-tests busy state', () => {
+  const component = code(read('components/Practice.tsx'));
+  const styles = code(read('styles.css'));
+
+  // Both, and neither alone is enough: `disabled` stops the second press,
+  // `aria-busy` is what a screen reader has instead of the sweeping bar.
+  it('disables the button and marks it busy while a suite runs', () => {
+    expect(component).toMatch(/disabled=\{running\}/);
+    expect(component).toMatch(/aria-busy=\{running\}/);
+  });
+
+  // The state is guarded in the handler too. `disabled` is a property of one
+  // rendered button; the guard covers a second call from anywhere.
+  it('refuses a second run in the handler, not only in the markup', () => {
+    expect(component).toMatch(/if \(running\) return/);
+  });
+
+  /**
+   * The indeterminate bar this app already uses for every wait with no
+   * percentage to report, added *to* the design system's button. Reused rather
+   * than reinvented — a second busy affordance is how two screens end up
+   * disagreeing about what "working" looks like.
+   */
+  it('shows the app’s existing indeterminate bar rather than a new one', () => {
+    expect(component).toContain('primary-wait');
+    expect(styles).toMatch(/\.primary-wait::after \{[^}]*animation:/);
+  });
+
+  // The pane is where you look for the result, so it must not still say
+  // "Nothing run yet" while a suite is running.
+  it('says so in the pane as well as on the button', () => {
+    expect(component).toMatch(/running \?[\s\S]{0,200}Running the suite/);
+  });
+});

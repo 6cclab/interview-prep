@@ -380,10 +380,17 @@ export function Practice({
           {/* `outline`, the same variant the drill's Run tests uses. `brand`
               was invisible here: `.workbench__btn` overrides the background to
               `--card`, which left the filled variant's on-brand foreground
-              painting dark text on a dark panel. */}
+              painting dark text on a dark panel.
+
+              `primary-wait` while running: the indeterminate sweeping bar this
+              app already uses for every wait that cannot report a percentage,
+              added *to* the system's button rather than replacing it. A suite
+              can take up to `SUITE_TIMEOUT_MS`, and for that whole time the
+              only signal was a dashed border — which reads as broken, not
+              busy, and is exactly what makes someone press it again. */}
           <Button
             type="button"
-            className="workbench__btn"
+            className={running ? 'workbench__btn primary-wait' : 'workbench__btn'}
             variant="outline"
             onClick={onRun}
             disabled={running}
@@ -397,8 +404,16 @@ export function Practice({
         {/* Below the code, in the centre column: the tests are about the code
             and belong under it, not off in a side panel. Scrolls itself so a
             long run never pushes the editor up the screen. */}
-        <div className="practice-pane">
-          {logs.length > 0 ? (
+        <div className="practice-pane" aria-busy={running}>
+          {/* Three states, and the running one is not optional: this pane is
+              where you look for the result, so leaving "Nothing run yet" up
+              while a suite runs actively contradicts the button. */}
+          {running ? (
+            <p className="practice-pane-empty">
+              Running the suite
+              <span className="workbench__caret" aria-hidden="true" />
+            </p>
+          ) : logs.length > 0 ? (
             <RunOutput logs={logs} />
           ) : (
             <p className="practice-pane-empty">

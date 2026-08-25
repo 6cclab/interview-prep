@@ -2002,6 +2002,7 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
 }
 .practice-pane-empty {
   margin: 0; max-width: 46ch;
+  display: flex; align-items: center; gap: 6px;
   font-size: var(--step-data); color: var(--muted-foreground);
 }
 
