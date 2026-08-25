@@ -38,11 +38,12 @@ import { findExercise, listExercises } from './exercises'
 import { runDebugTests, debugVerdictCue, type DebugVerdict } from './debug-tests'
 import { buildCoachPrompt, codeCue, readWorkingFile } from './coach'
 import { assistedCue, readAssistedDir, seedAssistedDir } from './assisted'
+import { buildPracticeChatPrompt, codeCue as practiceCodeCue } from './practice-chat'
 import { isoDate } from './coached'
 import { fsWorkStore } from './work-store-fs'
 import type { WorkStore } from './work-store'
 import { runDrillTests, verdictCue } from './drill-tests'
-import { createInterviewer, type StreamFn } from './interviewer'
+import { createInterviewer, type Message, type StreamFn } from './interviewer'
 import { backendSummary, describeBackend, modelFor, streamForBackend, transportLabel } from './backend'
 import { preloadOllama } from './ollama'
 import { createSession, finishSession, type FinishResult } from './session'
@@ -1034,6 +1035,107 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     //
     // The client has called this since the runner landed; the server never
     // answered it, so every browser run failed on a 404 before it started.
+    // The practice tutor. Sessionless, on purpose.
+    //
+    // Practice has no interviewer, no SSE session, no idle reaper and no record,
+    // so there is nothing here to attach a conversation to and nothing worth
+    // persisting one in. The client holds the history and sends it back each
+    // turn. That is forgeable — someone can claim the tutor said anything — and
+    // it does not matter: nothing here is scored, so there is no one to deceive
+    // but yourself, which is the same reasoning the browser-computed verdict
+    // already accepts.
+    if (req.method === 'POST' && url.pathname === '/api/practice/chat') {
+      let body: Record<string, unknown> | null
+      try {
+        body = await readJsonBody(req)
+      } catch (error) {
+        sendJson(res, 400, { error: errorMessage(error) })
+        return
+      }
+      if (!body) {
+        sendJson(res, 400, { error: 'invalid request body' })
+        return
+      }
+
+      const slug = typeof body.problem === 'string' ? body.problem : ''
+      if (!PROBLEM_SLUG.test(slug)) {
+        sendJson(res, 400, { error: 'Invalid problem name.' })
+        return
+      }
+      const problem = findCodingProblem(deps.root, slug)
+      if (problem === null) {
+        sendJson(res, 404, { error: 'Unknown problem.' })
+        return
+      }
+
+      const code = typeof body.code === 'string' ? body.code : ''
+      const history = Array.isArray(body.messages) ? body.messages : []
+      const messages: Message[] = []
+      for (const entry of history) {
+        if (typeof entry !== 'object' || entry === null) continue
+        const { role, content } = entry as Record<string, unknown>
+        if ((role !== 'user' && role !== 'assistant') || typeof content !== 'string') continue
+        messages.push({ role, content })
+      }
+      const asked = messages.at(-1)
+      if (!asked || asked.role !== 'user') {
+        sendJson(res, 400, { error: 'the last message must be one from the learner' })
+        return
+      }
+      // The buffer rides on the final user message rather than the system
+      // prompt, for the reason `coach.ts` gives about its own cue: a system
+      // prompt is built once, and the editor changes between every question.
+      // Sent every turn, it is always what they are looking at.
+      messages[messages.length - 1] = {
+        role: 'user',
+        content: `${practiceCodeCue(code)}\n\n${asked.content}`,
+      }
+
+      // Everything that can fail happens before a byte of the response is
+      // written. Once headers are on the wire the status is fixed, and a
+      // missing prompt file reported as a 200 with an error sentence in the
+      // chat is indistinguishable from the tutor saying something odd.
+      let system: string
+      try {
+        system = buildPracticeChatPrompt(deps.root, problem)
+      } catch (error) {
+        sendJson(res, 500, { error: errorMessage(error) })
+        return
+      }
+
+      // Plain chunked text, not `text/event-stream`. `EventSource` cannot POST,
+      // so this is read with `fetch` and a stream reader either way — and with
+      // one continuous reply and no event types, SSE framing would be overhead
+      // the client has to strip back off.
+      res.writeHead(200, {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'no-store',
+        connection: 'keep-alive',
+      })
+      res.flushHeaders()
+
+      let cancelled = false
+      req.on('close', () => {
+        cancelled = true
+      })
+
+      try {
+        for await (const delta of deps.createTransport('practice')(system, messages)) {
+          if (cancelled) break
+          res.write(delta)
+        }
+      } catch (error) {
+        // The reply is already partly on screen, so this cannot become a status
+        // code. Say so in the stream instead — a chat that stops mid-sentence
+        // with no explanation reads as the app breaking rather than the model
+        // failing, and the two want different responses from the reader.
+        console.error('[voice] practice chat failed:', errorMessage(error))
+        if (!cancelled) res.write(`\n\n_The tutor stopped: ${errorMessage(error)}_`)
+      }
+      res.end()
+      return
+    }
+
     const exerciseRoute = /^\/api\/coding\/([^/]+)\/exercise$/.exec(url.pathname)
     if (req.method === 'GET' && exerciseRoute) {
       const slug = exerciseRoute[1]!

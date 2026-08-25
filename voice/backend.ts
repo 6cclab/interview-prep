@@ -65,6 +65,14 @@ const TRACK_VAR: Record<Track, string> = {
   // all the same, so the arrangement stays "one variable per track" rather than
   // "one per track except the ones that were added later".
   debug: 'VOICE_BACKEND_DEBUG',
+  // The practice tutor, and the coach's reasoning applies to it word for word:
+  // it is teaching rather than asking, so a confident wrong explanation is the
+  // failure mode, and no test suite in the loop contradicts it. The difference
+  // is who notices — a coach is talking to someone who has already attempted the
+  // problem, a tutor is often the first explanation a learner hears. Its own
+  // knob so putting the drills on a local model does not silently move the
+  // teaching there too.
+  practice: 'VOICE_BACKEND_PRACTICE',
 }
 
 /** Every per-track variable name, for tests and for error messages. */
@@ -148,6 +156,7 @@ export function backendSummary(env: NodeJS.ProcessEnv = process.env): Record<Tra
     coach: chooseBackend('coach', env),
     debug: chooseBackend('debug', env),
     assisted: chooseBackend('assisted', env),
+    practice: chooseBackend('practice', env),
   }
 }
 

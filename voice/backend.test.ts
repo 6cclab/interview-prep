@@ -99,6 +99,7 @@ describe('backendSummary', () => {
       coding: 'cli',
       coach: 'cli',
       assisted: 'cli',
+      practice: 'cli',
     })
   })
 
