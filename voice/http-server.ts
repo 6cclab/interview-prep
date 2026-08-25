@@ -166,6 +166,14 @@ export interface VoiceServerDeps {
    * a voice lottery per browser and operating system.
    */
   synthesizer?: Synthesizer
+  /**
+   * Whether this process can serve a drill right now, for `GET /readyz`.
+   *
+   * Absent means yes — a local run has no database to wait on and no cache to
+   * warm, and defaulting to "ready" there keeps every existing test and the
+   * whole local path untouched. `main()` installs a real one in deployed mode.
+   */
+  ready?(): Promise<{ ready: boolean; detail: string }>
   /** Injectable so tests never shell out to the real `say -a '?'`. */
   listOutputDevices?(): Promise<Device[]>
   /**
@@ -798,6 +806,39 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+
+    // ------------------------------------------------------------------
+    // Liveness and readiness, above the auth gate.
+    //
+    // Deliberately not under `/api/`: everything there fails closed with a 401,
+    // and a kubelet probe carries no cookie. A probe that 401s reads to
+    // Kubernetes as a failing container, so the pod would be restarted forever
+    // by the very rule that protects the drill log.
+    //
+    // The split is the point. `/healthz` says the process is up — if it can
+    // answer at all, the answer is yes, so restarting would fix nothing.
+    // `/readyz` says this pod can serve a *drill*, which in deployed mode means
+    // Postgres answered and the problems loaded. Collapsing the two would
+    // either restart a pod that is merely waiting for its database, or route
+    // traffic to one that will 500 every request.
+    // ------------------------------------------------------------------
+    if (req.method === 'GET' && url.pathname === '/healthz') {
+      sendJson(res, 200, { ok: true })
+      return
+    }
+    if (req.method === 'GET' && url.pathname === '/readyz') {
+      const ready = deps.ready ?? (async () => ({ ready: true, detail: 'local mode: nothing to wait for' }))
+      try {
+        const status = await ready()
+        sendJson(res, status.ready ? 200 : 503, status)
+      } catch (error) {
+        // A throw is not ready. Reported rather than swallowed, because the
+        // message is the only thing that distinguishes "Postgres is still
+        // starting" from "the schema never applied".
+        sendJson(res, 503, { ready: false, detail: errorMessage(error) })
+      }
+      return
+    }
 
     // ------------------------------------------------------------------
     // Identity, first. Not for tidiness — for correctness.
@@ -2107,6 +2148,7 @@ async function main(): Promise<void> {
   // request at three in the morning.
   let auth: VoiceServerDeps['auth']
   let work: VoiceServerDeps['work']
+  let ready: VoiceServerDeps['ready']
   if (mode === 'deployed') {
     try {
       // The schema first, before anything queries. Idempotent — every statement
@@ -2126,6 +2168,23 @@ async function main(): Promise<void> {
       const count = await loadProblemCache()
       installProblemSource(dbProblems)
       console.log(`  Loaded ${count} coding problems from Postgres.`)
+      // Readiness means "this pod can serve a drill", which is two separate
+      // claims. The count is the one a socket check cannot make: a pod that
+      // booted before `pnpm ingest` ran has a live database, an applied schema,
+      // and zero problems — it answers every request and every coding drill
+      // 404s. That is precisely the state that should keep traffic away.
+      //
+      // Postgres is re-checked on every probe rather than trusted from startup,
+      // because the interesting failure is the database going away *after* a
+      // healthy boot, which is the case a start-time flag can never notice.
+      const { getPool } = await import('./db/pool')
+      ready = async () => {
+        await getPool().query('select 1')
+        if (count === 0) {
+          return { ready: false, detail: 'no coding problems loaded — has `pnpm ingest` run against this database?' }
+        }
+        return { ready: true, detail: `${count} problems, database answering` }
+      }
       // Same dynamic-import reasoning: `better-auth` and its Kysely adapter are
       // never resolved on the local path. Built here so a missing AUTH_SECRET
       // stops the process with a sentence, rather than 401ing every request.
@@ -2206,6 +2265,7 @@ async function main(): Promise<void> {
     vague: VOICE_VAGUE,
     auth,
     work,
+    ready,
   })
   // Local mode is still `127.0.0.1` only — TLS changes the scheme, never the
   // reach. A live microphone and a private story bank have no business on the

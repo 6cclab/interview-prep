@@ -60,7 +60,7 @@ function stubAuth(userId: string | null): NonNullable<VoiceServerDeps['auth']> {
   }
 }
 
-function listen(auth: VoiceServerDeps['auth']): Promise<number> {
+function listen(auth: VoiceServerDeps['auth'], extra: Partial<VoiceServerDeps> = {}): Promise<number> {
   server = createVoiceServer({
     root,
     createTransport: () =>
@@ -70,6 +70,7 @@ function listen(auth: VoiceServerDeps['auth']): Promise<number> {
     transcriber: { transcribe: async () => ({ text: '' }) },
     auth,
     store: sharedStore,
+    ...extra,
   })
   return new Promise((resolve) => {
     server!.listen(0, '127.0.0.1', () => {
@@ -275,5 +276,71 @@ describe('the auth handler is mounted above everything', () => {
     port = await listen(stubAuth(null))
     await get('/api/auth/get-session')
     expect(seenByAuth.map((s) => s.path)).toEqual(['/api/auth/get-session'])
+  })
+})
+
+/**
+ * Probes answer without a session.
+ *
+ * The whole point of the gate above is that everything under `/api/` fails
+ * closed. A kubelet carries no cookie, so a probe placed under `/api/` would
+ * 401 — which Kubernetes reads as a failing container and answers by
+ * restarting the pod, forever, on account of the rule that protects the drill
+ * log. That is why `/healthz` and `/readyz` sit above the gate rather than
+ * inside it, and this is the test that keeps them there.
+ *
+ * `stubAuth('user-1')` throughout, deliberately: the gate is *installed and
+ * working* in every case below, and the probes answer anyway. Passing no auth
+ * at all would prove nothing, because then there would be no gate to be
+ * outside of.
+ */
+describe('health probes are outside the auth gate', () => {
+  it('answers /healthz through an installed auth gate, with no cookie', async () => {
+    const port = await listen(stubAuth('user-1'))
+    const res = await fetch(`http://127.0.0.1:${port}/healthz`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+  })
+
+  it('answers /readyz through an installed auth gate, with no cookie', async () => {
+    const port = await listen(stubAuth('user-1'), {
+      ready: async () => ({ ready: true, detail: '42 problems, database answering' }),
+    })
+    const res = await fetch(`http://127.0.0.1:${port}/readyz`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ready: true, detail: '42 problems, database answering' })
+  })
+
+  // The state a socket check cannot see: database up, schema applied, and no
+  // problems — every request answers and every coding drill 404s.
+  it('reports 503 when the server says it cannot serve a drill', async () => {
+    const port = await listen(stubAuth('user-1'), {
+      ready: async () => ({ ready: false, detail: 'no coding problems loaded' }),
+    })
+    const res = await fetch(`http://127.0.0.1:${port}/readyz`)
+    expect(res.status).toBe(503)
+    expect(((await res.json()) as { detail: string }).detail).toContain('no coding problems')
+  })
+
+  // A dead pool throws rather than returning false. Reported, not swallowed:
+  // the message is the only thing separating "Postgres is still starting" from
+  // "the schema never applied".
+  it('turns a throwing readiness check into a 503 that says why', async () => {
+    const port = await listen(stubAuth('user-1'), {
+      ready: async () => {
+        throw new Error('connect ECONNREFUSED 10.0.0.5:5432')
+      },
+    })
+    const res = await fetch(`http://127.0.0.1:${port}/readyz`)
+    expect(res.status).toBe(503)
+    expect(((await res.json()) as { detail: string }).detail).toContain('ECONNREFUSED')
+  })
+
+  // Local mode has no database to wait on and no cache to warm.
+  it('is ready by default when no check is installed', async () => {
+    const port = await listen(stubAuth('user-1'))
+    const res = await fetch(`http://127.0.0.1:${port}/readyz`)
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { ready: boolean }).ready).toBe(true)
   })
 })
