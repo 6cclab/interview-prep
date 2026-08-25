@@ -369,64 +369,32 @@ body {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Primary action — one control, three appearances                        */
+/* Primary action                                                          */
 /* ---------------------------------------------------------------------- */
 
-.primary {
-  min-width: 250px;
-  height: 76px;
-  border: 2px solid var(--border);
-  box-shadow: 4px 4px 0 0 var(--shadow-color);
-  font-family: inherit;
-  font-size: 19px;
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  text-align: center;
-  padding: 0 16px;
-}
+/* The control itself is Brutalkit's `Button` — see `PrimaryAction.tsx`, and
+   the note there about why it is no longer hand-styled. Everything that used
+   to live here (`.primary`, `.primary--go`, `.primary--stop`, `.primary--wait`,
+   `.primary__hint`) is gone with it, because a variant this app defines is a
+   variant this app can delete by accident, which is exactly what happened.
 
-.primary:active {
-  transform: translate(2px, 2px);
-  box-shadow: 2px 2px 0 0 var(--shadow-color);
-}
-
-.primary__hint {
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  opacity: 0.8;
-}
-
-
-
-.primary--wait {
-  border: 2px dashed var(--muted-foreground);
-  background: var(--muted);
-  color: var(--muted-foreground);
-  box-shadow: none;
-  cursor: default;
-  /* Clips the sweeping bar below to the control's own box. */
+   What remains is the one thing `Button` genuinely has no variant for: an
+   indeterminate progress bar on the waiting state. The waits here are a
+   permission prompt, a transcription and a model generating, none of which
+   expose progress, and a merely-disabled button reads as broken rather than
+   busy. */
+.primary-wait {
   position: relative;
+  /* Clips the sweeping bar below to the button's own rounded box. */
   overflow: hidden;
 }
 
-/* An indeterminate progress bar, because there is no percentage to report: the
-   waits here are a permission prompt, a transcription and a model generating,
-   none of which expose progress. A dashed border alone reads as "disabled",
-   which is the wrong message — the drill is working, not broken. */
-.primary--wait::after {
+.primary-wait::after {
   content: '';
   position: absolute;
   inset-inline-start: 0;
   inset-block-end: 0;
-  block-size: 4px;
+  block-size: 3px;
   inline-size: 35%;
   background: var(--muted-foreground);
   animation: waitSweep 1.4s ease-in-out infinite;
@@ -441,12 +409,6 @@ body {
   }
 }
 
-@media (max-width: 720px) {
-  .primary {
-    width: 100%;
-    min-width: 0;
-  }
-}
 
 /* ---------------------------------------------------------------------- */
 /* Motion                                                                  */
@@ -495,7 +457,7 @@ body {
      wait is a wait and not a dead control, so removing it outright would take
      the indicator away from the people who asked for less motion, not less
      information. It sits still, full width, as a plain rule. */
-  .primary--wait::after {
+  .primary-wait::after {
     animation: none;
     inline-size: 100%;
   }
@@ -1606,17 +1568,28 @@ ol.md__list {
 .drill-cm .cm-activeLine,
 .drill-cm .cm-activeLineGutter { background: var(--muted); }
 .drill-cm .cm-activeLineGutter { opacity: 1; }
-.drill-cm .cm-cursor { border-left-color: var(--brand); }
-.drill-cm .cm-selectionBackground,
+/* The *native* caret, not CodeMirror's drawn one. `drawSelection()` is not in
+   the extension list (see SolutionEditor.tsx), so no `.cm-cursor` element is
+   ever rendered and a rule targeting one styles nothing. What actually shows
+   is the browser's own caret, and CodeMirror's base theme sets it to `black` —
+   invisible against this editor's near-black background, which is why the
+   cursor appeared to be missing entirely rather than merely mis-coloured. */
+.drill-cm .cm-content { caret-color: var(--brand); }
+/* `::selection` alone, for the same reason: without `drawSelection()` the
+   selection is the browser's, not a `.cm-selectionBackground` element. */
 .drill-cm ::selection { background: color-mix(in oklab, var(--brand) 26%, transparent); }
 .drill-cm .cm-matchingBracket { background: color-mix(in oklab, var(--foreground) 14%, transparent); outline: none; }
 /* restrained highlighting, all from tokens */
 .drill-cm .tok-keyword { color: var(--chart-5); }
 .drill-cm .tok-number  { color: var(--chart-3); }
 .drill-cm .tok-string  { color: var(--chart-4); }
+/* `tok-typeName` and `tok-punctuation`, not `tok-type`/`tok-punct` — these are
+   `@lezer/highlight`'s `classHighlighter` names, and the abbreviated pair
+   matched nothing, which is why types and punctuation stayed at the default
+   foreground while keywords and strings coloured correctly. */
 .drill-cm .tok-comment,
-.drill-cm .tok-type,
-.drill-cm .tok-punct   { color: var(--muted-foreground); }
+.drill-cm .tok-typeName,
+.drill-cm .tok-punctuation { color: var(--muted-foreground); }
 
 /* --- toolbar + hint ladder ------------------------------------- */
 .drill-toolbar {

@@ -769,7 +769,6 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
             {editorMode === 'browser' && (
               <div className="drill-editor">
                 <div className="drill-editor-head drill-label">
-                  <span>Browser editor · no autocomplete, no types</span>
                   <span data-autosave={solution.status === 'conflict' ? 'paused' : undefined}>
                     {solution.status === 'conflict'
                       ? 'Autosave paused'

@@ -1,3 +1,4 @@
+import { Button } from 'brutalkit/button'
 import type { Phase } from '../types'
 
 interface Props {
@@ -16,39 +17,57 @@ interface Props {
   onPress(): void
 }
 
-// Same control starts the session, starts a turn, and ends a turn — one
-// element, three appearances, per the handoff. This is deliberately a plain
-// button styled directly over Brutalkit's tokens rather than Brutalkit's own
-// `Button`: the handoff's reference markup renders this control the same
-// way (hand-styled, not `x-import Brutalkit.Button`) because its size
-// (250×76, two stacked lines) and always-on hard shadow don't match any
-// `Button` size/variant, and `Button`'s hover/press motion (translate + a
-// shadow that only appears on hover) isn't the "always-4px, press-to-2px"
-// look this control needs. `Button` is used everywhere the handoff itself
-// uses it — see Header.tsx, Dock.tsx, ErrorBanner.tsx.
+/**
+ * Same control starts the session, starts a turn, and ends a turn — one
+ * element, three appearances.
+ *
+ * Brutalkit's `Button`, not a hand-styled element. This used to be the latter,
+ * on the reasoning that the handoff's 250×76 two-line control matched no
+ * `Button` size and its always-on hard shadow matched no variant. That
+ * reasoning cost more than it bought: `851d267` deleted `.primary--go` and
+ * `.primary--stop` during an unrelated refactor, and because the classes were
+ * the component's own invention nothing connected them back to it. The button
+ * rendered with no background at all — a black rectangle on a black dock —
+ * and stayed that way for weeks. A variant that lives in the design system
+ * cannot be deleted by a refactor of this app's stylesheet.
+ *
+ * `brand` and `destructive` are the same two tokens the deleted rules named,
+ * now reached through the system that owns them rather than through CSS that
+ * happens to agree.
+ */
 export function PrimaryAction({ phase, starting = false, onPress }: Props) {
   // Every phase where the drill is doing something and pressing would be wrong.
-  // Rendered as a non-button so there is nothing to press: the transcribing case
-  // used to leave a live "End answer" here for the several seconds transcription
-  // takes, which invited a second press against an already-stopped recorder.
-  const WAITING: Partial<Record<Phase, { label: string; hint: string }>> = {
-    requesting: { label: 'Waiting for microphone', hint: 'Please wait' },
-    transcribing: { label: 'Transcribing your answer', hint: 'Not recording' },
-    thinking: { label: 'Interviewer is thinking', hint: 'Please wait' },
-    speaking: { label: 'Interviewer speaking', hint: 'Please wait' },
+  // `disabled` rather than a non-button: the transcribing case used to leave a
+  // live "End answer" here for the several seconds transcription takes, which
+  // invited a second press against an already-stopped recorder.
+  const WAITING: Partial<Record<Phase, string>> = {
+    requesting: 'Waiting for microphone',
+    transcribing: 'Transcribing your answer',
+    thinking: 'Interviewer is thinking',
+    speaking: 'Interviewer speaking',
   }
 
-  const waiting = starting ? { label: 'Starting session', hint: 'Please wait' } : WAITING[phase]
+  const waiting = starting ? 'Starting session' : WAITING[phase]
   if (waiting) {
     return (
-      <div className="primary primary--wait" aria-disabled="true" aria-busy="true">
-        <span className="primary__label">{waiting.label}</span>
-        <span className="primary__hint">{waiting.hint}</span>
-      </div>
+      <Button
+        variant="outline"
+        size="xl"
+        disabled
+        aria-busy="true"
+        // An indeterminate progress bar, because there is no percentage to
+        // report: the waits here are a permission prompt, a transcription and
+        // a model generating, none of which expose progress. Disabled styling
+        // alone reads as "broken", which is the wrong message — the drill is
+        // working. This is the one thing `Button` has no variant for, so it is
+        // added *to* the system's button rather than replacing it.
+        className="primary-wait"
+      >
+        {waiting}
+      </Button>
     )
   }
 
-  const appearance = phase === 'recording' ? 'stop' : 'go'
   const label =
     phase === 'idle'
       ? 'Start session'
@@ -59,9 +78,8 @@ export function PrimaryAction({ phase, starting = false, onPress }: Props) {
           : 'Start new session' // ended
 
   return (
-    <button type="button" className={`primary primary--${appearance}`} onClick={onPress}>
-      <span className="primary__label">{label}</span>
-      <span className="primary__hint">Space</span>
-    </button>
+    <Button variant={phase === 'recording' ? 'destructive' : 'brand'} size="xl" onClick={onPress}>
+      {label}
+    </Button>
   )
 }

@@ -3,6 +3,8 @@ import { EditorState, type Extension } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { javascript } from '@codemirror/lang-javascript';
+import { syntaxHighlighting } from '@codemirror/language';
+import { classHighlighter } from '@lezer/highlight';
 
 /**
  * A deliberately limited editor.
@@ -36,6 +38,19 @@ export function editorExtensions(readOnly: boolean): Extension[] {
     history(),
     keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
     javascript({ typescript: true }),
+    // `javascript()` only supplies the parser. Without a highlighter wired on
+    // top of it, the tree is built and then nothing is done with it — which is
+    // how this editor spent its whole life rendering undifferentiated grey
+    // text while `styles.css` carried a full set of `.tok-*` colours that
+    // nothing ever emitted.
+    //
+    // `classHighlighter` rather than a `HighlightStyle`: it tags nodes with
+    // stable `tok-keyword`/`tok-string`/`tok-comment` class names and leaves
+    // the colours to CSS, which is what lets the palette come from the
+    // Brutalkit tokens and follow the light/dark theme. A `HighlightStyle`
+    // would move those colours into this file, where the theme cannot reach
+    // them.
+    syntaxHighlighting(classHighlighter),
     EditorState.readOnly.of(readOnly),
   ];
 }
