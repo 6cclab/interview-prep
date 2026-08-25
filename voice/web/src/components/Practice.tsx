@@ -5,7 +5,7 @@ import { runExerciseInBrowser } from '../testRunner/clientVerdict';
 import type { RunLog } from '../testRunner/types';
 import { usePracticeChat, type ChatSend } from '../usePracticeChat';
 import { Markdown } from './Markdown';
-import { Workbench, WorkbenchEditor } from './Workbench';
+import { Workbench, WorkbenchEditor, WorkbenchHead } from './Workbench';
 import { SolutionEditor } from './SolutionEditor';
 
 /**
@@ -258,7 +258,85 @@ export function Practice({
         </div>
       </header>
 
-      <Workbench problem={problem} track="coding">
+      <Workbench
+        problem={problem}
+        track="coding"
+        aside={
+          <section className="practice-chat" aria-label="Ask the tutor">
+            <WorkbenchHead>Ask</WorkbenchHead>
+            <div className="practice-chat-log" role="log" aria-live="polite">
+              {chat.messages.length === 0 && (
+                <p className="practice-chat-empty">
+                  Ask anything about this problem — what it is asking for, why a
+                  test is failing, or how an approach works.
+                </p>
+              )}
+              {chat.messages.map((message, index) => (
+                <div
+                  key={index}
+                  className={
+                    message.role === 'assistant'
+                      ? 'practice-turn practice-turn--assistant'
+                      : 'practice-turn practice-turn--user'
+                  }
+                >
+                  {message.role === 'assistant' ? (
+                    <Markdown source={message.content} />
+                  ) : (
+                    <p>{message.content}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+            {/* Pinned below the log rather than scrolling with it: the box you
+                type into must not move when a reply streams in. */}
+            <form
+              className="practice-ask"
+              onSubmit={(event) => {
+                event.preventDefault();
+                chat.ask(question);
+                setQuestion('');
+              }}
+            >
+              <textarea
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                // Enter sends, Shift+Enter breaks the line. A chat box that needs
+                // a mouse to send is a chat box people stop using.
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    chat.ask(question);
+                    setQuestion('');
+                  }
+                }}
+                placeholder="Ask the tutor…"
+                rows={3}
+                aria-label="Your question"
+              />
+              {chat.streaming ? (
+                <Button
+                  type="button"
+                  className="workbench__btn"
+                  variant="outline"
+                  onClick={chat.stop}
+                >
+                  Stop
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  className="workbench__btn"
+                  variant="outline"
+                  disabled={question.trim() === ''}
+                >
+                  Ask
+                </Button>
+              )}
+            </form>
+          </section>
+        }
+      >
         <WorkbenchEditor label="solution.ts">
           {loaded ? (
             <SolutionEditor value={code} onChange={onChange} />
@@ -289,78 +367,18 @@ export function Practice({
           {verdict && <VerdictLine verdict={verdict} />}
         </div>
 
-        {/* Where the transcript sits on a drill. Same slot, same scrolling, for
-            the thing that plays the same part: the conversation about the code
-            you are writing, with the test output above it because output is
-            what most questions are about. */}
+        {/* Below the code, in the centre column: the tests are about the code
+            and belong under it, not off in a side panel. Scrolls itself so a
+            long run never pushes the editor up the screen. */}
         <div className="practice-pane">
-          {logs.length > 0 && <RunOutput logs={logs} />}
-
-          <section className="practice-chat" aria-label="Ask the tutor">
-            <h2 className="workbench__label">Ask</h2>
-            <div className="practice-chat-log" role="log" aria-live="polite">
-              {chat.messages.length === 0 && (
-                <p className="practice-chat-empty">
-                  Ask anything about this problem — what it is asking for, why a
-                  test is failing, or how an approach works.
-                </p>
-              )}
-              {chat.messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={
-                    message.role === 'assistant'
-                      ? 'practice-turn practice-turn--assistant'
-                      : 'practice-turn practice-turn--user'
-                  }
-                >
-                  {message.role === 'assistant' ? (
-                    <Markdown source={message.content} />
-                  ) : (
-                    <p>{message.content}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-            <form
-              className="practice-ask"
-              onSubmit={(event) => {
-                event.preventDefault();
-                chat.ask(question);
-                setQuestion('');
-              }}
-            >
-              <textarea
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                // Enter sends, Shift+Enter breaks the line. A chat box that needs
-                // a mouse to send is a chat box people stop using.
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    chat.ask(question);
-                    setQuestion('');
-                  }
-                }}
-                placeholder="Ask the tutor…"
-                rows={3}
-                aria-label="Your question"
-              />
-              {chat.streaming ? (
-                <Button type="button" variant="outline" onClick={chat.stop}>
-                  Stop
-                </Button>
-              ) : (
-                <Button
-                  type="submit"
-                  variant="secondary"
-                  disabled={question.trim() === ''}
-                >
-                  Ask
-                </Button>
-              )}
-            </form>
-          </section>
+          {logs.length > 0 ? (
+            <RunOutput logs={logs} />
+          ) : (
+            <p className="practice-pane-empty">
+              Nothing run yet. Press Run tests to see the suite and anything
+              your code prints.
+            </p>
+          )}
         </div>
       </Workbench>
     </div>

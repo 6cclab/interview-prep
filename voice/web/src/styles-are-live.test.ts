@@ -313,6 +313,21 @@ describe('the problem column', () => {
     expect(code(read('components/Workbench.tsx'))).toMatch(/<ProblemColumn\b/);
   });
 
+  /**
+   * Three columns need three widths that add up. The problem column's fixed
+   * 560px is right for a drill's two panes and wrong beside a third: 560 plus
+   * a 300-400px aside leaves the editor 280px at a 1200px viewport. So the
+   * outer columns go fluid only in the three-column mode, and the centre keeps
+   * the remainder - the one column that cannot be read narrower.
+   */
+  it('narrows the problem column only when there is a third one', () => {
+    expect(styles).toMatch(
+      /\.workbench--three \.workbench__problem \{[^}]*width:\s*clamp\(/
+    );
+    // The two-pane width stays fixed, which is what the drill screen is.
+    expect(styles).toMatch(/\.workbench__problem \{[^}]*width:\s*560px/);
+  });
+
   it.each(['App.tsx', 'components/Practice.tsx'])(
     'is how %s reaches the pane',
     (file) => {

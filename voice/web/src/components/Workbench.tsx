@@ -24,13 +24,24 @@ interface Props {
   problem: string;
   /** Which statement the column fetches, or null for a track that shows none. */
   track: ProblemTrack | null;
-  /** The right pane: editor, toolbar, and whatever sits under them. */
+  /** The centre pane: editor, toolbar, and whatever sits under them. */
   children: ReactNode;
+  /**
+   * A third column on the right, or nothing.
+   *
+   * Present, the workbench narrows the problem column to make room — three
+   * columns out of a fixed 560px plus a fixed aside leaves the editor with
+   * whatever is left over, which at 1200px is 280px and unusable. So the two
+   * outer columns become fluid and the centre keeps the remainder, which is
+   * the right priority: the statement and the conversation are prose and read
+   * fine narrower, the code is the thing being worked on.
+   */
+  aside?: ReactNode;
 }
 
-export function Workbench({ problem, track, children }: Props) {
+export function Workbench({ problem, track, children, aside }: Props) {
   return (
-    <div className="workbench">
+    <div className={aside ? 'workbench workbench--three' : 'workbench'}>
       {track !== null && (
         <ProblemColumn
           problem={problem}
@@ -39,6 +50,7 @@ export function Workbench({ problem, track, children }: Props) {
         />
       )}
       <main className="workbench__main">{children}</main>
+      {aside && <aside className="workbench__aside">{aside}</aside>}
     </div>
   );
 }
@@ -61,8 +73,20 @@ export function WorkbenchEditor({
 }) {
   return (
     <div className="workbench__editor">
-      <div className="workbench__editor-head workbench__label">{label}</div>
+      <WorkbenchHead>{label}</WorkbenchHead>
       <div className="workbench__cm">{children}</div>
     </div>
   );
+}
+
+/**
+ * A pane's 30px label bar — `SOLUTION.TS`, `ASK`, `OUTPUT`.
+ *
+ * Its own export so the aside and the output section get the *same* bar as the
+ * editor rather than a second definition of one. The practice screen had two
+ * such definitions before this, at 12.5px/0.1em against the bar's
+ * 10.5px/0.14em, which is the kind of drift nobody sees and everybody feels.
+ */
+export function WorkbenchHead({ children }: { children: ReactNode }) {
+  return <div className="workbench__head workbench__label">{children}</div>;
 }

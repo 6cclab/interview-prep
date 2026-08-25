@@ -1497,12 +1497,30 @@ ol.md__list {
 
 .workbench__main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
+/* The third column: the tutor on practice, nothing on a drill. A divider on its
+   left, like the problem column's on its right, so the screen reads as three
+   panes of one surface rather than three panels on a page. */
+.workbench__aside {
+  flex: none; width: clamp(300px, 24vw, 400px);
+  min-height: 0; display: flex; flex-direction: column;
+  border-left: 1px solid var(--border);
+}
+
+/* Three columns. The problem column gives up its fixed 560px, because 560 plus
+   a fixed aside leaves the editor 280px at a 1200px viewport — unusable, and
+   the centre column is the one thing here that cannot be read narrower. Both
+   outer columns go fluid and the code keeps the remainder. */
+.workbench--three .workbench__problem { width: clamp(320px, 26vw, 520px); }
+
 /* --- editor --------------------------------------------------
    Fixed height, code starts at the top. CodeMirror's own DOM is
    untouched: container, gutter and theme tokens only.
 --------------------------------------------------------------- */
 .workbench__editor { flex: none; display: flex; flex-direction: column; transition: opacity 140ms linear; }
-.workbench__editor-head {
+/* Every pane's label bar: `SOLUTION.TS`, `ASK`, `OUTPUT`. One rule, emitted by
+   `WorkbenchHead` — the practice screen previously defined its own twice, at a
+   different size and tracking. */
+.workbench__head {
   flex: none; height: 30px; display: flex; align-items: center;
   justify-content: space-between; padding: 0 18px;
   border-bottom: 1px solid var(--border);
@@ -1842,7 +1860,7 @@ html:not(.dark) .drill-rail[data-state="transcription-failed"] { background: col
 html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand) 7%, var(--card)); }
 
 /* file label states — a paused autosave cannot be dismissed and forgotten */
-.workbench__editor-head [data-autosave="paused"] { color: var(--destructive); }
+.workbench__head [data-autosave="paused"] { color: var(--destructive); }
 
 /* --- scrolled back off live ----------------------------------- */
 .drill-stream[data-behind] { opacity: 0.72; }
@@ -1972,13 +1990,16 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
    rules targeting class names nothing rendered, which look like design rather
    than breakage. `styles-are-live.test.ts` holds the pairing. */
 
-/* The transcript's slot and the transcript's behaviour: the one thing in the
-   main pane that scrolls, so the editor and the toolbar above it never move. */
+/* The tests, under the code they are about. The one thing in the centre column
+   that scrolls, so a long run never pushes the editor up the screen. */
 .practice-pane {
   flex: 1; min-height: 0; overflow: auto;
-  border-top: 1px solid var(--border);
   padding: var(--gap-4) 18px 18px;
   display: flex; flex-direction: column; gap: var(--gap-4);
+}
+.practice-pane-empty {
+  margin: 0; max-width: 46ch;
+  font-size: var(--step-data); color: var(--muted-foreground);
 }
 
 .practice-verdict { margin: 0; font-size: var(--step-data); }
@@ -1992,14 +2013,18 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
 .practice-verdict--cost { color: var(--chart-2); }
 .practice-verdict--errored { color: var(--muted-foreground); }
 
-/* No border and no padding. It is not a card sitting on a page — it is what
-   this pane is for, the way the transcript is on a drill, and boxing it made
-   the screen read as a dashboard of widgets. `.practice-pane` already supplies
-   the rule above it and the gutter around it. */
+/* The right column, filling it. No border of its own — `.workbench__aside`
+   already draws the divider, and boxing the contents inside a bordered pane
+   made the screen read as a dashboard of widgets rather than one surface. */
 .practice-chat {
-  display: flex; flex-direction: column; gap: var(--gap-3); min-width: 0;
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; min-width: 0;
 }
+/* The log scrolls; the form below it does not. A compose box that drifts down
+   the screen as a reply streams is a compose box you cannot aim at. */
 .practice-chat-log {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: var(--gap-4) 18px;
   display: flex; flex-direction: column; gap: var(--gap-4);
 }
 .practice-chat-empty { margin: 0; font-size: var(--step-data); color: var(--muted-foreground); }
@@ -2022,7 +2047,12 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
   font-family: var(--drill-mono); font-size: var(--step-data); line-height: var(--lead-data);
 }
 
-.practice-ask { display: flex; flex-direction: column; gap: var(--gap-2); align-items: flex-start; }
+.practice-ask {
+  flex: none; display: flex; flex-direction: column;
+  gap: var(--gap-2); align-items: flex-start;
+  padding: var(--gap-3) 18px var(--gap-4);
+  border-top: 1px solid var(--border);
+}
 /* `transparent`, not a surface token, and that is the fix rather than a dodge.
    Measured: `:root` carries the *dark* palette (`--card` is oklch(19%),
    `--background` oklch(13%)) while this page renders light — the light values
@@ -2035,19 +2065,23 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
    on a flat surface and the heavier weight made it the loudest thing in the
    pane. Capped at the prose measure rather than stretched: a full-width
    single-line input next to a 560px column of prose reads as a search bar. */
+/* 1px, matching every other rule on this screen; the 2px came from the card
+   grid, where a panel had to read as a raised object. Full width of the column
+   now that the column is a sensible measure on its own. */
 .practice-ask textarea {
-  width: 100%; max-width: 68ch; resize: vertical; font: inherit;
+  width: 100%; resize: vertical; font: inherit;
   padding: var(--gap-2) 10px;
   border: 1px solid var(--border); background: transparent; color: inherit;
 }
 
 /* Console output from the candidate's own code. Monospace, because it is
    program output and column alignment is often the thing being read. */
+/* Inside the scrolling pane, so a plain label rather than a `WorkbenchHead` —
+   a bar with its own border-bottom nested inside a padded, scrolling region
+   reads as a pane inside a pane. Same `.workbench__label` type either way,
+   which is the part that has to agree. */
 .practice-output { display: flex; flex-direction: column; gap: var(--gap-2); }
-/* Both section headings are `.workbench__label` — the same mono uppercase rule
-   `SOLUTION.TS` uses, rather than a second definition of it that had already
-   drifted to 12.5px and 0.1em. This is only the margin reset. */
-.practice-pane h2 { margin: 0; }
+.practice-output h2 { margin: 0; }
 .practice-output-group { display: flex; flex-direction: column; gap: 2px; }
 /* Which test was running. Muted, because it labels the output rather than being
    it — the same relationship a `describe` name has to a failure list. */
