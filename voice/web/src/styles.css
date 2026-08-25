@@ -1579,17 +1579,63 @@ ol.md__list {
    selection is the browser's, not a `.cm-selectionBackground` element. */
 .drill-cm ::selection { background: color-mix(in oklab, var(--brand) 26%, transparent); }
 .drill-cm .cm-matchingBracket { background: color-mix(in oklab, var(--foreground) 14%, transparent); outline: none; }
-/* restrained highlighting, all from tokens */
-.drill-cm .tok-keyword { color: var(--chart-5); }
-.drill-cm .tok-number  { color: var(--chart-3); }
-.drill-cm .tok-string  { color: var(--chart-4); }
-/* `tok-typeName` and `tok-punctuation`, not `tok-type`/`tok-punct` — these are
-   `@lezer/highlight`'s `classHighlighter` names, and the abbreviated pair
-   matched nothing, which is why types and punctuation stayed at the default
-   foreground while keywords and strings coloured correctly. */
-.drill-cm .tok-comment,
+/* Syntax highlighting.
+ *
+ * The class names are `@lezer/highlight`'s `classHighlighter` output, wired in
+ * `SolutionEditor.tsx` — see the note there on why the colours live here and
+ * not in a `HighlightStyle`. `primary-appearances.test.ts` checks every name
+ * below against the ones that package actually emits.
+ *
+ * Four hues and a grey is the whole budget. The theme ships `--chart-1`
+ * through `--chart-5`, but `--chart-1` is byte-identical to `--foreground`
+ * (both `oklch(93% .005 250)`), so it cannot carry meaning here — anything
+ * assigned to it renders as unstyled text. That leaves blue, green, orange and
+ * rust, and everything has to be said with those.
+ *
+ * What is deliberately left at the default foreground: identifiers, function
+ * names, properties. They are the subject of the code, they are the majority
+ * of every line, and colouring them too leaves nothing uncoloured to read
+ * against. The previous palette had the opposite problem — types and
+ * punctuation were the *only* things assigned a colour beyond keywords and
+ * strings, and both went to grey, so a whole file rendered as three shades of
+ * off-white. */
+
+/* Blue: the words the language reserves. */
+.drill-cm .tok-keyword,
+.drill-cm .tok-operator { color: var(--chart-5); }
+
+/* Green: strings, the one literal with obvious edges. */
+.drill-cm .tok-string,
+.drill-cm .tok-url { color: var(--chart-4); }
+
+/* Orange: the other literals. Numbers and booleans read as data rather than
+   as language, and want to be findable at a glance in a drill where an
+   off-by-one in a constant is a plausible bug. */
+.drill-cm .tok-number,
+.drill-cm .tok-bool,
+.drill-cm .tok-atom,
+.drill-cm .tok-literal { color: var(--chart-2); }
+
+/* Rust: the type layer. Distinct from the literals it sits next to in a
+   signature — `s: string` should not read as one colour. */
 .drill-cm .tok-typeName,
-.drill-cm .tok-punctuation { color: var(--muted-foreground); }
+.drill-cm .tok-className,
+.drill-cm .tok-namespace { color: var(--chart-3); }
+
+/* Grey, and out of the way: punctuation and the comments a stub uses to
+   explain itself. Italic as well as dim — a JSDoc block is often a third of
+   the visible file, and hue alone does not separate it enough. */
+.drill-cm .tok-punctuation,
+.drill-cm .tok-meta { color: var(--muted-foreground); }
+
+.drill-cm .tok-comment {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+
+/* The one thing that should be alarming. `tok-invalid` is what the parser
+   emits where it could not make sense of the text at all. */
+.drill-cm .tok-invalid { color: var(--destructive); }
 
 /* --- toolbar + hint ladder ------------------------------------- */
 .drill-toolbar {

@@ -11,14 +11,21 @@ import type { RailState } from '../types'
  * the editor down the screen — during a timed round, at the exact moment the
  * candidate least wants the page to move.
  *
- * Idle it is quiet metadata about the file. It is never empty, because an empty
- * rail would collapse and reintroduce the movement it exists to prevent.
+ * Idle it may be empty, and often is. That is safe *because* the height is
+ * fixed in CSS rather than derived from the content — an empty rail holds its
+ * 33px and nothing below it moves, which is the whole point. It would not have
+ * been safe under the `min-height` this rule used to have.
  */
 
 interface Props {
   state: RailState
-  /** Idle copy: what the editor is and when the file last saved. */
-  idleText: string
+  /**
+   * Idle copy. Optional, and omitted in the browser editor: the save status is
+   * already on the editor's own header (`solution.ts` / `Autosave paused` /
+   * `Save failed`), and saying it twice spent a permanent strip of the drill
+   * screen repeating something the candidate can already see.
+   */
+  idleText?: string
   onRetryTranscription?: () => void
   onDismissTranscription?: () => void
   onOverwrite?: () => void
@@ -43,7 +50,7 @@ export function StatusRail({
       // of a forty-five minute drill.
       role={state === 'idle' ? undefined : 'alert'}
     >
-      {state === 'idle' && <span>{idleText}</span>}
+      {state === 'idle' && idleText && <span>{idleText}</span>}
 
       {state === 'transcription-failed' && (
         <>
