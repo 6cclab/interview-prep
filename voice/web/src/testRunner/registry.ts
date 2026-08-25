@@ -1,4 +1,11 @@
-import type { RegisteredTest, RunLog, SuiteResult, TestOutcome } from './types'
+import type {
+  FailedTest,
+  RegisteredTest,
+  RunLog,
+  SuiteProgress,
+  SuiteResult,
+  TestOutcome,
+} from './types'
 
 /**
  * `describe`/`it` collection and execution.
@@ -75,7 +82,15 @@ function render(args: unknown[]): string {
     .join(' ')
 }
 
-export async function runSuite(): Promise<SuiteResult> {
+/**
+ * `onProgress` is called just before each test runs and again once it settles,
+ * so a caller that is killed mid-suite still knows which test it died in. It is
+ * optional because the Node tests that exercise this against all 42 real suites
+ * have no use for it, and a required callback there would be noise in every one.
+ */
+export async function runSuite(
+  onProgress?: (progress: SuiteProgress) => void,
+): Promise<SuiteResult> {
   const outcomes: TestOutcome[] = []
   const logs: RunLog[] = []
   let truncated = false
@@ -83,8 +98,17 @@ export async function runSuite(): Promise<SuiteResult> {
   const console_ = globalThis.console
   const original = LEVELS.map((level) => [level, console_[level]] as const)
 
+  const failedSoFar = (): FailedTest[] =>
+    outcomes
+      .filter((o) => o.status === 'failed')
+      .map((o) => ({ suite: o.ancestorTitles.join(' > '), title: o.title }))
+
   for (const test of tests) {
     const name = [...test.ancestorTitles, test.title].join(' > ')
+    onProgress?.({
+      running: { suite: test.ancestorTitles.join(' > '), title: test.title },
+      failed: failedSoFar(),
+    })
     for (const level of LEVELS) {
       console_[level] = (...args: unknown[]): void => {
         if (logs.length >= MAX_LOG_LINES) {
@@ -111,6 +135,11 @@ export async function runSuite(): Promise<SuiteResult> {
       // permanently replaced.
       for (const [level, fn] of original) console_[level] = fn
     }
+    // Settled: nothing is in flight until the next iteration says so. Without
+    // this, a suite whose *last* test passes would leave that test named as
+    // running, and a ceiling that fired during the teardown after it would
+    // report a passing test as the one that hung.
+    onProgress?.({ running: null, failed: failedSoFar() })
   }
 
   if (truncated) {

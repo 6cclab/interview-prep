@@ -37,6 +37,28 @@ export interface SuiteResult {
 }
 
 /**
+ * What the runner knows about a run that has not finished.
+ *
+ * Reported after each test, so that when the whole-suite ceiling fires the main
+ * thread knows which test was still in flight rather than only that *something*
+ * was. That difference is the whole point: a hung *cost* test is a working
+ * answer too slow to measure, which is a legitimate `cost-red` checkpoint; a
+ * hung *correctness* test is a loop that will not end. Reporting neither and
+ * calling both `errored` inverts the distinction the drill exists to make.
+ *
+ * Sent between tests, which is the only moment it can be: `runSuite` awaits
+ * each test, so the thread yields there and nowhere else. A test that spins
+ * synchronously posts nothing after itself, which is exactly how its identity
+ * survives as "the one still running".
+ */
+export interface SuiteProgress {
+  /** The test that has just been started and has not yet reported an outcome. */
+  running: FailedTest | null
+  /** Every test that has finished and failed so far. */
+  failed: FailedTest[]
+}
+
+/**
  * The shape `voice/drill-verdict.ts`'s `classifyFailures` and
  * `failedTestsFromJson` already consume — `suite` is `ancestorTitles` joined
  * with the same ` > ` delimiter vitest's JSON reporter's consumers expect.

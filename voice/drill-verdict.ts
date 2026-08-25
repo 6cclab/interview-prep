@@ -159,6 +159,23 @@ function parseMeasurement(value: unknown): CostMeasurement | null {
 const CORRECTNESS = /—\s*correctness\b/i
 
 /**
+ * Does this suite name mark a correctness test rather than a cost one?
+ *
+ * Exported as a predicate rather than as the regex, so the convention keeps
+ * exactly one owner — the same reason `groupFailures` lives here beside the
+ * join it inverts. A second copy of this pattern is a second thing to update
+ * if the `— correctness` convention ever changes, and the failure mode of
+ * missing one is the two reds silently swapping places.
+ *
+ * Matched against the `describe` name only, never the test title: a test whose
+ * own name mentions correctness must not flip a cost failure into a
+ * correctness one.
+ */
+export function isCorrectnessSuite(suite: string): boolean {
+  return CORRECTNESS.test(suite)
+}
+
+/**
  * Which kind of red, from the failing tests' *suite* names.
  *
  * Matched against `suite` only, never the test title: the convention lives on the

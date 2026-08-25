@@ -2,7 +2,7 @@ import { transform } from 'sucrase'
 import { describe, it, resetRegistry, runSuite } from './registry'
 import { expect } from './expect'
 import { toFailedTests } from './shim'
-import type { RunLog } from './types'
+import type { RunLog, SuiteProgress } from './types'
 import type { FailedTest } from './types'
 
 /**
@@ -55,7 +55,11 @@ export interface SuiteRun {
   logs: RunLog[]
 }
 
-export async function executeSuite(exercise: Exercise): Promise<SuiteRun> {
+export async function executeSuite(
+  exercise: Exercise,
+  /** Forwarded to `runSuite`. See `SuiteProgress` for why the Worker needs it. */
+  onProgress?: (progress: SuiteProgress) => void,
+): Promise<SuiteRun> {
   const modules = new Map<string, unknown>()
 
   const require = (specifier: string): unknown => {
@@ -82,7 +86,7 @@ export async function executeSuite(exercise: Exercise): Promise<SuiteRun> {
   resetRegistry()
   new Function('require', 'module', 'exports', toCjs(exercise.test))(require, { exports: {} }, {})
 
-  const result = await runSuite()
+  const result = await runSuite(onProgress)
   // Names only, and the candidate's own printed output. `toFailedTests` drops
   // the matcher messages — those quote the fixture they compared against.
   // `logs` are not covered by that rule: nothing but the code in the editor

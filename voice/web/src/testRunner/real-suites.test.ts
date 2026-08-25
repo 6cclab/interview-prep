@@ -5,6 +5,8 @@ import { expect as shimExpect } from './expect'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { executeSuite, type Exercise } from './execute'
+import { verdictForTimeout } from './runner'
+import type { SuiteProgress } from './types'
 import { stripSuiteComments } from '../../../suite-comments'
 
 /**
@@ -190,5 +192,83 @@ describe('every authored suite runs through the browser runner', () => {
     await executeSuite(first)
     const again = await executeSuite(first)
     expect(again.failed).toHaveLength((first.test.match(/\bit\(/g) ?? []).length)
+  })
+})
+
+/**
+ * Progress reporting, through the module the Worker actually runs.
+ *
+ * `runner.ts` said the overrun case could not be measured because "no
+ * brute-force implementations are committed to the repo". That is true of the
+ * *problems* and it is not what this needs. What the classification depends on
+ * is that `executeSuite` reports which test it is in, in order, with the
+ * `describe` name attached — and that is checkable against a suite shaped like
+ * a real one, without anything hanging.
+ *
+ * The hang itself is covered in `runner.test.ts`, against a Worker that reports
+ * and then goes quiet, which is what a spinning test looks like from outside.
+ * It is not reproduced here on purpose: a real `while (true)` cannot be
+ * preempted in-process, and escaping it by throwing out of `runSuite` would
+ * skip its `resetRegistry()` and leak registered tests into the 42 real suites
+ * this file runs afterwards.
+ */
+describe('progress reporting', () => {
+  const SUITE = `
+    import { describe, it, expect } from 'vitest'
+    import { slow } from './solution'
+    describe('slow — correctness', () => {
+      it('returns the right answer', () => { expect(slow(2)).toBe(4) })
+    })
+    describe('slow — cost', () => {
+      it('stays under budget', () => { expect(1).toBe(2) })
+    })
+  `
+  const SOLUTION = `export function slow(n) { return n * 2 }`
+
+  it('names each test before it runs, with its suite', async () => {
+    const seen: SuiteProgress[] = []
+    await executeSuite({ test: SUITE, solution: SOLUTION, utils: {} }, (p) =>
+      seen.push(structuredClone(p)),
+    )
+    const started = seen.filter((p) => p.running !== null).map((p) => p.running)
+    expect(started).toEqual([
+      { suite: 'slow — correctness', title: 'returns the right answer' },
+      { suite: 'slow — cost', title: 'stays under budget' },
+    ])
+  })
+
+  /**
+   * And nothing is left in flight once a test settles. Without that clearing
+   * report, a ceiling firing during the teardown after the last test would
+   * name a test that had already passed as the one that hung.
+   */
+  it('clears the running test once it settles', async () => {
+    const seen: SuiteProgress[] = []
+    await executeSuite({ test: SUITE, solution: SOLUTION, utils: {} }, (p) =>
+      seen.push(structuredClone(p)),
+    )
+    expect(seen.at(-1)?.running).toBeNull()
+  })
+
+  // The failures accumulate as they happen, which is what lets a timeout after
+  // a correctness failure report the wrong answer instead of "your drill broke".
+  it('carries failures that have already happened', async () => {
+    const seen: SuiteProgress[] = []
+    await executeSuite({ test: SUITE, solution: SOLUTION, utils: {} }, (p) =>
+      seen.push(structuredClone(p)),
+    )
+    expect(seen.at(-1)?.failed).toEqual([
+      { suite: 'slow — cost', title: 'stays under budget' },
+    ])
+  })
+
+  // The verdict that a hung cost test produces, which is the point of it all.
+  it('classifies a hung cost test as cost-red, not errored', () => {
+    expect(
+      verdictForTimeout(
+        { running: { suite: 'slow — cost', title: 'stays under budget' }, failed: [] },
+        30_000,
+      ).kind,
+    ).toBe('cost-red')
   })
 })
