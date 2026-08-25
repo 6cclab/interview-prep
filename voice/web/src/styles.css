@@ -1730,6 +1730,8 @@ ol.md__list {
   display: flex; flex-direction: column; gap: 14px;
   transition: opacity 140ms linear;
 }
+/* Verdicts and hints: a timestamp gutter, then the card. Not messages — see
+   the note in SessionStream.tsx. */
 .drill-entry { display: flex; gap: 14px; }
 .drill-entry > time {
   flex: none; width: 76px;
@@ -1737,8 +1739,37 @@ ol.md__list {
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted-foreground);
 }
 .drill-entry p { margin: 0; color: var(--muted-foreground); text-wrap: pretty; }
-.drill-entry[data-live] > time { color: var(--foreground); }
-.drill-entry[data-live] p { color: var(--foreground); font-size: var(--step-live); }
+
+/* --- spoken turns, as the design system's Message ----------------
+   The structure (row direction, alignment, the header's placement) is
+   Brutalkit's. What is added here is the one thing it has no notion of: which
+   turn is *current*.
+
+   Only the most recent interviewer turn is live. It gets `--foreground` at
+   `--step-live` while everything above sits at `--muted-foreground`, and that
+   contrast is what makes forty-five minutes of prose readable as a
+   conversation with a position in it rather than as a wall. A verdict is never
+   live — it is a measurement that already happened, and brightening it would
+   spend the loudest treatment on screen on the thing least worth re-reading.
+------------------------------------------------------------------ */
+.drill-messages { gap: var(--gap-3); }
+
+.drill-message [data-slot='message-header'] {
+  font-family: var(--drill-mono); font-size: var(--step-label);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.drill-message p { margin: 0; color: var(--muted-foreground); text-wrap: pretty; }
+
+.drill-message[data-live] [data-slot='message-header'] { color: var(--foreground); }
+.drill-message[data-live] p { color: var(--foreground); font-size: var(--step-live); }
+
+/* Brutalkit caps a bubble at 80% of its row, which is the right rule for a
+   chat panel and the wrong one for a stream that is sometimes the full width
+   of a 1500px screen — 80% of that is about 100 characters a line, well past
+   where prose stops being readable. `min()` keeps the design system's rule
+   wherever it is the tighter of the two and adds a reading measure where it is
+   not, rather than overriding it outright. */
+.drill-message [data-slot='bubble'] { max-inline-size: min(80%, 68ch); }
 
 /* --- verdicts, as stream entries ------------------------------
    Red carries one meaning: the answer is wrong. Cost is ochre and
