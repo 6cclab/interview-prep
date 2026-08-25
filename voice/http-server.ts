@@ -2186,7 +2186,12 @@ export function configuredSpeaker(root: string, makeSpeaker: (opts: SayOptions) 
 function announceBackends(): void {
   const backends = backendSummary()
   for (const [track, backend] of Object.entries(backends)) {
-    console.log(`  ${track}: ${describeBackend(backend, modelFor(backend))}`)
+    // Resolved per track, so a `VOICE_MODEL_PRACTICE` override is visible in
+    // the banner. A hybrid you cannot see is one you will misattribute a bad
+    // drill to, and that applies to the model as much as to the transport.
+    console.log(
+      `  ${track}: ${describeBackend(backend, modelFor(backend, process.env, track as Track))}`,
+    )
   }
   if (Object.values(backends).includes('ollama')) {
     void preloadOllama().then((message) => console.log(`  ${message}`))

@@ -78,6 +78,50 @@ const TRACK_VAR: Record<Track, string> = {
 /** Every per-track variable name, for tests and for error messages. */
 export const TRACK_VARS: readonly string[] = Object.values(TRACK_VAR)
 
+/**
+ * Per-track *model* override variable names.
+ *
+ * The backend knob was already per track, because the tracks are not equally
+ * forgiving of a weaker model. The model knob was not, which left a gap: two
+ * tracks on ollama had to be on the *same* ollama model, so the only way to
+ * give one of them a faster model was to move it to a different transport
+ * entirely.
+ *
+ * That gap is what made the practice tutor cost ~78 seconds a reply. It shares
+ * `ollama` with the drills and therefore shared their 17GB reasoning model,
+ * whose deliberation is the whole latency — and a tutor answering "what does
+ * this test check?" wants a different trade from an interviewer conducting a
+ * 45-minute round.
+ *
+ * Measured through this route, same question and buffer, warm, on the LAN box:
+ *
+ * | `VOICE_MODEL_PRACTICE` | reply | notes |
+ * |---|---|---|
+ * | unset (`qwen3.8:latest`) | ~78s | the drills' model; deliberates at length |
+ * | `qwen3:8b` | 43s | still a reasoning model, smaller |
+ * | `llama3.1:8b` | **7s** | no thinking channel at all |
+ *
+ * The latency *is* the deliberation, which is why the non-reasoning model is an
+ * order of magnitude faster rather than merely proportionally so. It is also
+ * visibly weaker prose, so this is a trade rather than a free win — hence a
+ * knob and not a new default. Nothing here is changed by default.
+ *
+ * Spelled out rather than built from the track name, for the same reason as
+ * the table above: grepping for `VOICE_MODEL_PRACTICE` has to find this.
+ */
+const TRACK_MODEL_VAR: Record<Track, string> = {
+  mock: 'VOICE_MODEL_MOCK',
+  design: 'VOICE_MODEL_DESIGN',
+  coding: 'VOICE_MODEL_CODING',
+  coach: 'VOICE_MODEL_COACH',
+  assisted: 'VOICE_MODEL_ASSISTED',
+  debug: 'VOICE_MODEL_DEBUG',
+  practice: 'VOICE_MODEL_PRACTICE',
+}
+
+/** Every per-track model variable name, for tests and for error messages. */
+export const TRACK_MODEL_VARS: readonly string[] = Object.values(TRACK_MODEL_VAR)
+
 /** The global variable, applied to any track without its own override. */
 const GLOBAL_VAR = 'VOICE_BACKEND'
 
@@ -171,11 +215,33 @@ export function backendSummary(env: NodeJS.ProcessEnv = process.env): Record<Tra
  */
 export function transportLabel(track: Track, env: NodeJS.ProcessEnv = process.env): string {
   const backend = chooseBackend(track, env)
-  return `${backend} / ${modelFor(backend, env)}`
+  // The track is passed, so a transcript records the model that *this* track
+  // ran on rather than the one the backend would have used by default. That is
+  // the whole point of the header — see the note above.
+  return `${backend} / ${modelFor(backend, env, track)}`
 }
 
-/** The model a backend would use, given `env`. Shared by the label and the banner. */
-export function modelFor(backend: Backend, env: NodeJS.ProcessEnv = process.env): string {
+/**
+ * The model a backend would use, given `env`. Shared by the label and the banner.
+ *
+ * Precedence: the track's own variable, then the backend's global one, then the
+ * built-in default. `track` is optional because two callers legitimately have a
+ * backend and no track — the startup banner's per-backend line, and tests that
+ * only care about the global resolution.
+ *
+ * An empty or whitespace-only value is treated as unset, matching
+ * `chooseBackend`, so `VOICE_MODEL_PRACTICE= pnpm mock:web` clears an inherited
+ * export rather than asking ollama for a model named "".
+ */
+export function modelFor(
+  backend: Backend,
+  env: NodeJS.ProcessEnv = process.env,
+  track?: Track,
+): string {
+  if (track !== undefined) {
+    const perTrack = env[TRACK_MODEL_VAR[track]]
+    if (perTrack !== undefined && perTrack.trim() !== '') return perTrack.trim()
+  }
   switch (backend) {
     case 'ollama':
       return env.OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL
@@ -203,13 +269,17 @@ export function streamForBackend(
   log: (line: string) => void = console.log,
 ): StreamFn {
   const backend = chooseBackend(track)
-  const model = modelFor(backend)
+  const model = modelFor(backend, process.env, track)
   log(describeBackend(backend, model))
   switch (backend) {
     case 'ollama':
-      return ollamaStream()
+      // Passed explicitly rather than left to `ollamaStream`'s own
+      // `OLLAMA_MODEL` lookup: that lookup cannot see the track, so a per-track
+      // override would have been resolved here for the log line and then
+      // silently ignored for the actual request.
+      return ollamaStream({ model })
     case 'openai':
-      return openaiStream()
+      return openaiStream({ model })
     case 'api':
       return anthropicStream(new Anthropic(), model)
     case 'cli':
