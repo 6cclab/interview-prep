@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from 'brutalkit/button';
-import type { DrillVerdict } from '../../../drill-verdict';
+import { groupFailures, type DrillVerdict } from '../../../drill-verdict';
 import { runExerciseInBrowser } from '../testRunner/clientVerdict';
 import type { RunLog } from '../testRunner/types';
 import { usePracticeChat, type ChatSend } from '../usePracticeChat';
@@ -55,6 +55,15 @@ function save(slug: string, code: string): void {
   }
 }
 
+/**
+ * The verdict as one line, for the toolbar.
+ *
+ * The toolbar is a fixed strip that stays put while the pane below it scrolls,
+ * so this has to stay one line whatever happened — a seven-item failure list
+ * lived here once and grew the strip until it pushed the editor around and
+ * collided with the output. The list moved to `FailureList`, in the pane. What
+ * belongs here is the answer to "what happened", visible without scrolling.
+ */
 function VerdictLine({ verdict }: { verdict: DrillVerdict }) {
   if (verdict.kind === 'green') {
     return (
@@ -82,15 +91,52 @@ function VerdictLine({ verdict }: { verdict: DrillVerdict }) {
   const tone = correctness
     ? 'practice-verdict--wrong'
     : 'practice-verdict--cost';
+  const count = verdict.failed.length;
   return (
-    <div className={`practice-verdict ${tone}`}>
-      <p>{correctness ? 'Wrong answer.' : 'Right answer, too expensive.'}</p>
-      <ul>
-        {verdict.failed.map((name) => (
-          <li key={name}>{name}</li>
-        ))}
-      </ul>
-    </div>
+    <p className={`practice-verdict ${tone}`}>
+      {correctness ? 'Wrong answer.' : 'Right answer, too expensive.'}{' '}
+      <span className="practice-verdict-count">
+        {count} {count === 1 ? 'test' : 'tests'} failed
+      </span>
+    </p>
+  );
+}
+
+/**
+ * Which tests failed, with the suite said once.
+ *
+ * Every name arrives as `<suite> > <title>`, and on a single-suite problem that
+ * meant seven rows each opening with the same thirty characters — the part that
+ * distinguishes them pushed to the right, past where the eye starts. The suite
+ * is a heading now and the rows are just the titles, which is the same shape
+ * vitest itself prints and for the same reason.
+ *
+ * `groupFailures` comes from `drill-verdict.ts`, next to the join it inverts,
+ * so the delimiter keeps exactly one owner.
+ */
+function FailureList({ verdict }: { verdict: DrillVerdict }) {
+  if (verdict.kind !== 'correctness-red' && verdict.kind !== 'cost-red')
+    return null;
+  const tone =
+    verdict.kind === 'correctness-red'
+      ? 'practice-failures practice-failures--wrong'
+      : 'practice-failures practice-failures--cost';
+  return (
+    <section className={tone} aria-label="Failing tests">
+      <h2 className="workbench__label">Failing</h2>
+      {groupFailures(verdict.failed).map((group, index) => (
+        <div key={index} className="practice-failure-group">
+          {group.suite !== '' && (
+            <p className="practice-failure-suite">{group.suite}</p>
+          )}
+          <ul>
+            {group.titles.map((title) => (
+              <li key={title}>{title}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -390,7 +436,9 @@ export function Practice({
               busy, and is exactly what makes someone press it again. */}
           <Button
             type="button"
-            className={running ? 'workbench__btn primary-wait' : 'workbench__btn'}
+            className={
+              running ? 'workbench__btn primary-wait' : 'workbench__btn'
+            }
             variant="outline"
             onClick={onRun}
             disabled={running}
@@ -413,8 +461,11 @@ export function Practice({
               Running the suite
               <span className="workbench__caret" aria-hidden="true" />
             </p>
-          ) : logs.length > 0 ? (
-            <RunOutput logs={logs} />
+          ) : verdict !== null || logs.length > 0 ? (
+            <>
+              {verdict && <FailureList verdict={verdict} />}
+              {logs.length > 0 && <RunOutput logs={logs} />}
+            </>
           ) : (
             <p className="practice-pane-empty">
               Nothing run yet. Press Run tests to see the suite and anything

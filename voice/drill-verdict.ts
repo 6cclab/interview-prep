@@ -65,9 +65,40 @@ export function parseCostMeasurement(messages: string[] | undefined): CostMeasur
   return null
 }
 
+/** The one place the display delimiter is written. See `failedTestName`. */
+const NAME_DELIMITER = ' > '
+
 /** `<suite> > <title>` — the display form, built here so the delimiter is ours. */
 export function failedTestName(test: FailedTest): string {
-  return `${test.suite} > ${test.title}`
+  return `${test.suite}${NAME_DELIMITER}${test.title}`
+}
+
+/**
+ * The inverse, for a screen that wants to show the suite once instead of on
+ * every row.
+ *
+ * It lives here rather than in the component that needs it because the
+ * delimiter has to have exactly one owner. A UI splitting on a `' > '` it
+ * assumed would go on matching a join it cannot see, and the failure mode is
+ * silent: titles containing the delimiter would quietly lose their tail, or a
+ * changed join would leave every row rendering as one undifferentiated string.
+ *
+ * Splits on the *first* delimiter only, because a test title may legitimately
+ * contain `>` — several in this repo describe comparisons. A name with no
+ * delimiter at all is returned whole as the title with an empty suite, which is
+ * the honest reading: something produced it that this function did not.
+ */
+export function groupFailures(failed: string[]): { suite: string; titles: string[] }[] {
+  const groups: { suite: string; titles: string[] }[] = []
+  for (const name of failed) {
+    const at = name.indexOf(NAME_DELIMITER)
+    const suite = at === -1 ? '' : name.slice(0, at)
+    const title = at === -1 ? name : name.slice(at + NAME_DELIMITER.length)
+    const last = groups.at(-1)
+    if (last && last.suite === suite) last.titles.push(title)
+    else groups.push({ suite, titles: [title] })
+  }
+  return groups
 }
 
 export type DrillVerdict =

@@ -2006,8 +2006,50 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
   font-size: var(--step-data); color: var(--muted-foreground);
 }
 
-.practice-verdict { margin: 0; font-size: var(--step-data); }
-.practice-verdict ul { margin: 6px 0 0; padding-left: 18px; }
+/* One line, always. The toolbar is a fixed strip and the pane below it is what
+   scrolls; a verdict that can grow pushes the editor around. The detail lives
+   in `.practice-failures`. */
+.practice-verdict { margin: 0; font-size: var(--step-data); white-space: nowrap; }
+/* "7 tests failed" — the count, quieter than the verdict it qualifies. The
+   verdict is the thing to read; the number is context for it. */
+.practice-verdict-count { color: var(--muted-foreground); }
+
+/* The failing tests, in the pane. */
+.practice-failures { display: flex; flex-direction: column; gap: var(--gap-2); }
+.practice-failures h2 { margin: 0; }
+.practice-failure-group { display: flex; flex-direction: column; gap: 2px; }
+/* The suite, once. Every row used to open with the same thirty characters,
+   which pushed the part that distinguishes them past where the eye starts. */
+.practice-failure-suite {
+  margin: 0; font-family: var(--drill-mono);
+  font-size: var(--step-label); letter-spacing: var(--track-label);
+  color: var(--muted-foreground);
+}
+.practice-failures ul {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column;
+}
+/* A rule down the left rather than a bullet or a border box: it groups the
+   rows as one failure set without drawing a card, and it carries the colour
+   that says which kind of red this is. */
+.practice-failures li {
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid currentColor;
+  font-size: var(--step-data); line-height: var(--lead-data);
+  text-wrap: pretty;
+}
+/* The two reds again, and for the third time the same reason: a wrong answer
+   and a working answer that costs too much are opposite next moves. The
+   distinction survives `drill-verdict.ts` byte-identical only to be thrown
+   away here if both lists render the same colour. */
+.practice-failures--wrong { color: var(--destructive); }
+.practice-failures--cost { color: var(--chart-2); }
+/* The titles read at full contrast; only the rule keeps the verdict colour.
+   Seven lines of saturated red is a wall, and the colour has already been
+   spent once on the line above. */
+.practice-failures li { color: var(--foreground); }
+.practice-failures--wrong li { border-left-color: var(--destructive); }
+.practice-failures--cost li { border-left-color: var(--chart-2); }
 .practice-verdict--green { color: var(--chart-4); }
 /* The two reds are different colours on purpose. A wrong answer and a correct
    answer that costs too much are opposite next moves, and the drill's whole

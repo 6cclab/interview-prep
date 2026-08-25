@@ -232,6 +232,38 @@ describe('the practice screen', () => {
     expect(wrong?.[1]).not.toBe(cost?.[1]);
   });
 
+  /**
+   * And on the failure list, which is the same distinction one layer down.
+   *
+   * The list moved out of the toolbar into the pane, and a new pair of classes
+   * came with it. A pair that renders in one colour flattens correctness-red
+   * and cost-red at the very last step, after `drill-verdict.ts` carried them
+   * apart byte-identically the whole way.
+   */
+  it('keeps the two reds apart on the failure list as well', () => {
+    const wrong = /\.practice-failures--wrong \{[^}]*color:\s*var\((--[a-z0-9-]+)\)/.exec(styles);
+    const cost = /\.practice-failures--cost \{[^}]*color:\s*var\((--[a-z0-9-]+)\)/.exec(styles);
+    expect(wrong?.[1]).toBeTruthy();
+    expect(cost?.[1]).toBeTruthy();
+    expect(wrong?.[1]).not.toBe(cost?.[1]);
+  });
+
+  /**
+   * The suite name is rendered once per group, not once per row. Reversing this
+   * is not a crash — it is seven rows that each open with the same thirty
+   * characters, which is what this replaced.
+   */
+  it('says the suite once, via the shared splitter', () => {
+    expect(component).toContain('groupFailures');
+    expect(component).toContain('practice-failure-suite');
+  });
+
+  // The toolbar strip must stay one line: it is fixed while the pane scrolls,
+  // so a verdict that can grow pushes the editor around. It did, with seven.
+  it('keeps the toolbar verdict to a single line', () => {
+    expect(styles).toMatch(/\.practice-verdict \{[^}]*white-space:\s*nowrap/);
+  });
+
   it('is the design system’s Button here too', () => {
     expect(component).toContain("from 'brutalkit/button'");
     expect(component).not.toMatch(/<button\b/);
