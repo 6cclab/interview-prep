@@ -1,0 +1,186 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/6cclab/interview-prep
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # `voice/db/postgres.test.ts` starts a real cluster with `initdb` rather
+      # than talking to a service container, because what it tests is mostly not
+      # TypeScript: whether `REVOKE SELECT ON problem` actually stops a query,
+      # whether a row-level policy actually filters. Those need a database that
+      # can be created from scratch with the roles in `schema.sql`.
+      #
+      # The runner image ships Postgres but does not put its binaries on PATH.
+      - name: Put Postgres on PATH
+        run: |
+          bindir=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)
+          echo "$bindir" >> "$GITHUB_PATH"
+
+      # Fail here, loudly, rather than three steps later as a silent skip. The
+      # DB suite calls `describe.skip` when there is no `initdb`, which is right
+      # for a laptop running a coding drill and catastrophic in CI: the gate
+      # would go green having verified none of the grants it exists to verify.
+      - name: Confirm initdb is reachable
+        run: initdb --version
+
+      - run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test:harness 2>&1 | tee /tmp/harness.log
+
+      # Belt and braces on the same failure. `initdb --version` proves the
+      # binary exists; this proves the suite that needs it actually ran. Asserts
+      # on "nothing skipped" rather than on a named test, so it survives a
+      # rename and still fails if the cluster silently stops starting.
+      - name: Confirm the database tests were not skipped
+        run: |
+          if grep -qi 'skipped' /tmp/harness.log; then
+            echo "::error::tests skipped — the Postgres cluster probably did not start"
+            grep -i 'skipped' /tmp/harness.log
+            exit 1
+          fi
+          grep -q 'voice/db/postgres.test.ts' /tmp/harness.log || {
+            echo "::error::the voice/db suite did not appear in the run at all"; exit 1; }
+
+      # The problems tree is content, not code, and typecheck cannot see most of
+      # what can break in it — a missing README, a stub that does not compile
+      # against its own suite. AGENTS.md requires this to say `Nothing broken`.
+      - run: pnpm exercises
+
+  build-and-deploy:
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Self-hosted, and that is a performance decision rather than a network one:
+    # the image compiles whisper.cpp from source, and this runner is amd64, so
+    # the build is native. A hosted arm64 build of the same Dockerfile goes
+    # through QEMU and takes many times longer.
+    runs-on: [self-hosted, 6cclab]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch secrets from Infisical
+        uses: infisical/secrets-action@v1.0.9
+        with:
+          method: 'oidc'
+          domain: 'https://infisical.6cclab.dev'
+          identity-id: '2eff097e-da38-4233-b537-25bfb634e9a4'
+          project-slug: 'github-actions-wc-rx'
+          env-slug: 'dev'
+          secret-path: '/deploy'
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ env.GHCR_TOKEN }}
+
+      # `linux/amd64` named explicitly rather than left to the runner's default.
+      # The Dockerfile branches on TARGETARCH to pick a piper release, and a
+      # wrong guess there surfaces as "piper is not on PATH" — which reads as a
+      # missing install rather than a wrong architecture.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max,compression=zstd,compression-level=3
+
+      - name: Checkout deployment repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: deployment
+          repository: 6cclab/interview-prep-deployment
+          token: ${{ env.PAT }}
+
+      - name: Install Kustomize
+        run: |
+          KUSTOMIZE_VERSION=5.6.0
+          curl -sL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" -o kustomize.tar.gz
+          tar xzf kustomize.tar.gz && sudo mv kustomize /usr/local/bin/
+          rm -f kustomize.tar.gz
+
+      # The full 40-char SHA, per the deployment-repo convention. A `latest` tag
+      # is not reliably resolved and causes ErrImagePull; a short SHA is not what
+      # the other deployment repos carry.
+      #
+      # This commit is the deploy: ArgoCD watches the deployment repo, so the
+      # history of that one file is the release history.
+      - name: Update image tag
+        working-directory: deployment/envs/dev
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          kustomize edit set image ${{ env.IMAGE }}=${{ env.IMAGE }}:${{ github.sha }}
+          cd ../..
+          git add -A
+          if git diff --cached --quiet; then echo "No changes detected"; exit 0; fi
+          git commit -m "deploy interview-prep to ${{ github.sha }}"
+          git push origin main
+
+      - name: Sync ArgoCD
+        uses: clowdhaus/argo-cd-action/@main
+        with:
+          version: 3.2.1
+          command: app
+          options: >-
+            sync interview-prep
+            --grpc-web
+            --server argocd.apps.dev-01.6cclab.dev
+            --auth-token ${{ env.ARGO_TOKEN }}
+
+      # Fail the deploy when the rollout does not go healthy, rather than
+      # reporting success and leaving a crashlooping pod for someone to find.
+      #
+      # Ingestion is not a step here: it runs inside the cluster as an ArgoCD
+      # PreSync hook, before the new pods roll. That ordering matters — the
+      # server loads every problem into memory at boot and serves from that
+      # cache, so ingesting *after* a rollout changes the database and nothing
+      # else, and `/readyz` correctly keeps the pod out of the Service until
+      # something restarts it. See the deployment repo's `ingest.yaml`.
+      - name: Wait for the rollout to go healthy
+        uses: clowdhaus/argo-cd-action/@main
+        with:
+          version: 3.2.1
+          command: app
+          options: >-
+            wait interview-prep
+            --grpc-web
+            --server argocd.apps.dev-01.6cclab.dev
+            --auth-token ${{ env.ARGO_TOKEN }}
+            --health
+            --timeout 600
