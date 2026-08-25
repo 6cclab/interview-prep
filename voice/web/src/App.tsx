@@ -318,11 +318,16 @@ function DrillScreen({ route, dark, onToggleTheme, onGoHome }: DrillScreenProps)
   const railState: RailState =
     solution.status === 'conflict' ? 'save-conflict' : transcriptFailed ? 'transcription-failed' : 'idle'
 
+  // Nothing at all in the browser editor. This used to read "Browser editor ·
+  // no type checking — solution.ts saved": the first half is true, unchanging,
+  // and obvious from the editor being on screen, and the second half is already
+  // rendered on the editor's own header a few pixels below. The rail keeps its
+  // fixed height either way, so removing the text moves nothing — and the two
+  // states worth interrupting for, a save conflict and a failed transcription,
+  // still take it over.
   const railIdleText =
     editorMode === 'browser'
-      ? solution.status === 'saving'
-        ? 'Browser editor · no type checking — saving'
-        : 'Browser editor · no type checking — solution.ts saved'
+      ? undefined
       : `${track.kicker} · ${track.budgetMinutes === null ? 'spoken' : `${track.budgetMinutes} minutes, spoken`}`
   const onRunTests = useCallback(() => {
     void runAfterSave(editorMode, solution.save, async () => {
