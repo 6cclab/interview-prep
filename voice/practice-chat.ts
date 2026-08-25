@@ -110,12 +110,18 @@ export function buildPracticeChatPrompt(root: string, problem: ProblemLocation):
     throw new Error(`Cannot open practice chat for "${problem.slug}": missing problem documents`)
   }
 
-  const dir = `problems/${problem.pattern}/${problem.slug}`
+  // Bare filenames, never the paths `practiceChatPaths` returns.
+  //
+  // A problem lives at `problems/<pattern>/<slug>/`, so the path *is* the
+  // answer — labelling the README with where it came from would hand the tutor
+  // the pattern for free, in a mode whose whole rule is that the tutor knows
+  // nothing the learner cannot read. It can still name the technique after
+  // reading the problem; that is teaching rather than being told.
   return [
     readFileSync(promptPath, 'utf8'),
-    `<file path="${dir}/README.md">\n${readme}\n</file>`,
-    `<file path="${dir}/stub.ts">\n${stub}\n</file>`,
+    `<file name="README.md">\n${readme}\n</file>`,
+    `<file name="stub.ts">\n${stub}\n</file>`,
     // Stripped, exactly as the browser's copy is. See the file comment.
-    `<file path="${dir}/solution.test.ts">\n${stripSuiteComments(suite)}\n</file>`,
+    `<file name="solution.test.ts">\n${stripSuiteComments(suite)}\n</file>`,
   ].join('\n\n')
 }
