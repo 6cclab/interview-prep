@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -18,7 +18,8 @@ import { join } from 'node:path'
  * temporary directory under a long project path blows past that; the failure is
  * a confusing `psql: error: Unix-domain socket path ... is too long` that names
  * neither the cluster nor the test. `-h 127.0.0.1` sidesteps the limit entirely
- * and is what a deployment connects over anyway.
+ * and is what a deployment connects over anyway. The server still *opens* a
+ * socket, so it is pointed at the throwaway directory — see `startCluster`.
  *
  * **Not a vitest `globalSetup`.** `vitest.config.ts` explains why the repo has
  * none: a globalSetup runs for every `vitest run`, including a single coding
@@ -51,10 +52,11 @@ export const NO_POSTGRES =
 
 export function startCluster(port = 55_432): Cluster {
   // `mkdtemp` under the OS temp dir, which is short on macOS and Linux alike.
-  // The data directory has no length limit; only the socket did, and there is
-  // no socket.
+  // The data directory has no length limit; the socket does, and this keeps it
+  // well under.
   const dir = mkdtempSync(join(tmpdir(), 'voice-pg-'))
   const data = join(dir, 'data')
+  const logFile = join(dir, 'log')
 
   const run = (bin: string, args: string[]): void => {
     execFileSync(bin, args, { stdio: 'pipe' })
@@ -69,14 +71,37 @@ export function startCluster(port = 55_432): Cluster {
       data,
       '-w',
       '-o',
-      `-p ${port} -c listen_addresses=127.0.0.1 -c fsync=off -c full_page_writes=off`,
+      // `unix_socket_directories` is pointed at the throwaway directory rather
+      // than left at the build's default, and that default is the whole reason
+      // this is here: Debian and Ubuntu compile it to `/var/run/postgresql`,
+      // which exists and is owned by the `postgres` user. Anyone else gets
+      // `pg_ctl: could not start server` with the actual cause — a socket the
+      // server may not create — only in the log file. Homebrew defaults to
+      // `/tmp`, so this never fails on a Mac and always fails on CI.
+      //
+      // Connections still go over TCP; this only gives the socket somewhere
+      // legal to live. The directory is short, so the 103-byte path cap the
+      // header comment describes is not in play.
+      `-p ${port} -c listen_addresses=127.0.0.1 -c unix_socket_directories=${dir} ` +
+        `-c fsync=off -c full_page_writes=off`,
       '-l',
-      join(dir, 'log'),
+      logFile,
       'start',
     ])
   } catch (err) {
+    // The postmaster's own log, before the directory holding it is deleted.
+    //
+    // Without this the failure is `pg_ctl: could not start server` and nothing
+    // else, because every interesting line went to a file that this `catch`
+    // then removes. That cost a full CI round trip to diagnose once.
+    let log = ''
+    try {
+      log = readFileSync(logFile, 'utf8').trim()
+    } catch {
+      log = '(the postmaster wrote no log)'
+    }
     rmSync(dir, { recursive: true, force: true })
-    throw err
+    throw new Error(`${err instanceof Error ? err.message : String(err)}\n\npostgres log:\n${log}`)
   }
 
   return {
