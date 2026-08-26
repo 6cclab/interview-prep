@@ -32,7 +32,7 @@ import {
   type VoiceMode,
 } from './problems'
 import { buildExercise } from './coding-exercise'
-import { readSolution, writeSolution, versionOf } from './solution-file'
+import { versionOf } from './solution-file'
 import { findCompetency, listCompetencies } from './competencies'
 import { findExercise, listExercises } from './exercises'
 import { runDebugTests, debugVerdictCue, type DebugVerdict } from './debug-tests'
@@ -1221,8 +1221,15 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         return
       }
 
+      // Through the work store, so a deployed instance reads and writes this
+      // person's buffer rather than the one `solution.ts` sitting in the
+      // container's checkout. Locally the store still writes that exact file —
+      // there the file IS the buffer, and `Run tests`, `pnpm reset` and
+      // `/review` all depend on it being so.
+      const work = workFor(deps, userId)
+
       if (req.method === 'GET') {
-        const file = readSolution(deps.root, slug)
+        const file = await work.readSolution(slug)
         if (file === null) {
           sendJson(res, 404, { error: 'Unknown problem.' })
           return
@@ -1245,7 +1252,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         return
       }
 
-      const outcome = writeSolution(deps.root, slug, text, version)
+      const outcome = await work.writeSolution(slug, text, version)
       if (outcome === 'missing') {
         sendJson(res, 404, { error: 'Unknown problem.' })
         return
@@ -1254,10 +1261,13 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // 409, the same shape `POST /end` uses for its non-re-entrancy latch.
         // The client keeps the typed buffer; it must never resolve this by
         // discarding what the candidate wrote.
-        const current = readSolution(deps.root, slug)!
+        const current = await work.readSolution(slug)
         sendJson(res, 409, {
-          error: 'solution.ts changed on disk since you opened it.',
-          version: current.version,
+          // Says what changed rather than where it lives: deployed there is no
+          // disk and no `solution.ts`, and an error naming a file nobody can
+          // open is worse than one naming none.
+          error: 'This problem’s buffer changed since you opened it.',
+          version: current?.version,
         })
         return
       }

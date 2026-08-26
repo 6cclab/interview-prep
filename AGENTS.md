@@ -256,6 +256,18 @@ you need once.
   list both sides read, so the UI cannot offer what the parser would refuse.
   A picker is not the enforcement — a hand-typed hash or a `curl` skips it.
 
+**The buffer follows the same split.** `WorkStore.readSolution` /
+`writeSolution` is the seam. Locally the buffer *is*
+`problems/<pattern>/<slug>/solution.ts`, which is what makes `Run tests`,
+`pnpm reset` and `/review` all read the same bytes without any of them knowing
+an editor exists. Deployed it is a `solution_buffer` row per person, seeded on
+first read from the problem's `stub` document — never `solution`, which is a
+spoiler the `app_runtime` grant cannot read at all. A first read serves the stub
+without writing a row: the buffer exists once something is typed, not once
+something is opened. Writes are compare-and-set inside one transaction, and a
+lost race reports `stale` rather than silently overwriting — the client keeps
+the typed text and says so.
+
 Either way the button runs that problem's suite server-side and the interviewer
 is told the outcome as a bracketed note it never speaks — `drill.md`'s step 7,
 reassigned, the same way the design track's time check is.

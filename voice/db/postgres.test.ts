@@ -16,7 +16,7 @@ import {
 import { collectProblems, ingest } from './ingest'
 import { dbProblems, loadProblemCache, resetProblemCache } from '../problems-db'
 import { VENDOR_TABLES, applyAuthSchema, authConfig, getAuth, linkAnonymousWork, resetAuth } from './auth'
-import { dbWorkStore } from '../work-store-db'
+import { dbWorkStore, upsertBuffer } from '../work-store-db'
 import { applyMigration, formatRejects, planMigration } from './migrate-local'
 
 /**
@@ -1058,6 +1058,199 @@ suite('voice/db against a real Postgres', () => {
     it('refuses to write for an unauthenticated request', async () => {
       await expect(dbWorkStore(null).appendDrillLog(row())).rejects.toThrow(/unauthenticated/)
       await expect(dbWorkStore(null).readHistory()).rejects.toThrow(/unauthenticated/)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+
+  /**
+   * The solution buffer, which is the one piece of *in-progress* work in the
+   * database rather than a finished record.
+   *
+   * The local path writes `problems/<pattern>/<slug>/solution.ts` itself, and
+   * that is right there: the file IS the buffer, and `Run tests`, `pnpm reset`
+   * and `/review` all read that exact path. On a deployed instance there is one
+   * checkout and several people, so the same write means two people drilling the
+   * same problem overwrite each other — and the loser watches their own editor
+   * change under them.
+   */
+  describe('the solution buffer, per person', () => {
+    const trees: string[] = []
+    const STUB = 'export function isPalindrome(s: string): boolean {\n  return false\n}\n'
+
+    beforeEach(async () => {
+      const root = mkdtempSync(join(tmpdir(), 'voice-buffer-'))
+      trees.push(root)
+      const dir = join(root, 'problems', 'two-pointers', 'valid-palindrome')
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'README.md'), '# valid-palindrome\n')
+      writeFileSync(join(dir, 'meta.yaml'), 'pattern: two-pointers\ndifficulty: warmup\n')
+      writeFileSync(join(dir, 'stub.ts'), STUB)
+      // The worked answer, seeded on purpose: a tree with no spoiler in it
+      // cannot demonstrate that a first read serves the stub rather than it.
+      writeFileSync(join(dir, 'solution.ts'), 'export const THE_ANSWER = "two pointers, converge"\n')
+      await ingest(root)
+      await loadProblemCache()
+    })
+
+    afterAll(() => {
+      for (const root of trees.splice(0)) rmSync(root, { recursive: true, force: true })
+    })
+
+    /**
+     * A first read serves the stub — never `solution.ts`.
+     *
+     * `app_runtime` cannot read that document at all: `is_spoiler` is set on it
+     * at ingest and `problem_document_public` filters it out. The grant is the
+     * enforcement; this asserts the behaviour it produces, because on a shared
+     * instance the checkout's `solution.ts` also holds whatever the last person
+     * left there.
+     */
+    it('starts from the stub, not the answer', async () => {
+      const file = await dbWorkStore('ada').readSolution('valid-palindrome')
+      expect(file?.text).toBe(STUB)
+      expect(file?.text).not.toContain('THE_ANSWER')
+    })
+
+    /**
+     * And writes no row for it. Seeding on read would put a row in the table for
+     * every problem anyone merely opened — the buffer should come into existence
+     * when something is typed, not when something is glanced at.
+     */
+    it('does not create a row for a problem that was only opened', async () => {
+      await dbWorkStore('ada').readSolution('valid-palindrome')
+      const rows = await withRuntime('ada', async (client) => {
+        const { rows } = await client.query('select 1 from solution_buffer')
+        return rows
+      })
+      expect(rows).toEqual([])
+    })
+
+    it('reads back what was written', async () => {
+      const store = dbWorkStore('ada')
+      const before = (await store.readSolution('valid-palindrome'))!
+      expect(await store.writeSolution('valid-palindrome', 'mine', before.version)).toBe('ok')
+      expect((await store.readSolution('valid-palindrome'))?.text).toBe('mine')
+    })
+
+    it('saves twice in a row, each against the version it just got', async () => {
+      const store = dbWorkStore('ada')
+      const first = (await store.readSolution('valid-palindrome'))!
+      await store.writeSolution('valid-palindrome', 'one', first.version)
+      const second = (await store.readSolution('valid-palindrome'))!
+      expect(await store.writeSolution('valid-palindrome', 'two', second.version)).toBe('ok')
+    })
+
+    /** The whole point of the table. */
+    it('keeps two people out of each other’s buffer', async () => {
+      const ada = dbWorkStore('ada')
+      const grace = dbWorkStore('grace')
+      const stub = (await ada.readSolution('valid-palindrome'))!
+
+      // Both start from the same stub and therefore the same version — which is
+      // exactly the case a single shared file would have collapsed.
+      expect(await ada.writeSolution('valid-palindrome', 'ada wrote this', stub.version)).toBe('ok')
+      expect(await grace.writeSolution('valid-palindrome', 'grace wrote this', stub.version)).toBe('ok')
+
+      expect((await ada.readSolution('valid-palindrome'))?.text).toBe('ada wrote this')
+      expect((await grace.readSolution('valid-palindrome'))?.text).toBe('grace wrote this')
+    })
+
+    /**
+     * `stale` is not a retryable error. It means something else holds the buffer
+     * — a second tab — and the client must keep the typed text and say so.
+     * Silently winning that race destroys work.
+     */
+    it('refuses a write against a version that has moved on', async () => {
+      const store = dbWorkStore('ada')
+      const stub = (await store.readSolution('valid-palindrome'))!
+      await store.writeSolution('valid-palindrome', 'first', stub.version)
+
+      expect(await store.writeSolution('valid-palindrome', 'second', stub.version)).toBe('stale')
+      // And left the first write alone. A refusal that still wrote would be
+      // worse than no check at all.
+      expect((await store.readSolution('valid-palindrome'))?.text).toBe('first')
+    })
+
+    /**
+     * Two first writes for the same buffer race in a way `for update` cannot
+     * serialise — there is no row yet to lock. The unique index decides it, and
+     * the loser has to hear `stale` rather than have its write silently dropped.
+     */
+    it('resolves two simultaneous first writes to one winner and one stale', async () => {
+      const store = dbWorkStore('ada')
+      const stub = (await store.readSolution('valid-palindrome'))!
+      const outcomes = await Promise.all([
+        store.writeSolution('valid-palindrome', 'racer one', stub.version),
+        store.writeSolution('valid-palindrome', 'racer two', stub.version),
+      ])
+      expect(outcomes.filter((o) => o === 'ok')).toHaveLength(1)
+      expect(outcomes.filter((o) => o === 'stale')).toHaveLength(1)
+      expect((await store.readSolution('valid-palindrome'))?.text).toMatch(/^racer (one|two)$/)
+    })
+
+    /**
+     * The previous test does not actually interleave — the two `writeSolution`
+     * calls serialise, and the loser is caught by the version check rather than
+     * by the `on conflict ... where` re-check. That was found by removing the
+     * re-check and watching every test still pass.
+     *
+     * So this drives the interleave by hand: two transactions, both of which
+     * select and find no row, then both insert. `for update` locks nothing when
+     * there is no row, so the unique index is the only thing standing between
+     * them — and the `where` clause is what turns the loser into a reported
+     * `stale` rather than a write that vanishes.
+     *
+     * `upsertBuffer` is exported and takes a client precisely so this is
+     * reachable — the store's own transaction is closed to a caller, and inlined
+     * there the branch could not be tested at all.
+     */
+    it('reports a lost first-write race rather than dropping the write', async () => {
+      const problemId = await withRuntime('ada', async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          "select id from problem_public where track = 'coding' and slug = 'valid-palindrome'",
+        )
+        return rows[0]!.id
+      })
+
+      const insert = (content: string, expected: string) =>
+        withRuntime('ada', async (client) => {
+          await client.query(
+            'select content from solution_buffer where user_id = $1 and problem_id = $2 for update',
+            ['ada', problemId],
+          )
+          await bothHaveRead()
+          return upsertBuffer(client, 'ada', problemId, content, expected)
+        })
+
+      // Both transactions get past their select before either inserts, which is
+      // the state the re-check exists for and the one the serialised test above
+      // never reaches.
+      let arrived = 0
+      let open: () => void = () => {}
+      const gate = new Promise<void>((resolve) => {
+        open = resolve
+      })
+      const bothHaveRead = async (): Promise<void> => {
+        if (++arrived === 2) open()
+        return gate
+      }
+
+      const outcomes = await Promise.all([insert('one', STUB), insert('two', STUB)])
+      expect(outcomes.sort()).toEqual(['ok', 'stale'])
+    })
+
+    it('reports a slug that resolves to nothing rather than throwing', async () => {
+      const store = dbWorkStore('ada')
+      expect(await store.readSolution('no-such-problem')).toBeNull()
+      expect(await store.writeSolution('no-such-problem', 'x', 'v')).toBe('missing')
+    })
+
+    it('refuses to read or write for an unauthenticated request', async () => {
+      await expect(dbWorkStore(null).readSolution('valid-palindrome')).rejects.toThrow(/unauthenticated/)
+      await expect(dbWorkStore(null).writeSolution('valid-palindrome', 'x', 'v')).rejects.toThrow(
+        /unauthenticated/,
+      )
     })
   })
 

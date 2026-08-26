@@ -2,6 +2,7 @@ import type { Track } from './context'
 import type { DrillLogRow, StoryLog } from './transcript'
 import type { CoachedRow } from './coached'
 import type { HistoryRow, HistorySummary } from './drill-log'
+import type { SolutionFile, WriteOutcome } from './solution-file'
 
 /**
  * What a finished drill leaves behind, and where it goes.
@@ -44,6 +45,34 @@ export interface HistoryPayload {
 }
 
 export interface WorkStore {
+  /**
+   * The buffer the candidate is typing into, for one problem.
+   *
+   * In-progress work rather than a finished record, which is why the comment at
+   * the top of this file says "leaves behind" and this does not fit it — the
+   * alternative was a second seam, a second dep and a second factory for two
+   * methods that are per-user work stored per mode, which is exactly what this
+   * interface already is. One seam, widened.
+   *
+   * Locally this is `problems/<pattern>/<slug>/solution.ts` itself: the file IS
+   * the buffer, which is what makes `Run tests`, `pnpm reset` and `/review` all
+   * work against the same bytes without any of them knowing about an editor.
+   * Deployed it is a row, because there is one checkout and several people.
+   *
+   * Returns `null` when the slug resolves to no problem. Never a path — a
+   * coding problem's directory is its pattern, and the pattern is the answer.
+   */
+  readSolution(slug: string): Promise<SolutionFile | null>
+  /**
+   * Write only if the buffer still holds what the caller last saw.
+   *
+   * `'stale'` is not a retryable error. It means something else holds the
+   * buffer — a second tab, or locally the candidate's own editor — and the
+   * client must keep the typed text and say so. Silently winning that race
+   * destroys work, which is why the check and the write have to happen together
+   * rather than as a read followed by a write.
+   */
+  writeSolution(slug: string, text: string, expected: string): Promise<WriteOutcome>
   /**
    * Persist the transcript body.
    *
