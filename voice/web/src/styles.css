@@ -1662,6 +1662,99 @@ ol.md__list {
    emits where it could not make sense of the text at all. */
 .code-editor .tok-invalid { color: var(--destructive); }
 
+/* --- the assist: completions, hovers, squiggles ---------------- */
+/*
+ * Practice only. A drill editor is handed none of these extensions, so none of
+ * these elements ever exist there — see `SolutionEditor.tsx` for the rule and
+ * `assist/assist-is-practice-only.test.ts` for what holds it.
+ *
+ * Scoped under `.code-editor` like everything above it, and for the same
+ * reason: appearance belongs to the component that emits the markup, not to
+ * whichever screen happens to wrap it.
+ *
+ * CodeMirror's `lint` and `autocomplete` packages ship base themes in light
+ * grey and system blue. Against this editor they read as another application's
+ * widgets pasted over the top — the same class of wrongness as the black caret
+ * two rules up, and just as easy to mistake for intent.
+ */
+.code-editor .cm-tooltip {
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: 4px 4px 0 color-mix(in oklab, var(--foreground) 18%, transparent);
+}
+.code-editor .cm-tooltip-autocomplete > ul {
+  font-family: var(--drill-mono);
+  font-size: var(--step-code);
+  max-height: 16em;
+}
+.code-editor .cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.code-editor .cm-completionIcon { opacity: 0.7; }
+.code-editor .cm-completionLabel { color: var(--foreground); }
+/* The matched substring, which is the only reason the list is in this order. */
+.code-editor .cm-completionMatchedText {
+  color: var(--brand);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+/*
+ * Diagnostics.
+ *
+ * `--destructive` is the same red a wrong answer uses, and that is deliberate
+ * rather than a collision: a type error and a failing correctness test are the
+ * same message — this code does not do what you meant. The two reds this repo
+ * is careful to keep apart are correctness-red and *cost*-red, and nothing here
+ * is about cost.
+ */
+.code-editor .cm-lintRange-error {
+  /* A wavy underline drawn in the text layer, so it moves with the text and
+     survives a reflow — CodeMirror's default is a background SVG data URI in a
+     colour this theme does not use. */
+  background: none;
+  text-decoration: underline wavy var(--destructive);
+  text-underline-offset: 3px;
+}
+.code-editor .cm-lintRange-warning {
+  background: none;
+  text-decoration: underline wavy var(--chart-2);
+  text-underline-offset: 3px;
+}
+.code-editor .cm-diagnostic {
+  font-family: var(--drill-mono);
+  font-size: var(--step-code);
+  border-left: 4px solid var(--border);
+  padding: var(--gap-2) 10px;
+}
+.code-editor .cm-diagnostic-error { border-left-color: var(--destructive); }
+.code-editor .cm-diagnostic-warning { border-left-color: var(--chart-2); }
+
+/*
+ * Hover and completion detail, emitted by `assist/extension.ts`.
+ *
+ * The signature is code and set in the code face; the doc comment is prose and
+ * is not. A stub's JSDoc is often several sentences, and rendering it in mono
+ * at code size makes a tooltip that covers the function you are hovering over.
+ */
+.assist-tooltip { max-width: 46ch; padding: var(--gap-2) 10px; }
+.assist-tooltip__signature {
+  display: block;
+  font-family: var(--drill-mono);
+  font-size: var(--step-code);
+  white-space: pre-wrap;
+  color: var(--foreground);
+}
+.assist-tooltip__doc {
+  margin: var(--gap-2) 0 0;
+  font-size: var(--step-data);
+  line-height: var(--lead-base);
+  color: var(--muted-foreground);
+}
+
 /* --- toolbar + hint ladder ------------------------------------- */
 .workbench__toolbar {
   flex: none; display: flex; align-items: center; gap: 14px;

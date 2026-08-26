@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { tsLibs } from './ts-libs-plugin'
 
 // `vite`'s CLI defaults `root` to the current working directory, not the
 // directory of this config file — and `mock:web`/`build:web` are invoked
@@ -43,7 +44,17 @@ export default defineConfig({
   // Tailwind is here only because Brutalkit peer-depends on it: its
   // stylesheet expects `@import "tailwindcss"` to have run first. The design
   // itself is plain CSS over Brutalkit's tokens, per the handoff.
-  plugins: [react(), tailwindcss()],
+  // `tsLibs` serves `virtual:ts-libs` — the TypeScript standard library as
+  // text, for the Practice editor's language service. It resolves out of the
+  // installed `typescript` at build time; see `ts-libs-plugin.ts` for why not
+  // a CDN and why not a vendored copy.
+  plugins: [react(), tailwindcss(), tsLibs()],
+  // Workers are bundled by a *separate* rolldown pass with its own plugin
+  // list, so a plugin registered above is simply not present when the assist
+  // Worker is compiled — `virtual:ts-libs` fails to resolve and the whole build
+  // dies. The top-level registration is still needed for `pnpm dev:web`, which
+  // serves the worker through the main pipeline.
+  worker: { plugins: () => [tsLibs()] },
   build: {
     // Outside `voice/web` on purpose: this is the build *output*, served by
     // `voice/http-server.ts`, not part of the source tree it's built from.

@@ -271,6 +271,57 @@ describe('the practice screen', () => {
 });
 
 /**
+ * The assist's own classes, against the module that emits them.
+ *
+ * Same trap, third time. `.assist-tooltip` and its two children are built in
+ * `assist/extension.ts` rather than in a component, which puts them one further
+ * step away from anything that would notice a rename — and a hover tooltip is
+ * the kind of thing you see rarely enough that unstyled would read as "that is
+ * how it looks" for a long time.
+ */
+describe('the assist', () => {
+  const extension = code(read('assist/extension.ts'));
+  const styles = code(read('styles.css'));
+
+  it('styles only classes the extension actually renders', () => {
+    const styled = [...styles.matchAll(/\.(assist[A-Za-z_-]*)/g)].map((m) => m[1]!);
+    expect(styled.length).toBeGreaterThan(0);
+    expect([...new Set(styled)].filter((name) => !extension.includes(name))).toEqual([]);
+  });
+
+  /**
+   * CodeMirror's `lint` and `autocomplete` base themes are light grey and
+   * system blue. Unstyled, they land on a near-black editor looking like a
+   * different application's widgets — the same failure as the black caret, and
+   * read as intent rather than as breakage for the same reason.
+   */
+  it('re-themes the widgets its extensions bring with them', () => {
+    for (const selector of [
+      '.cm-tooltip-autocomplete',
+      '.cm-completionLabel',
+      '.cm-lintRange-error',
+      '.cm-diagnostic-error',
+    ]) {
+      expect(styles).toContain(`.code-editor ${selector}`);
+    }
+  });
+
+  /**
+   * A type error is a wrong answer, and shares its red on purpose. What must
+   * not happen is a diagnostic borrowing the *cost* colour — correctness-red
+   * and cost-red are this repo's central distinction, and a squiggle in the
+   * cost hue would say "too slow" about a misspelled field name.
+   */
+  it('does not spend the cost colour on a diagnostic', () => {
+    const wrong = /\.practice-verdict--wrong\s*\{[^}]*color:\s*var\((--[a-z0-9-]+)\)/.exec(styles)?.[1];
+    const cost = /\.practice-verdict--cost\s*\{[^}]*color:\s*var\((--[a-z0-9-]+)\)/.exec(styles)?.[1];
+    const rule = /\.code-editor \.cm-lintRange-error \{[^}]*\}/.exec(styles)?.[0] ?? '';
+    expect(rule).toContain(`var(${wrong})`);
+    expect(rule).not.toContain(`var(${cost})`);
+  });
+});
+
+/**
  * The shell class, which is a class name and therefore the same trap.
  *
  * `.app-root` is the element that paints `var(--background)`. Practice was

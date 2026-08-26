@@ -30,6 +30,24 @@ import { classHighlighter } from '@lezer/highlight';
  * cannot be dropped without dropping JavaScript syntax support entirely, so
  * their presence on the dependency tree is expected and does not mean the
  * constraint above has been violated.
+ *
+ * ---
+ *
+ * **The `extensions` prop, and why it does not weaken any of the above.**
+ *
+ * The Practice screen composes a TypeScript language service in — completions,
+ * hover types, inline diagnostics, the lot — by passing `assistExtensions()`
+ * here. That is deliberate and it is *not* an exception to the rule, because
+ * the rule was always about the drill. Practice is untimed, unrecorded, has a
+ * tutor beside it and a header that says `nothing is recorded`; it is where you
+ * work out what a problem *is*. The drill is the rehearsal, and a rehearsal
+ * with tooling you will not have on the day rehearses the wrong thing.
+ *
+ * So the boundary moved from "this component has no such capability" to "the
+ * drill's call site hands it none", and it is still a boundary a test can hold:
+ * `SolutionEditor.test.tsx` still fails on a forbidden import *here*, and
+ * `assist/assist-is-practice-only.test.ts` fails if the drill's editor in
+ * `App.tsx` is ever given these extensions. Both must stay.
  */
 export function editorExtensions(readOnly: boolean): Extension[] {
   return [
@@ -59,9 +77,19 @@ interface Props {
   value: string;
   onChange(next: string): void;
   readOnly?: boolean;
+  /**
+   * Appended after the base list, so a caller can add capability without this
+   * component knowing what it is. Only Practice passes anything — see the doc
+   * comment above, and the test that keeps it that way.
+   *
+   * Must be referentially stable: the editor is rebuilt when it changes, which
+   * discards the cursor and the undo history. Practice holds it in a `useMemo`
+   * keyed on the problem.
+   */
+  extensions?: Extension[];
 }
 
-export function SolutionEditor({ value, onChange, readOnly = false }: Props) {
+export function SolutionEditor({ value, onChange, readOnly = false, extensions }: Props) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
   const latest = useRef(onChange);
@@ -75,6 +103,7 @@ export function SolutionEditor({ value, onChange, readOnly = false }: Props) {
         doc: value,
         extensions: [
           ...editorExtensions(readOnly),
+          ...(extensions ?? []),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) latest.current(update.state.doc.toString());
           }),
@@ -91,7 +120,7 @@ export function SolutionEditor({ value, onChange, readOnly = false }: Props) {
     // throw away the cursor and the undo history. External replacements go
     // through the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readOnly]);
+  }, [readOnly, extensions]);
 
   // Adopt an externally-changed document (a reload after a 409), without
   // disturbing anything when the change came from typing.

@@ -7,6 +7,7 @@ import { usePracticeChat, type ChatSend } from '../usePracticeChat';
 import { Markdown } from './Markdown';
 import { Workbench, WorkbenchHead, WorkbenchSplit } from './Workbench';
 import { SolutionEditor } from './SolutionEditor';
+import { useAssist } from '../assist/useAssist';
 
 /**
  * Practice: the editor, the suite, and a tutor.
@@ -222,6 +223,10 @@ export function Practice({
   // buffer as it is now and not as it was when the handler was created.
   const codeRef = useRef('');
   codeRef.current = code;
+
+  // Completions, hover types and inline diagnostics — on this screen and not on
+  // a drill. See `assist/service.ts` for the boundary and why it sits here.
+  const assist = useAssist();
   const chat = usePracticeChat(problem, () => codeRef.current, send);
 
   // The stub, every visit. There is nothing saved to prefer over it.
@@ -471,7 +476,7 @@ export function Practice({
           }
         >
           {loaded ? (
-            <SolutionEditor value={code} onChange={onChange} />
+            <SolutionEditor value={code} onChange={onChange} extensions={assist} />
           ) : (
             <p>Loading…</p>
           )}

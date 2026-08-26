@@ -243,6 +243,20 @@ you need once.
   one rehearses an advantage you will not have. `SolutionEditor.test.tsx` fails
   if any of those packages is ever imported, so adding one breaks a test rather
   than shipping as an improvement.
+
+  **Practice is the exception, and only Practice.** `/#/practice/<slug>` runs a
+  real TypeScript language service — completions, hover types, inline
+  diagnostics — in `voice/web/src/assist/`. It is untimed, unrecorded and has a
+  tutor beside it; it is where you work out what a problem *is*, which is not
+  the activity the rule above protects. The boundary is a call site, not an
+  absence: `SolutionEditor` takes an `extensions` prop, Practice passes
+  `assistExtensions()`, the drill passes nothing, and
+  `assist/assist-is-practice-only.test.ts` fails if that ever changes in either
+  direction. The service type-checks against the same options as the root
+  `tsconfig.json` — an editor looser than `pnpm typecheck` would teach you that
+  its silence means nothing. Cost: **+17 KB gzipped** on the page for the
+  CodeMirror extensions, and a **991 KB gzipped** Worker chunk holding
+  `typescript` that is fetched when Practice mounts and never by a drill.
 - **Your own editor**: you edit `solution.ts` yourself, against real types,
   isolated by the OS. This is the mode that keeps the file the buffer.
   **Local only.** `own` means the server edits and runs a `solution.ts` on its
