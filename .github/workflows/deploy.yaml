@@ -152,6 +152,17 @@ jobs:
           git commit -m "deploy interview-prep to ${{ github.sha }}"
           git push origin main
 
+      # `--timeout` is explicit because the default is 300s and this sync has to
+      # outlast a PreSync hook. Measured on the first real deploy through this
+      # workflow (run 32909169213, 2026-08-25): the sync died at 4m54s with the
+      # ingest Job still `Pending deletion`, and the deploy then *succeeded*
+      # anyway once the hook finished — ArgoCD reached Synced/Healthy on the
+      # right image minutes after the pipeline had already gone red.
+      #
+      # A red run for a green deploy is worse than a plain failure: it is the
+      # thing that teaches you to stop reading CI. The wait step below already
+      # allows 600s for the rollout; the sync needs at least as much for the
+      # hook that runs before it.
       - name: Sync ArgoCD
         uses: clowdhaus/argo-cd-action/@main
         with:
@@ -162,6 +173,7 @@ jobs:
             --grpc-web
             --server argocd.apps.dev-01.6cclab.dev
             --auth-token ${{ env.ARGO_TOKEN }}
+            --timeout 900
 
       # Fail the deploy when the rollout does not go healthy, rather than
       # reporting success and leaving a crashlooping pod for someone to find.
