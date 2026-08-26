@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { ProblemTrack } from '../types';
 import { ProblemColumn } from './ProblemColumn';
+import { useSplit } from '../useSplit';
 
 /**
  * The shape every screen where you read a problem and write code against it.
@@ -40,8 +41,17 @@ interface Props {
 }
 
 export function Workbench({ problem, track, children, aside }: Props) {
+  // The aside's width, on the same terms as the editor's height: a preference,
+  // not a constant. It was `clamp(300px, 24vw, 400px)`, which is a reasonable
+  // guess at "enough for prose" and the wrong answer whenever you are reading a
+  // long explanation or, the other way, want the code wider while you type.
+  const split = useSplit('aside', { axis: 'horizontal' });
   return (
-    <div className={aside ? 'workbench workbench--three' : 'workbench'}>
+    <div
+      className={aside ? 'workbench workbench--three' : 'workbench'}
+      ref={aside ? split.containerRef : undefined}
+      data-dragging={aside && split.dragging ? '' : undefined}
+    >
       {track !== null && (
         <ProblemColumn
           problem={problem}
@@ -50,31 +60,116 @@ export function Workbench({ problem, track, children, aside }: Props) {
         />
       )}
       <main className="workbench__main">{children}</main>
-      {aside && <aside className="workbench__aside">{aside}</aside>}
+      {aside && (
+        <>
+          {/* Same control as the horizontal one, turned ninety degrees: a real
+              separator with a range, focusable, arrow keys, double-click to
+              restore. The only difference is which rect coordinate the drag
+              reads — see `useSplit`. */}
+          <div
+            className="workbench__divider workbench__divider--v"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize the tutor column"
+            aria-valuenow={Math.round(split.fraction * 100)}
+            aria-valuemin={Math.round(split.limits.min * 100)}
+            aria-valuemax={Math.round(split.limits.max * 100)}
+            tabIndex={0}
+            onPointerDown={split.onPointerDown}
+            onKeyDown={split.onKeyDown}
+            onDoubleClick={split.reset}
+          />
+          <aside
+            className="workbench__aside"
+            style={{ flexBasis: `${split.fraction * 100}%` }}
+          >
+            {aside}
+          </aside>
+        </>
+      )}
     </div>
   );
 }
 
 /**
- * The editor and its label bar.
+ * The editor, a draggable divider, and the pane under it.
  *
- * The bar is not decoration: it is the only place the filename appears, and on
- * the drill it doubles as where autosave says it has stopped. Practice has
- * nothing to report there, so it shows the filename alone — but it shows the
- * bar, because an editor that starts at the top of a pane with no header reads
- * as a text area rather than as a file.
+ * The editor was a fixed 352px with the pane below taking everything left over,
+ * which on the practice screen put a sixteen-line editor under a test pane with
+ * room for forty lines of nothing. Now the editor takes the column and the pane
+ * below gets a share of it that can be dragged — because how much output you
+ * want on screen depends on the problem and on whether the suite is red, which
+ * is a preference and not a constant.
+ *
+ * `label` and the editor's children are passed rather than the caller composing
+ * the editor itself, because the three parts have to be siblings in one flex
+ * column for the fraction to mean anything: a wrapper around the editor would
+ * resolve the percentage against the wrapper instead of the column. That
+ * replaced a `WorkbenchEditor` export, rather than sitting beside it — two ways
+ * to build the same pane is how the drill and practice drifted apart the first
+ * time.
+ *
+ * `toolbar` sits between them, fixed, and is deliberately *above* the divider —
+ * it acts on the code, so it belongs to the editor half, and a toolbar that
+ * moved when you resized the output would read as part of the output.
  */
-export function WorkbenchEditor({
+export function WorkbenchSplit({
+  storageKey,
+  defaultFraction,
   label,
-  children
+  toolbar,
+  children,
+  lower
 }: {
+  /** Which screen's preference this is. Separate keys, separate memories. */
+  storageKey: string;
+  /** The lower pane's share before anything is dragged. */
+  defaultFraction?: number;
   label: ReactNode;
   children: ReactNode;
+  toolbar?: ReactNode;
+  lower: ReactNode;
 }) {
+  const split = useSplit(storageKey, { initial: defaultFraction });
   return (
-    <div className="workbench__editor">
-      <WorkbenchHead>{label}</WorkbenchHead>
-      <div className="workbench__cm">{children}</div>
+    <div
+      className="workbench__split"
+      ref={split.containerRef}
+      data-dragging={split.dragging ? '' : undefined}
+    >
+      <div className="workbench__editor">
+        <WorkbenchHead>{label}</WorkbenchHead>
+        <div className="workbench__cm">{children}</div>
+      </div>
+      {toolbar}
+      {/*
+        `separator` with a value, not a bare div: this is a real control with a
+        real range, and a screen reader that announces it as a group with no
+        value tells someone nothing about what dragging it would do. Focusable
+        so the arrow keys in `onKeyDown` can be reached at all — a divider that
+        needs a mouse is unusable on the one screen most likely to be driven
+        from the keyboard.
+
+        Double-click restores the default. Dragging the output to nothing and
+        wanting it back is the common mistake, and hunting for a 7px strip is a
+        poor way to fix it.
+      */}
+      <div
+        className="workbench__divider"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize the editor"
+        aria-valuenow={Math.round(split.fraction * 100)}
+        aria-valuemin={Math.round(split.limits.min * 100)}
+        aria-valuemax={Math.round(split.limits.max * 100)}
+        tabIndex={0}
+        onPointerDown={split.onPointerDown}
+        onKeyDown={split.onKeyDown}
+        onDoubleClick={split.reset}
+      />
+      <div className="workbench__lower" style={{ flexBasis: `${split.fraction * 100}%` }}>
+        {lower}
+      </div>
     </div>
   );
 }

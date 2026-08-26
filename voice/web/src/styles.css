@@ -1500,10 +1500,12 @@ ol.md__list {
 /* The third column: the tutor on practice, nothing on a drill. A divider on its
    left, like the problem column's on its right, so the screen reads as three
    panes of one surface rather than three panels on a page. */
+/* Width comes from the divider's fraction (an inline `flex-basis`), not from a
+   `clamp` here — see `Workbench`. The border moved to the divider, which is now
+   the rule between the two columns. */
 .workbench__aside {
-  flex: none; width: clamp(300px, 24vw, 400px);
-  min-height: 0; display: flex; flex-direction: column;
-  border-left: 1px solid var(--border);
+  flex-grow: 0; flex-shrink: 0;
+  min-height: 0; min-width: 0; display: flex; flex-direction: column;
 }
 
 /* Three columns. The problem column gives up its fixed 560px, because 560 plus
@@ -1525,7 +1527,64 @@ ol.md__list {
   justify-content: space-between; padding: 0 18px;
   border-bottom: 1px solid var(--border);
 }
+/* Still fixed when the editor stands alone (the drill's `own` mode renders no
+   pane under it, so there is nothing for it to share the column with). Inside
+   `.workbench__split` the rule below takes over and the editor fills whatever
+   the divider leaves. */
 .workbench__cm { height: var(--editor-height); overflow: auto; padding: 14px 18px; }
+
+/* The resizable column: editor, toolbar, divider, lower pane. `min-height: 0`
+   on both this and the editor because a flex item's default `min-height: auto`
+   refuses to shrink below its content — without it the editor grows to fit the
+   whole file and the divider drags against a floor that is not where it looks. */
+.workbench__split {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+}
+
+.workbench__split .workbench__editor { flex: 1 1 auto; min-height: 0; }
+
+.workbench__split .workbench__cm { flex: 1; min-height: 0; height: auto; }
+
+.workbench__lower {
+  flex-grow: 0; flex-shrink: 0; min-height: 0;
+  display: flex; flex-direction: column;
+}
+
+/* 7px of grab area for a 1px line. A divider sized to its border is one you
+   miss, and the miss costs a click into the editor — which moves the caret. */
+.workbench__divider {
+  flex: none; height: 7px; cursor: row-resize;
+  border-top: 1px solid var(--border);
+  background: var(--background);
+}
+
+.workbench__divider--v {
+  height: auto; width: 7px; cursor: col-resize;
+  border-top: none; border-left: 1px solid var(--border);
+}
+
+.workbench__divider:hover,
+.workbench__divider:focus-visible,
+.workbench__split[data-dragging] .workbench__divider,
+.workbench[data-dragging] > .workbench__divider--v {
+  background: var(--brand);
+  border-top-color: var(--brand);
+  border-left-color: var(--brand);
+  outline: none;
+}
+
+/* Same selection lock as the vertical split, for the horizontal drag. */
+.workbench[data-dragging] { user-select: none; cursor: col-resize; }
+
+/* The whole column, not just the divider: a pointer that outruns the divider
+   is still dragging, and without this it selects the code it passes over. */
+.workbench__split[data-dragging] { user-select: none; cursor: row-resize; }
+
+/* The divider already draws the rule between the two panes. Without this the
+   drill's transcript brings its own and the seam is 2px of doubled border with
+   a 7px gap of background between them. */
+.workbench__lower .drill-stream { border-top: none; }
 .code-editor .cm-editor { background: transparent; }
 .code-editor .cm-editor.cm-focused { outline: none; }
 .code-editor .cm-scroller { font-family: var(--drill-mono); font-size: var(--step-code); line-height: var(--lead-base); }
@@ -1996,6 +2055,8 @@ html:not(.dark) .drill-hint-entry { background: color-mix(in oklab, var(--brand)
 /* The tests, under the code they are about. The one thing in the centre column
    that scrolls, so a long run never pushes the editor up the screen. */
 .practice-pane {
+  /* `flex: 1` of `.workbench__lower`, whose own basis is the dragged fraction —
+     so this fills the share it is given rather than claiming the column. */
   flex: 1; min-height: 0; overflow: auto;
   padding: var(--gap-4) 18px 18px;
   display: flex; flex-direction: column; gap: var(--gap-4);

@@ -13,7 +13,7 @@ import { Home } from './components/Home';
 import { Practice } from './components/Practice';
 import { History } from './components/History';
 import { HomeHeader } from './components/HomeHeader';
-import { Workbench, WorkbenchEditor } from './components/Workbench';
+import { Workbench, WorkbenchSplit } from './components/Workbench';
 import { SolutionEditor } from './components/SolutionEditor';
 import { useSolution, runAfterSave } from './useSolution';
 import { routeDrill, routeHash, useRoute, type Route } from './route';
@@ -919,56 +919,82 @@ function DrillScreen({
           {/* Browser-editor mode only. `own` mode keeps the candidate in their
                 real editor against real types, so there is nothing to render
                 here — see `editorMode` above. */}
-          {editorMode === 'browser' && (
-            <WorkbenchEditor
-              label={
-                <span
-                  data-autosave={
-                    solution.status === 'conflict' ? 'paused' : undefined
-                  }
-                >
-                  {solution.status === 'conflict'
-                    ? 'Autosave paused'
-                    : solution.status === 'error'
-                      ? 'Save failed — kept locally'
-                      : 'solution.ts'}
-                </span>
-              }
-            >
-              <SolutionEditor
-                value={solution.text}
-                onChange={solution.setText}
-                readOnly={solution.status === 'loading'}
-              />
-            </WorkbenchEditor>
-          )}
-
-          {/* Run tests and the ladder, directly under the editor rather than
+          {(() => {
+            {/* Run tests and the ladder, directly under the editor rather than
                 down in the dock: they act on the code, and the cost of a rung
                 should be read where the code is. */}
-          {track.tools && (
-            <DrillToolbar
-              hintRung={hintRung}
-              hintPending={hintPending}
-              hintsExhausted={track.ladderRunsOut ? hintsExhausted : false}
-              running={testsRunning}
-              onRun={
-                live ? (track.saveBeforeRun ? onRunTests : runTests) : undefined
-              }
-              onHint={live ? askForHint : undefined}
-              rationed={track.rationed}
-              runLabel={track.runLabel}
-            />
-          )}
+            const toolbar = track.tools ? (
+              <DrillToolbar
+                hintRung={hintRung}
+                hintPending={hintPending}
+                hintsExhausted={track.ladderRunsOut ? hintsExhausted : false}
+                running={testsRunning}
+                onRun={
+                  live ? (track.saveBeforeRun ? onRunTests : runTests) : undefined
+                }
+                onHint={live ? askForHint : undefined}
+                rationed={track.rationed}
+                runLabel={track.runLabel}
+              />
+            ) : undefined;
 
-          <SessionStream
-            stream={stream}
-            interimSentences={interimSentences}
-            streaming={interviewerSpeaking}
-            meta={streamMeta}
-            partner={track.partner}
-            hintRung={hintRung}
-          />
+            const transcript = (
+              <SessionStream
+                stream={stream}
+                interimSentences={interimSentences}
+                streaming={interviewerSpeaking}
+                meta={streamMeta}
+                partner={track.partner}
+                hintRung={hintRung}
+              />
+            );
+
+            // Browser-editor mode only. `own` mode keeps the candidate in their
+            // real editor against real types, so there is no editor here to
+            // divide the column with — the transcript simply takes it, as it
+            // always has, and there is nothing to resize.
+            if (editorMode !== 'browser') {
+              return (
+                <>
+                  {toolbar}
+                  {transcript}
+                </>
+              );
+            }
+
+            // 0.55 rather than the practice screen's 0.18: this pane is the
+            // conversation, not a test report, and it is what the drill is
+            // mostly spent reading. The number is roughly where the old fixed
+            // 352px editor put the divider, so an existing drill does not open
+            // to a rearranged screen.
+            return (
+              <WorkbenchSplit
+                storageKey="drill"
+                defaultFraction={0.55}
+                label={
+                  <span
+                    data-autosave={
+                      solution.status === 'conflict' ? 'paused' : undefined
+                    }
+                  >
+                    {solution.status === 'conflict'
+                      ? 'Autosave paused'
+                      : solution.status === 'error'
+                        ? 'Save failed — kept locally'
+                        : 'solution.ts'}
+                  </span>
+                }
+                toolbar={toolbar}
+                lower={transcript}
+              >
+                <SolutionEditor
+                  value={solution.text}
+                  onChange={solution.setText}
+                  readOnly={solution.status === 'loading'}
+                />
+              </WorkbenchSplit>
+            );
+          })()}
         </Workbench>
 
         {/* The four first-class errors still interrupt, because each of them
