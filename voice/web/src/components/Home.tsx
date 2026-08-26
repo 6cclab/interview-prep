@@ -160,6 +160,35 @@ function useProblems(track: ProblemTrack): ProblemList {
 }
 
 /**
+ * Which editing modes this instance accepts.
+ *
+ * Defaults to both, and stays there if the request fails. A picker that renders
+ * a *narrower* set than the server would accept loses a mode silently; one that
+ * offers a mode that turns out to be refused costs a 400 on the way into a
+ * drill. Of the two, the visible failure is the better one.
+ */
+function useEditors(): ('browser' | 'own')[] {
+  const [editors, setEditors] = useState<('browser' | 'own')[]>(['browser', 'own'])
+  useEffect(() => {
+    let live = true
+    void (async () => {
+      try {
+        const res = await fetch('/api/instance')
+        if (!res.ok) return
+        const body = (await res.json()) as { editors?: ('browser' | 'own')[] }
+        if (live && Array.isArray(body.editors) && body.editors.length > 0) setEditors(body.editors)
+      } catch (error) {
+        console.error('voice: /api/instance unreachable', error)
+      }
+    })()
+    return () => {
+      live = false
+    }
+  }, [])
+  return editors
+}
+
+/**
  * The one line of record on this screen: cold solves, and when you last drilled.
  *
  * Cold rather than total, for the reason `local/drill-log.md`'s own preamble
@@ -392,10 +421,15 @@ export function Home({ onChoose }: Props) {
   const debug = useProblems('debug')
   const assisted = useProblems('assisted')
   const record = useRecord()
+  const editors = useEditors()
   // Where the coding drill's answer gets written — see AGENTS.md, "Two editing
   // modes". Defaults to the browser editor: it is the mode that most resembles
   // an actual interview screen, so it is what a first-time visitor sees.
   const [editor, setEditor] = useState<'browser' | 'own'>('browser')
+  // `browser` is both the default and the only option a deployed instance
+  // accepts, so nothing has to reconcile a stale `own` here when the list
+  // arrives — the state simply never leaves `browser` on a server that never
+  // offers the control that sets it.
 
   // Any list failing to reach the server means the server is not there.
   const offline =
@@ -463,7 +497,17 @@ export function Home({ onChoose }: Props) {
             buttonLabel="Coding drill"
             primary
             onStart={(problem) => onChoose({ view: 'coding', problem, editor })}
-            extra={<EditorChoice value={editor} onChange={setEditor} />}
+            // No control at all when there is nothing to choose between, rather
+            // than a disabled one or a single stuck radio. A one-option choice
+            // reads as a setting that might do something and is the kind of
+            // thing someone clicks at twice before concluding the page is
+            // broken. On a deployed instance the browser editor is simply how
+            // it works, and a picker should not narrate an absent alternative.
+            extra={
+              editors.includes('own') ? (
+                <EditorChoice value={editor} onChange={setEditor} />
+              ) : undefined
+            }
           />
 
           <TrackRow

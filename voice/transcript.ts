@@ -233,6 +233,19 @@ export interface DrillLogRow {
   hints: number
   elapsedMs: number
   note: string
+  /**
+   * Which runner produced the verdicts this row was judged against.
+   *
+   * `local/drill-log.md` has no column for it and gets none: the Markdown table
+   * is parsed back by `parseDrillLog` and read by `/status`, and a local run is
+   * always `server` anyway, so a column would be a constant that broke a
+   * reader. It is carried here for `drill_log.verified_by`, where a deployed row
+   * genuinely is browser-graded.
+   *
+   * Optional, defaulting to `server` at the point of writing: the several dozen
+   * callers that predate it are all local, and all correct as `server`.
+   */
+  verifiedBy?: 'server' | 'browser'
 }
 
 /**

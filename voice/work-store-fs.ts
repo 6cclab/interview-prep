@@ -1,6 +1,7 @@
 import { appendCoached, readCoachedProblems, type CoachedRow } from './coached'
 import { readDrillLog, summarise } from './drill-log'
 import { appendDrillLog, appendStoryLog, writeSession, type DrillLogRow, type StoryLog } from './transcript'
+import { readSolution, writeSolution, type SolutionFile, type WriteOutcome } from './solution-file'
 import type { HistoryPayload, SavedTranscript, WorkStore } from './work-store'
 
 /**
@@ -19,6 +20,17 @@ import type { HistoryPayload, SavedTranscript, WorkStore } from './work-store'
  */
 export function fsWorkStore(root: string): WorkStore {
   return {
+    // The file is the buffer here, and `solution-file.ts` explains at length why
+    // that is the load-bearing choice rather than a shortcut: `Run tests`,
+    // `pnpm reset` and `/review` all already work against that exact path.
+    async readSolution(slug: string): Promise<SolutionFile | null> {
+      return readSolution(root, slug)
+    },
+
+    async writeSolution(slug: string, text: string, expected: string): Promise<WriteOutcome> {
+      return writeSolution(root, slug, text, expected)
+    },
+
     async saveTranscript({ preferredPath, body }): Promise<SavedTranscript> {
       // `writeSession` will not overwrite an existing transcript, so the path it
       // used is not always the path it was asked for. Reporting back the one it

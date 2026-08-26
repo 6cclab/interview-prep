@@ -90,6 +90,22 @@ jobs:
   build-and-deploy:
     needs: test
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # One deploy at a time, and never cancel one in flight.
+    #
+    # Two merges four minutes apart already produced two overlapping deploys:
+    # both built, both committed an image tag to the deployment repo, and both
+    # told ArgoCD to sync. That resolved correctly, but by ordering rather than
+    # by design — the losing race writes the *older* SHA last and pins
+    # production to the earlier commit, with two green checkmarks above it.
+    #
+    # `cancel-in-progress: false` because the steps here are not safely
+    # interruptible: killing the job between `git push` to the deployment repo
+    # and `argocd app sync` leaves the desired state committed and nothing told
+    # to apply it. Queueing costs a few minutes; cancelling costs a deploy that
+    # half happened.
+    concurrency:
+      group: deploy-${{ github.ref }}
+      cancel-in-progress: false
     # Self-hosted, and that is a performance decision rather than a network one:
     # the image compiles whisper.cpp from source, and this runner is amd64, so
     # the build is native. A hosted arm64 build of the same Dockerfile goes

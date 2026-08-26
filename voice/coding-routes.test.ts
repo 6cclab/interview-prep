@@ -120,6 +120,333 @@ afterEach(async () => {
 })
 
 /**
+ * The editing mode, over HTTP.
+ *
+ * `parseDrill` is unit-tested next door; these two prove the wiring — that
+ * `deps.mode` actually reaches the parser and the picker, which is the part a
+ * unit test of a pure function cannot show.
+ *
+ * `deps.mode` is set without `VOICE_MODE`, deliberately. The two are separate
+ * axes: the environment variable chooses the *store* (and the Postgres source
+ * is not built yet, so setting it here would 500 every list), while this dep
+ * chooses which editing modes are served. Testing the second without the first
+ * is what keeps this about the editor.
+ */
+describe('the own editor on a deployed instance', () => {
+  it('is refused at the route, not only in the picker', async () => {
+    const { port } = await listen(baseDeps({ mode: 'deployed' }))
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coding', problem: SLUG, editor: 'own' }),
+    })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/local-only/i)
+  })
+
+  // The picker cannot be the enforcement, so the enforcement has to survive a
+  // request the picker never made.
+  it('is still refused when the client never asks the picker at all', async () => {
+    const { port } = await listen(baseDeps({ mode: 'deployed' }))
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coding', problem: SLUG, editor: 'own', budgetMinutes: 30 }),
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('tells the picker which modes exist', async () => {
+    const { port } = await listen(baseDeps({ mode: 'deployed' }))
+    const body = (await (await fetch(`http://127.0.0.1:${port}/api/instance`)).json()) as {
+      editors: string[]
+    }
+    expect(body.editors).toEqual(['browser'])
+  })
+
+  it('still offers both locally', async () => {
+    const { port } = await listen(baseDeps())
+    const body = (await (await fetch(`http://127.0.0.1:${port}/api/instance`)).json()) as {
+      editors: string[]
+    }
+    expect(body.editors).toEqual(['browser', 'own'])
+  })
+
+  /**
+   * The quiet default. An absent `editor` reads as `own` everywhere downstream,
+   * so a deployed drill started without the field would have landed in exactly
+   * the mode the refusal above exists to prevent — and silently, with no 400 to
+   * notice.
+   */
+  it('starts a drill with no editor field in the browser', async () => {
+    const { port } = await listen(baseDeps({ mode: 'deployed' }))
+    const res = await startCodingSession(port)
+    expect(res.status).toBe(201)
+    expect(((await res.json()) as { editor: string }).editor).toBe('browser')
+  })
+})
+
+/**
+ * `POST /api/session/:id/tests` on a deployed instance.
+ *
+ * The server does not run candidate code there. The suite runs in the browser
+ * and the outcome travels with the request, which is forgeable by definition —
+ * that trade is accepted and recorded as `drill_log.verified_by`, because the
+ * only adversary is the candidate deceiving themselves. What is *not* accepted
+ * is the server executing a shared checkout on their behalf.
+ */
+describe('running tests on a deployed instance', () => {
+  async function startedSession(overrides: Partial<VoiceServerDeps> = {}) {
+    const { port } = await listen(baseDeps({ mode: 'deployed', ...overrides }))
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coding', problem: SLUG, editor: 'browser' }),
+    })
+    expect(res.status).toBe(201)
+    return { port, id: ((await res.json()) as { id: string }).id }
+  }
+
+  const ranHere = () => {
+    const calls: string[][] = []
+    return {
+      calls,
+      runner: async (args: string[]) => {
+        calls.push(args)
+      },
+    }
+  }
+
+  it('takes the verdict the browser computed', async () => {
+    const { port, id } = await startedSession()
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/tests`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ verdict: { kind: 'cost-red', failed: ['x — scale > big input'] } }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ kind: 'cost-red', failed: ['x — scale > big input'] })
+  })
+
+  /**
+   * The hole this closes. Falling through to `runDrillTests` when the field is
+   * simply absent would execute whatever is in the container's shared checkout
+   * — the exact thing the branch exists to prevent, reachable by omitting a key.
+   */
+  it('refuses a request with no verdict rather than running the suite itself', async () => {
+    const spy = ranHere()
+    const { port, id } = await startedSession({ runDrillTests: spy.runner })
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/tests`, { method: 'POST' })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/in your browser/i)
+    expect(spy.calls).toEqual([])
+  })
+
+  // `verdictCue` interpolates `failed` straight into the interviewer's prompt,
+  // so an unchecked shape here is a prompt built out of arbitrary posted JSON.
+  it.each([
+    { verdict: { kind: 'nonsense' } },
+    { verdict: { kind: 'correctness-red' } },
+    { verdict: { kind: 'correctness-red', failed: [1, 2] } },
+    { verdict: 'green' },
+    { verdict: null },
+  ])('refuses a malformed verdict: %j', async (body) => {
+    const spy = ranHere()
+    const { port, id } = await startedSession({ runDrillTests: spy.runner })
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/tests`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    expect(res.status).toBe(400)
+    expect(spy.calls).toEqual([])
+  })
+
+  /**
+   * The browser runner covers a coding suite, not the debugging track's two
+   * files. Refusing is the honest answer — the alternative is running the
+   * candidate's code on the server, which is the whole thing being removed.
+   */
+  it('refuses the debugging track rather than running it server-side', async () => {
+    // Seeded here rather than in `seedContext`, so this test cannot quietly
+    // pass by failing to start a session — a silent no-op is exactly the shape
+    // of a green test that verified nothing.
+    const dir = join(root, 'debugging/loyalty-discount')
+    mkdirSync(join(dir, 'src'), { recursive: true })
+    writeFileSync(join(dir, 'README.md'), '# Bug report: loyalty discount\n')
+    writeFileSync(join(dir, 'meta.yaml'), 'title: Loyalty discount\n')
+    writeFileSync(join(dir, 'repro.test.ts'), 'export {}')
+    writeFileSync(join(dir, 'invariant.test.ts'), 'export {}')
+    writeFileSync(join(dir, 'src/discount.ts'), 'export const x = 1')
+    writeFileSync(join(root, 'prompts/debug.md'), 'DEBUG COMMAND')
+
+    const spy = ranHere()
+    const { port } = await listen(baseDeps({ mode: 'deployed', runDebugTests: spy.runner }))
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'debug', problem: 'loyalty-discount' }),
+    })
+    expect(created.status).toBe(201)
+    const { id } = (await created.json()) as { id: string }
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/tests`, { method: 'POST' })
+    expect(res.status).toBe(400)
+    expect(spy.calls).toEqual([])
+    // The *message*, not just the status. Removing the debug branch still 400s
+    // — the verdict requirement below catches it — so a status-only assertion
+    // passes with the branch deleted and proves nothing about it. What the
+    // branch adds is an answer that names the real situation, instead of asking
+    // for a verdict from a track that has no browser runner to produce one.
+    expect(((await res.json()) as { error: string }).error).toMatch(/debugging track/i)
+  })
+
+  // Local is frozen, not changed. It still spawns vitest, still takes no body,
+  // and still has no reason to take a client's word for an outcome it can
+  // compute itself.
+  it('leaves a local instance running its own suite', async () => {
+    const { port } = await listen(baseDeps())
+    const created = await startCodingSession(port)
+    const { id } = (await created.json()) as { id: string }
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/tests`, { method: 'POST' })
+    expect(res.status).toBe(200)
+  })
+})
+
+/**
+ * Body size, per route.
+ *
+ * Every route read its body through one `readJsonBody` whose cap was a single
+ * constant named `MAX_DEVICE_CONFIG_BODY_BYTES` — 4KB, sized for a PATCH
+ * carrying two short strings. Every route added afterwards inherited it
+ * silently. A practice conversation stopped answering on its third question and
+ * any solution over 4KB stopped saving, both reporting something else entirely.
+ *
+ * These tests exist because nothing here ever posted a body of a realistic
+ * size. A limit no test approaches is a limit nobody knows the value of.
+ */
+describe('request bodies at a realistic size', () => {
+  /**
+   * A working buffer, not a stub. `problems/` files run to a few KB and a
+   * candidate mid-rewrite legitimately runs longer — a pasted brute force
+   * sitting above the version being written.
+   */
+  it('saves a solution far larger than a stub', async () => {
+    const { port } = await listen(baseDeps())
+    const current = await (
+      await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`)
+    ).json()
+    const res = await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text: `// ${'x'.repeat(60_000)}\nexport {}`,
+        version: (current as { version: string }).version,
+      }),
+    })
+    expect(res.status).toBe(200)
+  })
+
+  /**
+   * The message matters as much as the status. An oversized save used to answer
+   * "A save needs `text` and `version`" — naming fields the client had in fact
+   * sent — because `readJsonBody` returned null for both "too large" and
+   * "malformed", and the route read the absent fields off an empty object.
+   */
+  it('says a body is too large rather than blaming the fields', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'x'.repeat(2 * 1024 * 1024), version: 'v' }),
+    })
+    expect(res.status).toBe(413)
+    const { error } = (await res.json()) as { error: string }
+    expect(error).toMatch(/larger than/i)
+    // And explicitly not the old answer, which named fields the client sent.
+    expect(error).not.toMatch(/needs/i)
+  })
+
+  // Malformed and oversized are different problems with different answers: one
+  // means "send valid JSON", the other "send less".
+  it('keeps malformed apart from too large', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: '{ this is not json',
+    })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/valid JSON/i)
+  })
+
+  /**
+   * The one the failure was actually reported on. The chat resends the whole
+   * conversation plus the editor buffer every turn, so its body grows with the
+   * session by design — which is precisely why it could not share a limit sized
+   * for a single message. Three turns of a real answer clears 4KB.
+   */
+  it('answers a practice question with several turns of history behind it', async () => {
+    // The tutor prompt off disk, plus the stub — `buildPracticeChatPrompt`
+    // builds from readme + stub + suite, and the shared tree seeds no stub.
+    writeFileSync(join(root, 'prompts/practice-chat.md'), 'TUTOR PROMPT')
+    writeFileSync(join(root, `problems/${PATTERN}/${SLUG}/stub.ts`), 'export {}')
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () =>
+          async function* () {
+            yield 'ok'
+          },
+      }),
+    )
+    const res = await fetch(`http://127.0.0.1:${port}/api/practice/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        problem: SLUG,
+        code: 'export {}',
+        messages: [
+          { role: 'user', content: 'Whats up with my approach?' },
+          { role: 'assistant', content: 'a'.repeat(3000) },
+          { role: 'user', content: 'Consolidated put logic?' },
+          { role: 'assistant', content: 'b'.repeat(3000) },
+          { role: 'user', content: 'How is your put any different to mine?' },
+        ],
+      }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('ok')
+  })
+})
+
+/**
+ * `GET /api/instance` — what this instance does, as capabilities.
+ *
+ * Two clients need it and neither can infer it: the picker, for the editing
+ * modes `parseDrill` will accept, and the drill screen, to know whether it has
+ * to run the suite itself. One route rather than a field on `/api/problems`,
+ * because the drill screen never asks for a problem list — a reload lands
+ * straight on `#/coding/<slug>` — and two routes describing the same instance
+ * are two that can drift.
+ */
+describe('GET /api/instance', () => {
+  it('reports a local instance as running its own tests', async () => {
+    const { port } = await listen(baseDeps())
+    expect(await (await fetch(`http://127.0.0.1:${port}/api/instance`)).json()).toEqual({
+      editors: ['browser', 'own'],
+      runsTestsInBrowser: false,
+    })
+  })
+
+  it('reports a deployed instance as browser-only, both ways', async () => {
+    const { port } = await listen(baseDeps({ mode: 'deployed' }))
+    expect(await (await fetch(`http://127.0.0.1:${port}/api/instance`)).json()).toEqual({
+      editors: ['browser'],
+      runsTestsInBrowser: true,
+    })
+  })
+})
+
+/**
  * The last error boundary around the route chain.
  *
  * `handleRequest` is invoked as a floating promise. Without a `.catch` on it,
@@ -175,6 +502,9 @@ describe('GET /api/problems?track=coding', () => {
     const { port } = await listen(baseDeps())
     const res = await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)
     expect(res.status).toBe(200)
+    // `toEqual`, not `toMatchObject`, and it stays that way: this route's whole
+    // job is withholding `pattern`, and an exact shape is what would notice a
+    // field arriving that nobody meant to send.
     expect(await res.json()).toEqual({
       problems: ['celebrity', SLUG],
       difficulties: { celebrity: 'hard', [SLUG]: 'medium' },

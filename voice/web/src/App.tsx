@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { computeVerdictInBrowser } from './testRunner/clientVerdict';
 import { Button } from 'brutalkit/button';
 import { useVoiceSession } from './useVoiceSession';
 import { Header } from './components/Header';
@@ -12,7 +13,7 @@ import { Home } from './components/Home';
 import { Practice } from './components/Practice';
 import { History } from './components/History';
 import { HomeHeader } from './components/HomeHeader';
-import { Workbench, WorkbenchEditor } from './components/Workbench';
+import { Workbench, WorkbenchSplit } from './components/Workbench';
 import { SolutionEditor } from './components/SolutionEditor';
 import { useSolution, runAfterSave } from './useSolution';
 import { routeDrill, routeHash, useRoute, type Route } from './route';
@@ -286,6 +287,46 @@ function DrillScreen({
   onToggleTheme,
   onGoHome
 }: DrillScreenProps) {
+  // Where the suite runs. A deployed instance has no vitest to spawn and no
+  // per-person checkout to spawn it against, so the browser runs it and posts
+  // the verdict; a local one keeps doing exactly what it has always done. The
+  // client cannot infer which it is — hence `/api/instance`.
+  //
+  // Starts false and stays false if the request fails, which is the safe
+  // direction: `false` is the mode that works without this having succeeded at
+  // all, and a deployed server answers a verdict-less request with a 400 rather
+  // than running anything.
+  const [runsTestsInBrowser, setRunsTestsInBrowser] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const res = await fetch('/api/instance');
+        if (!res.ok) return;
+        const body = (await res.json()) as { runsTestsInBrowser?: boolean };
+        if (live) setRunsTestsInBrowser(body.runsTestsInBrowser === true);
+      } catch (error) {
+        console.error('voice: /api/instance unreachable', error);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // The editor buffer, readable from a callback created before `solution`
+  // exists. Assigned during render below, so the getter always sees the text
+  // on screen rather than the first render's empty string.
+  const solutionTextRef = useRef('');
+  const codingSlug = route.view === 'coding' ? route.problem : undefined;
+  const computeVerdict = useMemo(
+    () =>
+      runsTestsInBrowser && codingSlug !== undefined
+        ? () => computeVerdictInBrowser(codingSlug, solutionTextRef.current)
+        : undefined,
+    [runsTestsInBrowser, codingSlug],
+  );
+
   const {
     mode,
     entries,
@@ -325,7 +366,7 @@ function DrillScreen({
     outputDevices,
     selectedOutputId,
     selectOutput
-  } = useVoiceSession();
+  } = useVoiceSession(computeVerdict);
 
   // The drill this screen runs, from the route rather than from a picker: the
   // route is the single source of truth for which track this is, which is what
@@ -349,6 +390,11 @@ function DrillScreen({
   // not of the route, because it is chosen at start (Task 4).
   const editorMode = track.offersEditor ? drill?.editor : undefined;
   const solution = useSolution(problem, editorMode === 'browser');
+  // Assigned during render, not in an effect: `computeVerdict` above may be
+  // invoked between a keystroke and the next commit, and an effect would leave
+  // it running the previous render's text — i.e. grading code the candidate has
+  // already changed, and reporting the verdict as if it were current.
+  solutionTextRef.current = solution.text;
 
   // Which of the three moments the screen is in. Derived, never stored — see
   // `deriveMoment`. It drives the attention model in CSS via a data attribute
@@ -873,56 +919,82 @@ function DrillScreen({
           {/* Browser-editor mode only. `own` mode keeps the candidate in their
                 real editor against real types, so there is nothing to render
                 here — see `editorMode` above. */}
-          {editorMode === 'browser' && (
-            <WorkbenchEditor
-              label={
-                <span
-                  data-autosave={
-                    solution.status === 'conflict' ? 'paused' : undefined
-                  }
-                >
-                  {solution.status === 'conflict'
-                    ? 'Autosave paused'
-                    : solution.status === 'error'
-                      ? 'Save failed — kept locally'
-                      : 'solution.ts'}
-                </span>
-              }
-            >
-              <SolutionEditor
-                value={solution.text}
-                onChange={solution.setText}
-                readOnly={solution.status === 'loading'}
-              />
-            </WorkbenchEditor>
-          )}
-
-          {/* Run tests and the ladder, directly under the editor rather than
+          {(() => {
+            {/* Run tests and the ladder, directly under the editor rather than
                 down in the dock: they act on the code, and the cost of a rung
                 should be read where the code is. */}
-          {track.tools && (
-            <DrillToolbar
-              hintRung={hintRung}
-              hintPending={hintPending}
-              hintsExhausted={track.ladderRunsOut ? hintsExhausted : false}
-              running={testsRunning}
-              onRun={
-                live ? (track.saveBeforeRun ? onRunTests : runTests) : undefined
-              }
-              onHint={live ? askForHint : undefined}
-              rationed={track.rationed}
-              runLabel={track.runLabel}
-            />
-          )}
+            const toolbar = track.tools ? (
+              <DrillToolbar
+                hintRung={hintRung}
+                hintPending={hintPending}
+                hintsExhausted={track.ladderRunsOut ? hintsExhausted : false}
+                running={testsRunning}
+                onRun={
+                  live ? (track.saveBeforeRun ? onRunTests : runTests) : undefined
+                }
+                onHint={live ? askForHint : undefined}
+                rationed={track.rationed}
+                runLabel={track.runLabel}
+              />
+            ) : undefined;
 
-          <SessionStream
-            stream={stream}
-            interimSentences={interimSentences}
-            streaming={interviewerSpeaking}
-            meta={streamMeta}
-            partner={track.partner}
-            hintRung={hintRung}
-          />
+            const transcript = (
+              <SessionStream
+                stream={stream}
+                interimSentences={interimSentences}
+                streaming={interviewerSpeaking}
+                meta={streamMeta}
+                partner={track.partner}
+                hintRung={hintRung}
+              />
+            );
+
+            // Browser-editor mode only. `own` mode keeps the candidate in their
+            // real editor against real types, so there is no editor here to
+            // divide the column with — the transcript simply takes it, as it
+            // always has, and there is nothing to resize.
+            if (editorMode !== 'browser') {
+              return (
+                <>
+                  {toolbar}
+                  {transcript}
+                </>
+              );
+            }
+
+            // 0.55 rather than the practice screen's 0.18: this pane is the
+            // conversation, not a test report, and it is what the drill is
+            // mostly spent reading. The number is roughly where the old fixed
+            // 352px editor put the divider, so an existing drill does not open
+            // to a rearranged screen.
+            return (
+              <WorkbenchSplit
+                storageKey="drill"
+                defaultFraction={0.55}
+                label={
+                  <span
+                    data-autosave={
+                      solution.status === 'conflict' ? 'paused' : undefined
+                    }
+                  >
+                    {solution.status === 'conflict'
+                      ? 'Autosave paused'
+                      : solution.status === 'error'
+                        ? 'Save failed — kept locally'
+                        : 'solution.ts'}
+                  </span>
+                }
+                toolbar={toolbar}
+                lower={transcript}
+              >
+                <SolutionEditor
+                  value={solution.text}
+                  onChange={solution.setText}
+                  readOnly={solution.status === 'loading'}
+                />
+              </WorkbenchSplit>
+            );
+          })()}
         </Workbench>
 
         {/* The four first-class errors still interrupt, because each of them

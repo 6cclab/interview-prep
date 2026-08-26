@@ -170,6 +170,12 @@ export interface FinishOptions {
     pattern: string
     hints: number
     elapsedMs: number
+    /**
+     * Which runner graded it. Deployed instances do not run candidate code, so
+     * every verdict there came from the candidate's own browser — see the
+     * `/tests` route. Absent means server-side vitest.
+     */
+    verifiedBy?: 'server' | 'browser'
   }
   /** Which backend and model conducted it — see `formatSession`'s `transport`. */
   transport?: string
@@ -244,6 +250,7 @@ export async function finishSession(
         solved: log.solved,
         hints: opts.drill.hints,
         elapsedMs: opts.drill.elapsedMs,
+        verifiedBy: opts.drill.verifiedBy,
         note: log.note,
       })
       drillLogWritten = true

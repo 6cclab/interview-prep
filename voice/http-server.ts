@@ -32,7 +32,7 @@ import {
   type VoiceMode,
 } from './problems'
 import { buildExercise } from './coding-exercise'
-import { readSolution, writeSolution, versionOf } from './solution-file'
+import { versionOf } from './solution-file'
 import { findCompetency, listCompetencies } from './competencies'
 import { findExercise, listExercises } from './exercises'
 import { runDebugTests, debugVerdictCue, type DebugVerdict } from './debug-tests'
@@ -43,6 +43,7 @@ import { isoDate } from './coached'
 import { fsWorkStore } from './work-store-fs'
 import type { WorkStore } from './work-store'
 import { runDrillTests, verdictCue } from './drill-tests'
+import { parseDrillVerdict, type DrillVerdict } from './drill-verdict'
 import { createInterviewer, type Message, type StreamFn } from './interviewer'
 import { backendSummary, describeBackend, modelFor, streamForBackend, transportLabel } from './backend'
 import { preloadOllama } from './ollama'
@@ -75,6 +76,24 @@ import {
 
 export interface VoiceServerDeps {
   root: string
+  /**
+   * Which store and which editing modes this process serves.
+   *
+   * Defaults to `local`, so every test that constructs a server without one —
+   * nearly all of them — keeps the behaviour it was written against, and so a
+   * local run needs no environment at all.
+   *
+   * Passed rather than read from `resolveMode()` down in a route for the usual
+   * reason: a route that reads the environment is a route a test can only
+   * exercise by mutating it. `main()` resolves the mode once and hands it over.
+   *
+   * The one behaviour that turns on it today is the editing mode — `own` is
+   * local-only, see `parseDrill`. `deps.auth` being present would have been a
+   * usable proxy for "deployed", but it is a different fact that happens to
+   * correlate, and correlations are how a future local-with-auth run quietly
+   * loses its own editor.
+   */
+  mode?: VoiceMode
   /**
    * The interviewer transport for a session on `track`.
    *
@@ -199,19 +218,67 @@ export interface VoiceServerDeps {
 // straight into memory is a trivial way for a single request to exhaust it.
 const MAX_TURN_AUDIO_BYTES = 25 * 1024 * 1024
 
-// A device-config PATCH body is a couple of short string fields — a few
-// hundred bytes at most. 4KB is a wide margin, not a guess, and rejecting
-// anything past it costs nothing a real client would ever hit.
+/**
+ * Per-route body limits.
+ *
+ * **Each caller passes its own, and `readJsonBody` has no default**, because
+ * the default is what broke: the cap was a single constant named
+ * `MAX_DEVICE_CONFIG_BODY_BYTES`, sized for a PATCH carrying two short strings,
+ * and every route added afterwards silently inherited it. A practice
+ * conversation stopped answering on its third question, and any solution over
+ * 4KB stopped saving — both reporting something else entirely. A shared default
+ * cannot be reviewed at the call site; a required argument has to be.
+ */
+// Two short string fields. 4KB is a wide margin, not a guess.
 const MAX_DEVICE_CONFIG_BODY_BYTES = 4 * 1024
+// `{ track, problem, budgetMinutes, editor }` — slugs and small numbers.
+const MAX_SESSION_BODY_BYTES = 4 * 1024
+// A solution file. `problems/` runs to a few KB and a candidate's working
+// buffer legitimately runs longer, with a pasted brute force alongside a
+// rewrite. 1MB is far past anything anyone types and still bounded.
+const MAX_SOLUTION_BODY_BYTES = 1024 * 1024
+// A whole practice conversation plus the editor buffer, resent every turn. This
+// grows with the session by design, which is exactly why it cannot share a
+// limit sized for a single message.
+const MAX_CHAT_BODY_BYTES = 1024 * 1024
+// A verdict: a kind, and a list of failing test names. Large only when a suite
+// fails in its entirety.
+const MAX_VERDICT_BODY_BYTES = 256 * 1024
 
-/** Reads and JSON-parses a small request body. Malformed or oversized input yields `null`. */
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+/**
+ * A body past its route's limit.
+ *
+ * Its own type rather than a `null`, because `null` also means "malformed",
+ * and the two produced actively misleading answers: an oversized solution save
+ * came back as "A save needs `text` and `version`" — a message about fields
+ * the client had in fact sent — and an oversized chat as "invalid request
+ * body". Both read as client bugs. Neither was.
+ */
+export class RequestTooLarge extends Error {}
+
+/**
+ * Reads and JSON-parses a request body, up to `limit` bytes.
+ *
+ * Malformed input still yields `null`. Oversized input throws, so a route can
+ * say so rather than reporting whatever its field validation makes of an empty
+ * object. Reading an unbounded body straight into memory is a trivial way for
+ * one request to exhaust it, which is why there is a limit at all — the fix is
+ * for each limit to fit its route, not for the limit to go away.
+ */
+async function readJsonBody(
+  req: IncomingMessage,
+  limit: number,
+): Promise<Record<string, unknown> | null> {
   const chunks: Buffer[] = []
   let total = 0
   for await (const chunk of req) {
     const buf = chunk as Buffer
     total += buf.length
-    if (total > MAX_DEVICE_CONFIG_BODY_BYTES) return null
+    if (total > limit) {
+      throw new RequestTooLarge(
+        `That request is larger than this route accepts (${Math.round(limit / 1024)}KB).`,
+      )
+    }
     chunks.push(buf)
   }
   try {
@@ -235,7 +302,21 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
  * and re-runs `assertNoSpoilers` on the paths it derives, so the spoiler gate
  * never rests on this function being right.
  */
-export function parseDrill(body: Record<string, unknown> | null): Drill {
+/**
+ * The editing modes a mode will accept, newest-visitor default first.
+ *
+ * One function so the picker and `parseDrill` cannot drift: a UI offering
+ * `own` on a deployed instance is a UI whose only outcome is a 400, and the way
+ * that happens is two lists maintained separately. The test pins them together.
+ */
+export function editorsFor(mode: VoiceMode): ('browser' | 'own')[] {
+  return mode === 'deployed' ? ['browser'] : ['browser', 'own']
+}
+
+export function parseDrill(
+  body: Record<string, unknown> | null,
+  mode: VoiceMode = 'local',
+): Drill {
   const track = body?.track ?? 'mock'
   if (
     track !== 'mock' &&
@@ -292,17 +373,41 @@ export function parseDrill(body: Record<string, unknown> | null): Drill {
     budgetMs = Math.round(raw) * 60_000
   }
 
-  // Coding track only: where the answer is written. Absent (or an empty/null
-  // value) means the candidate's own editor, the long-standing default — this
-  // does not coerce an unrecognised value, the same style as `competency`
-  // above, since this is the one place client input reaches a filesystem path.
+  // Coding track only: where the answer is written. This does not coerce an
+  // unrecognised value, the same style as `competency` above, since this is the
+  // one place client input reaches a filesystem path.
+  //
+  // **`own` is local-only, and the mode decides — not the client.** `own` means
+  // the candidate edits `problems/<pattern>/<slug>/solution.ts` in a real editor
+  // and the server spawns vitest against that path. Both halves of that are
+  // properties of the machine the candidate is sitting at, and a deployed
+  // instance is not that machine: there is one checkout behind the process and
+  // it is shared by everyone using it, so `own` there does not mean "my editor",
+  // it means "a file several strangers are also editing".
+  //
+  // So the refusal is here rather than in the picker. A UI that stops offering
+  // the choice is a UI that can be bypassed with a hand-typed hash or a `curl`;
+  // this is the code path that makes it unreachable.
   const editor = body?.editor
   if (editor !== undefined && editor !== null && editor !== '') {
     if (track !== 'coding' || (editor !== 'browser' && editor !== 'own')) {
       throw new Error(`Invalid editor mode: ${String(editor)}`)
     }
+    if (editor === 'own' && mode === 'deployed') {
+      throw new Error(
+        'The `own` editor mode is local-only: it edits a solution.ts on the server’s own ' +
+          'disk, which a deployed instance shares between everyone using it. Write this one in ' +
+          'the browser.',
+      )
+    }
     return { track, problem, budgetMs, editor }
   }
+  // Absent means `own` locally — the long-standing default, and the mode the
+  // repo was built around. Deployed has no such default to fall back to, so it
+  // resolves to `browser` explicitly rather than leaving the field unset: an
+  // absent `editor` downstream reads as `own` (see `session-store.ts`), and a
+  // default that means "edit the shared checkout" is the one this must not have.
+  if (mode === 'deployed' && track === 'coding') return { track, problem, budgetMs, editor: 'browser' }
   return { track, problem, budgetMs }
 }
 
@@ -585,6 +690,13 @@ function finishOptions(deps: VoiceServerDeps, stored: StoredSession, elapsedMs: 
               stored.drill.track === 'debug' ? 'debugging' : codingPattern(deps.root, stored.drill.problem),
             hints: stored.hintRung,
             elapsedMs,
+            // Derived from the mode rather than remembered per verdict, because
+            // in deployed mode there is no other possibility: the `/tests` route
+            // refuses to run anything server-side there, so every verdict a
+            // deployed drill was judged against came from the browser. Tracking
+            // it per run would be a second source of truth for a fact the mode
+            // already settles.
+            verifiedBy: (deps.mode ?? 'local') === 'deployed' ? ('browser' as const) : ('server' as const),
           }
         : undefined,
   }
@@ -988,7 +1100,13 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         return
       }
       if (req.method === 'POST') {
-        const body = await readJsonBody(req)
+        let body: Record<string, unknown> | null
+        try {
+          body = await readJsonBody(req, MAX_DEVICE_CONFIG_BODY_BYTES)
+        } catch (error) {
+          sendJson(res, error instanceof RequestTooLarge ? 413 : 400, { error: errorMessage(error) })
+          return
+        }
         if (!body) {
           sendJson(res, 400, { error: 'invalid request body' })
           return
@@ -1052,9 +1170,11 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     if (req.method === 'POST' && url.pathname === '/api/practice/chat') {
       let body: Record<string, unknown> | null
       try {
-        body = await readJsonBody(req)
+        body = await readJsonBody(req, MAX_CHAT_BODY_BYTES)
       } catch (error) {
-        sendJson(res, 400, { error: errorMessage(error) })
+        // 413 for oversize, 400 for malformed. Different problems with
+        // different answers: one means "send less", the other "send valid JSON".
+        sendJson(res, error instanceof RequestTooLarge ? 413 : 400, { error: errorMessage(error) })
         return
       }
       if (!body) {
@@ -1165,8 +1285,15 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         return
       }
 
+      // Through the work store, so a deployed instance reads and writes this
+      // person's buffer rather than the one `solution.ts` sitting in the
+      // container's checkout. Locally the store still writes that exact file —
+      // there the file IS the buffer, and `Run tests`, `pnpm reset` and
+      // `/review` all depend on it being so.
+      const work = workFor(deps, userId)
+
       if (req.method === 'GET') {
-        const file = readSolution(deps.root, slug)
+        const file = await work.readSolution(slug)
         if (file === null) {
           sendJson(res, 404, { error: 'Unknown problem.' })
           return
@@ -1177,19 +1304,29 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
 
       let body: Record<string, unknown> | null
       try {
-        body = await readJsonBody(req)
+        body = await readJsonBody(req, MAX_SOLUTION_BODY_BYTES)
       } catch (error) {
-        sendJson(res, 400, { error: errorMessage(error) })
+        // 413 for oversize, 400 for malformed. Different problems with
+        // different answers: one means "send less", the other "send valid JSON".
+        sendJson(res, error instanceof RequestTooLarge ? 413 : 400, { error: errorMessage(error) })
         return
       }
-      const text = body?.text
-      const version = body?.version
+      // `body === null` is malformed JSON, not missing fields. Reported apart
+      // because the merged message — "A save needs `text` and `version`" — was
+      // what an oversized save used to answer, naming fields the client had
+      // sent and sending anyone reading it in exactly the wrong direction.
+      if (body === null) {
+        sendJson(res, 400, { error: 'That save was not valid JSON.' })
+        return
+      }
+      const text = body.text
+      const version = body.version
       if (typeof text !== 'string' || typeof version !== 'string') {
         sendJson(res, 400, { error: 'A save needs `text` and `version`.' })
         return
       }
 
-      const outcome = writeSolution(deps.root, slug, text, version)
+      const outcome = await work.writeSolution(slug, text, version)
       if (outcome === 'missing') {
         sendJson(res, 404, { error: 'Unknown problem.' })
         return
@@ -1198,14 +1335,46 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         // 409, the same shape `POST /end` uses for its non-re-entrancy latch.
         // The client keeps the typed buffer; it must never resolve this by
         // discarding what the candidate wrote.
-        const current = readSolution(deps.root, slug)!
+        const current = await work.readSolution(slug)
         sendJson(res, 409, {
-          error: 'solution.ts changed on disk since you opened it.',
-          version: current.version,
+          // Says what changed rather than where it lives: deployed there is no
+          // disk and no `solution.ts`, and an error naming a file nobody can
+          // open is worse than one naming none.
+          error: 'This problem’s buffer changed since you opened it.',
+          version: current?.version,
         })
         return
       }
       sendJson(res, 200, { version: versionOf(text) })
+      return
+    }
+
+    /**
+     * What this instance does, as capabilities rather than as a mode name.
+     *
+     * Two clients need it and neither can infer it: the picker, to offer only
+     * the editing modes `parseDrill` will accept, and the drill screen, to know
+     * whether it has to run the suite itself. Its own route rather than a field
+     * on `/api/problems` because the drill screen never asks for a problem list
+     * — a reload lands straight on `#/coding/<slug>` — and because one route
+     * describing the instance beats two that can drift apart.
+     *
+     * Capabilities, not `mode`, deliberately. The client's job is to render what
+     * it is given; making it the second place in the system that knows
+     * `deployed` implies browser-only is how the two get to disagree.
+     *
+     * Unauthenticated-safe by position: it sits below the 401 gate like every
+     * other `/api/` route, so a deployed instance still requires a session for
+     * it. Anonymous sign-in happens on boot, before anything asks.
+     */
+    if (req.method === 'GET' && url.pathname === '/api/instance') {
+      const mode = deps.mode ?? 'local'
+      sendJson(res, 200, {
+        editors: editorsFor(mode),
+        // A deployed instance does not run candidate code — see the `/tests`
+        // route, which refuses a request that arrives without a verdict.
+        runsTestsInBrowser: mode === 'deployed',
+      })
       return
     }
 
@@ -1423,9 +1592,11 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // derives, so the spoiler gate never rests on this parse being correct.
       let drill: Drill
       try {
-        drill = parseDrill(await readJsonBody(req))
+        drill = parseDrill(await readJsonBody(req, MAX_SESSION_BODY_BYTES), deps.mode ?? 'local')
       } catch (error) {
-        sendJson(res, 400, { error: errorMessage(error) })
+        // 413 for oversize, 400 for malformed. Different problems with
+        // different answers: one means "send less", the other "send valid JSON".
+        sendJson(res, error instanceof RequestTooLarge ? 413 : 400, { error: errorMessage(error) })
         return
       }
 
@@ -1693,6 +1864,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         sendJson(res, 409, { error: 'a turn is already in progress for this session' })
         return
       }
+
       turnsInFlight.add(id)
       store.touch(id, idleClock())
 
@@ -1961,6 +2133,51 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         sendJson(res, 409, { error: 'a turn is already in progress for this session' })
         return
       }
+
+      // A deployed instance does not run candidate code. The suite runs in the
+      // browser and the outcome travels with the request; there is no vitest
+      // here to spawn and no per-person checkout to spawn it against.
+      //
+      // **Required, not preferred.** An absent verdict is a 400 rather than a
+      // fall through to `runDrillTests`, which would execute whatever is in the
+      // container's shared checkout — the exact thing this branch exists to
+      // stop, reachable by leaving a field out.
+      //
+      // Confined to `deployed`: a local instance has the checkout, the suite and
+      // a real runner, so it has no reason to take a client's word for the
+      // outcome. Keeping the forgeable path in the one mode that cannot do
+      // better is the whole of the trade — see `verified_by` in `schema.sql`.
+      let supplied: DrillVerdict | null = null
+      if ((deps.mode ?? 'local') === 'deployed') {
+        if (testable === 'debug') {
+          // The browser runner covers a coding suite, not the debugging track's
+          // two files. Refusing is the honest answer: the alternative is running
+          // the candidate's code on the server, which is what this whole branch
+          // exists to prevent.
+          sendJson(res, 400, {
+            error: 'The debugging track cannot run its tests on a deployed instance yet.',
+          })
+          return
+        }
+        let body: Record<string, unknown> | null
+        try {
+          body = await readJsonBody(req, MAX_VERDICT_BODY_BYTES)
+        } catch (error) {
+          sendJson(res, 400, { error: errorMessage(error) })
+          return
+        }
+        // Validated rather than trusted onward: `verdictCue` reads `failed`
+        // straight into the interviewer's prompt, so an unchecked shape here is
+        // a prompt built out of arbitrary posted JSON.
+        supplied = parseDrillVerdict(body?.verdict)
+        if (supplied === null) {
+          sendJson(res, 400, {
+            error: 'This instance runs the suite in your browser — the request must carry its verdict.',
+          })
+          return
+        }
+      }
+
       turnsInFlight.add(id)
       store.touch(id, idleClock())
 
@@ -1978,7 +2195,9 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       let verdict: DebugVerdict | Awaited<ReturnType<typeof runDrillTests>>
       try {
         verdict =
-          testable === 'debug'
+          supplied !== null
+            ? supplied
+            : testable === 'debug'
             ? await runDebugTests({
                 root: deps.root,
                 exercise: stored.drill.problem!,
@@ -2367,6 +2586,7 @@ async function main(): Promise<void> {
   const tls = readTlsMaterial(root)
   const server = createVoiceServer({
     root,
+    mode,
     createTransport: (track) => streamForBackend(track, (line) => console.log(`${track}: ${line}`)),
     transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
     tls,

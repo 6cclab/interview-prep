@@ -3,6 +3,7 @@ import type { CoachedRow } from './coached'
 import type { HistoryRow } from './drill-log'
 import { summarise } from './drill-log'
 import type { DrillLogRow, StoryLog } from './transcript'
+import { versionOf, type SolutionFile, type WriteOutcome } from './solution-file'
 import type { HistoryPayload, SavedTranscript, WorkStore } from './work-store'
 
 /**
@@ -30,6 +31,67 @@ async function problemIdFor(client: DbClient, slug: string | undefined): Promise
   return rows[0]?.id ?? null
 }
 
+/**
+ * The insert, and what a zero rowcount means.
+ *
+ * Exported and taking a client so a test can drive two of these through
+ * interleaved transactions — which is the only way to reach the branch below.
+ * Inlined in `writeSolution` it was unreachable from any test: two calls through
+ * the store serialise, and the loser is caught by the version check one step
+ * earlier. Removing this branch left the whole suite green, which is how that
+ * was found.
+ *
+ * The conflict path fires only when a row appeared between the caller's `select
+ * ... for update` and this insert — two first writes for the same buffer, which
+ * `for update` cannot serialise because there was no row to lock. The re-check
+ * in the `where` clause is what decides that race; a zero rowcount is how it
+ * reports having lost. `stale` rather than a write that silently vanishes.
+ *
+ * `based_on_content_hash` is not written: it exists for the "the stub or the
+ * tests changed under you" banner, which compares against the problem's own
+ * hash and is not built yet. A value nothing reads is a field that looks
+ * maintained and is not.
+ */
+export async function upsertBuffer(
+  client: DbClient,
+  userId: string,
+  problemId: string,
+  text: string,
+  expected: string,
+): Promise<'ok' | 'stale'> {
+  const written = await client.query(
+    `insert into solution_buffer (user_id, problem_id, content, updated_at)
+     values ($1, $2, $3, now())
+     on conflict (user_id, problem_id) do update
+       set content = excluded.content, updated_at = now()
+       where solution_buffer.content = $4`,
+    [userId, problemId, text, expected],
+  )
+  return written.rowCount === 0 ? 'stale' : 'ok'
+}
+
+/** The `stub` document's text, or null when the problem carries no code. */
+async function stubFor(client: DbClient, problemId: string): Promise<string | null> {
+  const { rows } = await client.query<{ content: string }>(
+    "select content from problem_document_public where problem_id = $1 and kind = 'stub'",
+    [problemId],
+  )
+  return rows[0]?.content ?? null
+}
+
+/** This person's buffer if they have one, otherwise the stub they would start from. */
+async function bufferOrStub(
+  client: DbClient,
+  userId: string,
+  problemId: string,
+): Promise<string | null> {
+  const { rows } = await client.query<{ content: string }>(
+    'select content from solution_buffer where user_id = $1 and problem_id = $2',
+    [userId, problemId],
+  )
+  return rows[0]?.content ?? (await stubFor(client, problemId))
+}
+
 export function dbWorkStore(userId: string | null): WorkStore {
   // A null user cannot own anything, and every RLS policy would reject the
   // write anyway. Failing here rather than there turns a `row-level security`
@@ -42,6 +104,70 @@ export function dbWorkStore(userId: string | null): WorkStore {
   }
 
   return {
+    /**
+     * The buffer, as a row rather than a file.
+     *
+     * A deployed instance has one checkout and several people, so `solution.ts`
+     * on disk is not "the candidate's working file", it is a file everyone
+     * shares — two people drilling the same problem would overwrite each other,
+     * and the loser would watch their own editor change under them.
+     *
+     * **A first read returns the stub, and does not write a row.** The buffer
+     * comes into existence when something is typed. Seeding on read would put a
+     * row in the table for every problem anyone merely opened, and would make
+     * "has this person started this problem" — a question `/status` asks in
+     * spirit — answer yes for a glance.
+     *
+     * The stub, never `solution` — that document is a spoiler, `is_spoiler` is
+     * true on it at ingest, and `app_runtime` cannot read it through
+     * `problem_document_public` at all. The grant is what enforces that; this
+     * comment only records that it is deliberate.
+     */
+    async readSolution(slug: string): Promise<SolutionFile | null> {
+      return withRuntime(owner(), async (client) => {
+        const problemId = await problemIdFor(client, slug)
+        if (problemId === null) return null
+        const text = await bufferOrStub(client, owner(), problemId)
+        return text === null ? null : { text, version: versionOf(text) }
+      })
+    },
+
+    /**
+     * Compare-and-set, inside one transaction.
+     *
+     * The read and the write have to be atomic or the guard is decorative: two
+     * tabs both read version A, both find it current, and both write — the
+     * second silently destroying the first's work, which is the entire failure
+     * the version is here to prevent. `withRuntime` opens a transaction and
+     * `for update` locks the row for its duration, so the second caller waits
+     * and then correctly sees a version that is no longer what it expected.
+     *
+     * `for update` on a row that does not exist locks nothing, so two first
+     * writes can race. `on conflict` resolves that at the unique index rather
+     * than in application code — but resolving it means one of them wins, so the
+     * conflict path re-checks the version it is overwriting rather than assuming
+     * its own read is still true.
+     */
+    async writeSolution(slug: string, text: string, expected: string): Promise<WriteOutcome> {
+      return withRuntime(owner(), async (client) => {
+        const problemId = await problemIdFor(client, slug)
+        if (problemId === null) return 'missing'
+
+        const { rows } = await client.query<{ content: string }>(
+          'select content from solution_buffer where user_id = $1 and problem_id = $2 for update',
+          [owner(), problemId],
+        )
+        const current = rows[0]?.content ?? (await stubFor(client, problemId))
+        // No row and no stub means the problem exists but carries no code —
+        // system design, for one. There is nothing to edit and nothing to
+        // compare against.
+        if (current === null) return 'missing'
+        if (versionOf(current) !== expected) return 'stale'
+
+        return upsertBuffer(client, owner(), problemId, text, current)
+      })
+    },
+
     async saveTranscript({ body, track }): Promise<SavedTranscript> {
       // The preferred path is ignored, deliberately: it encodes a directory
       // layout — `local/designs/<problem>-live-...` — that means nothing here.
@@ -75,10 +201,11 @@ export function dbWorkStore(userId: string | null): WorkStore {
             row.solved ? 'solved' : 'unsolved',
             row.hints,
             row.elapsedMs,
-            // Server-side vitest, until the browser runner reports its own
-            // verdicts. Recorded rather than assumed, because a browser verdict
-            // is forgeable and the point is that it is distinguishable.
-            'server',
+            // Recorded rather than assumed, because a browser verdict is
+            // forgeable and the point is that it is distinguishable, not that
+            // it is prevented. Absent means server-side vitest — every caller
+            // that does not set it is a local run, where it is the truth.
+            row.verifiedBy ?? 'server',
             row.note,
           ],
         )

@@ -245,10 +245,61 @@ you need once.
   than shipping as an improvement.
 - **Your own editor**: you edit `solution.ts` yourself, against real types,
   isolated by the OS. This is the mode that keeps the file the buffer.
+  **Local only.** `own` means the server edits and runs a `solution.ts` on its
+  own disk, and a deployed instance has exactly one checkout behind it, shared
+  by everyone using it — there `own` does not mean "my editor", it means "a file
+  several strangers are also editing". `parseDrill` refuses it under
+  `VOICE_MODE=deployed` and resolves an absent `editor` to `browser` rather than
+  to the local default, because an absent one reads as `own` everywhere
+  downstream. The picker asks `/api/problems?track=coding` which modes exist and
+  renders no control at all when there is only one; `editorsFor` is the single
+  list both sides read, so the UI cannot offer what the parser would refuse.
+  A picker is not the enforcement — a hand-typed hash or a `curl` skips it.
 
-Either way the button runs that problem's suite server-side and the interviewer
-is told the outcome as a bracketed note it never speaks — `drill.md`'s step 7,
+**The buffer follows the same split.** `WorkStore.readSolution` /
+`writeSolution` is the seam. Locally the buffer *is*
+`problems/<pattern>/<slug>/solution.ts`, which is what makes `Run tests`,
+`pnpm reset` and `/review` all read the same bytes without any of them knowing
+an editor exists. Deployed it is a `solution_buffer` row per person, seeded on
+first read from the problem's `stub` document — never `solution`, which is a
+spoiler the `app_runtime` grant cannot read at all. A first read serves the stub
+without writing a row: the buffer exists once something is typed, not once
+something is opened. Writes are compare-and-set inside one transaction, and a
+lost race reports `stale` rather than silently overwriting — the client keeps
+the typed text and says so.
+
+Locally the button runs that problem's suite server-side and the interviewer is
+told the outcome as a bracketed note it never speaks — `drill.md`'s step 7,
 reassigned, the same way the design track's time check is.
+
+**A deployed instance does not run candidate code.** The suite runs in a Web
+Worker in the browser and the verdict travels with `POST /api/session/:id/tests`,
+which refuses a request that arrives without one rather than falling back to
+vitest — the fallback would execute whatever is in the container's shared
+checkout, reachable by leaving a field out. `parseDrillVerdict` validates the
+shape before it reaches `verdictCue`, which interpolates `failed` into the
+interviewer's prompt. The debugging track is refused there for now: the browser
+runner covers a coding suite, not its two files.
+
+That verdict is forgeable and the trade is accepted — the only adversary is the
+candidate deceiving themselves. What matters is that it is *distinguishable*, so
+`drill_log.verified_by` records `browser` or `server`, and `/status` can weight
+the two differently rather than reading a forged green as a cold solve.
+
+`GET /api/instance` reports what an instance does — `editors` and
+`runsTestsInBrowser` — as capabilities rather than as a mode name. Its own route
+because the drill screen never asks for a problem list (a reload lands straight
+on `#/coding/<slug>`), and because one route describing the instance beats two
+that can drift.
+
+## Local mode is frozen
+
+`VOICE_MODE=local` keeps working exactly as documented above and is what every
+local drill still runs. It is no longer where new work goes: features land on the
+deployed path, and local keeps the behaviour it has. Nothing is being deleted —
+the zero-setup daily loop and the plain-text `local/` record are still the reason
+it exists — but a new capability arriving in one mode and not the other is
+expected rather than a gap to close.
 
 The editor mode is a **start-time choice and is not in the URL**. Reopening a
 live session gets it back from the server's session state; a reparsed hash
