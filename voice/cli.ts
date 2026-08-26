@@ -3,10 +3,21 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { record } from './audio'
-import { streamForBackend } from './backend'
+import { streamForBackend, transportLabel } from './backend'
 import { timeCue, buildSystemPrompt, type Track } from './context'
 import { listInputDevices, listOutputDevices, listVoices, readDeviceConfig, resolveSpeech } from './devices'
 import { createInterviewer } from './interviewer'
+import { assertCapturable, capturedBytes, LiveRefused, livePath, recordSegmented } from './live'
+import { formatArtifact, formatTranscript, stamp } from './live-artifact'
+import {
+  avfoundationInput,
+  LIVE_USAGE,
+  LiveUsage,
+  parseLiveArgs,
+  resolveCaptureDevice,
+} from './live-cli'
+import { captureSegments } from './live-run'
+import { liveSummaryPrompt, summarise } from './live-summary'
 import { runSession } from './session'
 import { resolveSpeaker, saySpeaker, whisperTranscriber } from './speech'
 import { transcriptionPrompt } from './vocabulary'
@@ -108,9 +119,123 @@ async function printVoices(requested?: string): Promise<void> {
   console.log('  { "voice": "Ava (Premium)", "rate": 170 }')
 }
 
+/**
+ * `pnpm voice:live` / `pnpm voice:debrief` — capture a real round.
+ *
+ * The order here is load-bearing. Every check that can refuse happens *before*
+ * ffmpeg starts, so a refusal costs nothing; everything after the first byte of
+ * audio is written defensively, because from that point on there is a recording
+ * of a real interview that only exists here and cannot be made again.
+ */
+async function runLive(mode: 'live' | 'debrief', argv: string[]): Promise<void> {
+  const args = parseLiveArgs(mode, argv)
+  const root = process.cwd()
+
+  // Resolve and clear the device first. `--device` wins over `local/voice.json`
+  // so a machine configured for practice drills does not silently decide which
+  // microphone records an interview.
+  const device = resolveCaptureDevice(await listInputDevices(), args.device ?? resolveDevices(root).input)
+  // A debrief is him talking to himself after the fact — there is no second
+  // party in the room to overhear, so the headphone rule has nothing to protect
+  // and demanding it would only teach him to pass the flag reflexively. The
+  // loopback refusal still applies: there is no reason to capture system audio
+  // in either mode.
+  assertCapturable(device, mode === 'debrief' ? true : args.headphones)
+
+  const scratch = mkdtempSync(join(tmpdir(), `voice-${mode}-`))
+  const startedAt = new Date()
+  const started = Date.now()
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+
+  console.log(`Recording from ${device.name}. Press Enter when the round is over.`)
+  const every =
+    args.segmentSeconds >= 60 ? `${Math.round(args.segmentSeconds / 60)} min` : `${args.segmentSeconds}s`
+  console.log(`Segments close every ${every} and transcribe as they do.`)
+  console.log('Only this microphone is being captured.\n')
+
+  const recorder = recordSegmented(scratch, avfoundationInput(device), 'ffmpeg', args.segmentSeconds)
+
+  let transcript = ''
+  try {
+    const segments = await captureSegments({
+      dir: scratch,
+      recorder,
+      transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
+      seconds: args.segmentSeconds,
+      until: rl.question('').then(() => undefined),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      // The same vocabulary bias the drills use. A real round is the last place
+      // to be transcribing "O of n log n" as "on log on".
+      transcriptionPrompt: transcriptionPrompt('coding'),
+      // The same stamp the transcript carries, so a line on screen and a line
+      // in the file name the same moment. Rounding to whole minutes here made
+      // every segment of a short capture report "0m".
+      onSegment: (segment) => {
+        process.stdout.write(`  transcribed ${stamp(segment.offsetMs)}\n`)
+      },
+    })
+    transcript = formatTranscript(segments)
+    console.log(
+      `\nCaptured ${segments.length} segment(s), ` +
+        `${Math.round(capturedBytes(scratch, recorder.written()) / 1e6)}MB of audio.`,
+    )
+  } finally {
+    rl.close()
+  }
+
+  // The summary is the optional half. Everything below is written whether or
+  // not a model answers — a captured round must not be lost because ollama was
+  // down, and `formatArtifact` says on the page when no summary was generated.
+  let summary = null
+  let model = 'none'
+  try {
+    model = transportLabel('coach')
+    summary = await summarise(streamForBackend('coach'), liveSummaryPrompt(root), {
+      company: args.company,
+      round: args.round,
+      mode,
+      transcript,
+    })
+  } catch (error) {
+    console.error(`\nNo summary: ${(error as Error).message}`)
+  }
+
+  const body = formatArtifact(
+    {
+      company: args.company,
+      round: args.round,
+      mode,
+      startedAt,
+      durationMs: Date.now() - started,
+      device: device.name,
+      model,
+    },
+    summary,
+    transcript,
+  )
+
+  try {
+    // The path written may differ from the one asked for — `writeSession` will
+    // not overwrite — so print what it actually used.
+    console.log(`\nRecord: ${writeSession(root, livePath(args.company, startedAt), body)}`)
+    rmSync(scratch, { recursive: true, force: true })
+  } catch (error) {
+    // The audio stays. It is the only copy, and a failed write is not a reason
+    // to delete a recording of a real interview.
+    console.error(`Could not write the record: ${(error as Error).message}`)
+    console.error(`The audio is still at ${scratch}.`)
+    throw error
+  }
+}
+
 async function main(): Promise<void> {
-  const track = process.argv[2] as Track | 'devices' | 'voices' | undefined
+  const track = process.argv[2] as Track | 'devices' | 'voices' | 'live' | 'debrief' | undefined
   const problem = process.argv[3]
+
+  if (track === 'live' || track === 'debrief') {
+    await runLive(track, process.argv.slice(3))
+    return
+  }
 
   if (track === 'devices') {
     await printDevices()
@@ -124,7 +249,9 @@ async function main(): Promise<void> {
 
   if (track !== 'mock' && track !== 'design') {
     console.error(
-      'Usage: pnpm mock:voice | pnpm design:voice <problem> | pnpm voice:devices | pnpm voice:voices [voice]',
+      'Usage: pnpm mock:voice | pnpm design:voice <problem> | pnpm voice:devices | pnpm voice:voices [voice]\n' +
+        '       pnpm voice:live --company <name> --device <:N> --headphones\n' +
+        '       pnpm voice:debrief --company <name>',
     )
     process.exit(1)
   }
@@ -190,5 +317,10 @@ async function main(): Promise<void> {
 
 main().catch((error: unknown) => {
   console.error((error as Error).message)
+  // A refusal and a usage error are decisions this tool made, not crashes, and
+  // printing the usage under a mistyped flag is the difference between fixing
+  // it and giving up on the round.
+  if (error instanceof LiveUsage) console.error(`\n${LIVE_USAGE}`)
+  if (error instanceof LiveRefused) console.error('\nRun `pnpm voice:devices` to list microphones.')
   process.exit(1)
 })
