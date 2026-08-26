@@ -20,11 +20,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # These three are on their latest majors because every earlier one runs on
+      # Node 20, which GitHub has deprecated: the runner already forces them onto
+      # Node 24 and annotates every run saying so. That forcing is a grace
+      # period, not a promise — when it ends, a workflow still on v4 stops
+      # running rather than warning.
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      # `cache: pnpm` still has to be asked for. setup-node v5 started caching
+      # automatically when `package.json` carries a `packageManager` field —
+      # which this repo's does — and v6 narrowed that back to npm only. So the
+      # automatic path would not cover pnpm even if it fired, and this line is
+      # what actually caches the store.
+      #
+      # Order matters and already is right: `pnpm/action-setup` must run first,
+      # because setup-node resolves the pnpm store path by invoking pnpm.
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -83,7 +96,7 @@ jobs:
     # through QEMU and takes many times longer.
     runs-on: [self-hosted, 6cclab]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Fetch secrets from Infisical
         uses: infisical/secrets-action@v1.0.9
@@ -120,7 +133,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max,compression=zstd,compression-level=3
 
       - name: Checkout deployment repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
           path: deployment
