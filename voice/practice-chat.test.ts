@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Server } from 'node:http'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVoiceServer, type VoiceServerDeps } from './http-server'
@@ -182,6 +182,52 @@ describe('buildPracticeChatPrompt', () => {
   it('never carries the worked answer', () => {
     const prompt = buildPracticeChatPrompt(root, { slug: SLUG, pattern: PATTERN })
     expect(prompt).not.toContain(WORKED_ANSWER)
+  })
+})
+
+/**
+ * The discipline block, pinned.
+ *
+ * A real session produced a reply containing three competing versions of one
+ * method, a line commented `// placeholder logic — see full fix below`, and a
+ * variable annotated `// will be undefined now, but we'll set it back below`.
+ * Every *sentence* rule in the prompt was satisfied: none of the banned phrases
+ * appeared in prose. The working-out had simply moved inside the code fences,
+ * which is worse, because code is what gets copied into the editor.
+ *
+ * Asserted on the file rather than on a model's output because that is what can
+ * be tested deterministically. A model following it is a separate question and
+ * a separate measurement — but a rule that is not in the file cannot be
+ * followed at all, and this is the file quietly losing it that these guard.
+ */
+describe('the tutor prompt bans working-out in code, not only in prose', () => {
+  const prompt = readFileSync(join(process.cwd(), 'prompts/practice-chat.md'), 'utf8')
+  const discipline = /<discipline>([\s\S]*?)<\/discipline>/.exec(prompt)?.[1] ?? ''
+
+  it('has a discipline block at all, and first', () => {
+    expect(discipline).not.toBe('')
+    expect(prompt.trimStart().startsWith('<discipline>')).toBe(true)
+  })
+
+  it('asks for one version of a function per reply', () => {
+    expect(discipline).toMatch(/one version of any function/i)
+  })
+
+  it('refuses placeholders and code known to be wrong', () => {
+    expect(discipline).toMatch(/placeholder/i)
+    expect(discipline).toMatch(/must run|would not paste it/i)
+  })
+
+  it('refuses a bug annotated as it is being written', () => {
+    expect(discipline).toMatch(/annotate a bug/i)
+  })
+
+  // The prose rules the code rules sit beside. Losing either half loses the
+  // point — the two failure modes are the same failure in two syntaxes.
+  it('still bans the phrases it always did', () => {
+    for (const phrase of ['wait', 'hold on', 'let me re-check', 'my read so far']) {
+      expect(discipline.toLowerCase()).toContain(phrase)
+    }
   })
 })
 
