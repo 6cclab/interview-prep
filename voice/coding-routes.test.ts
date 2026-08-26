@@ -120,6 +120,73 @@ afterEach(async () => {
 })
 
 /**
+ * The editing mode, over HTTP.
+ *
+ * `parseDrill` is unit-tested next door; these two prove the wiring — that
+ * `deps.mode` actually reaches the parser and the picker, which is the part a
+ * unit test of a pure function cannot show.
+ *
+ * `deps.mode` is set without `VOICE_MODE`, deliberately. The two are separate
+ * axes: the environment variable chooses the *store* (and the Postgres source
+ * is not built yet, so setting it here would 500 every list), while this dep
+ * chooses which editing modes are served. Testing the second without the first
+ * is what keeps this about the editor.
+ */
+describe('the own editor on a deployed instance', () => {
+  it('is refused at the route, not only in the picker', async () => {
+    const { port } = await listen(baseDeps({ mode: 'deployed' }))
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coding', problem: SLUG, editor: 'own' }),
+    })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/local-only/i)
+  })
+
+  // The picker cannot be the enforcement, so the enforcement has to survive a
+  // request the picker never made.
+  it('is still refused when the client never asks the picker at all', async () => {
+    const { port } = await listen(baseDeps({ mode: 'deployed' }))
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coding', problem: SLUG, editor: 'own', budgetMinutes: 30 }),
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('tells the picker which modes exist', async () => {
+    const { port } = await listen(baseDeps({ mode: 'deployed' }))
+    const body = (await (await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)).json()) as {
+      editors: string[]
+    }
+    expect(body.editors).toEqual(['browser'])
+  })
+
+  it('still offers both locally', async () => {
+    const { port } = await listen(baseDeps())
+    const body = (await (await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)).json()) as {
+      editors: string[]
+    }
+    expect(body.editors).toEqual(['browser', 'own'])
+  })
+
+  /**
+   * The quiet default. An absent `editor` reads as `own` everywhere downstream,
+   * so a deployed drill started without the field would have landed in exactly
+   * the mode the refusal above exists to prevent — and silently, with no 400 to
+   * notice.
+   */
+  it('starts a drill with no editor field in the browser', async () => {
+    const { port } = await listen(baseDeps({ mode: 'deployed' }))
+    const res = await startCodingSession(port)
+    expect(res.status).toBe(201)
+    expect(((await res.json()) as { editor: string }).editor).toBe('browser')
+  })
+})
+
+/**
  * The last error boundary around the route chain.
  *
  * `handleRequest` is invoked as a floating promise. Without a `.catch` on it,
@@ -175,9 +242,13 @@ describe('GET /api/problems?track=coding', () => {
     const { port } = await listen(baseDeps())
     const res = await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)
     expect(res.status).toBe(200)
+    // `toEqual`, not `toMatchObject`, and it stays that way: this route's whole
+    // job is withholding `pattern`, and an exact shape is what would notice a
+    // field arriving that nobody meant to send.
     expect(await res.json()).toEqual({
       problems: ['celebrity', SLUG],
       difficulties: { celebrity: 'hard', [SLUG]: 'medium' },
+      editors: ['browser', 'own'],
     })
   })
 

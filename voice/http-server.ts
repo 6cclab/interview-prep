@@ -76,6 +76,24 @@ import {
 export interface VoiceServerDeps {
   root: string
   /**
+   * Which store and which editing modes this process serves.
+   *
+   * Defaults to `local`, so every test that constructs a server without one —
+   * nearly all of them — keeps the behaviour it was written against, and so a
+   * local run needs no environment at all.
+   *
+   * Passed rather than read from `resolveMode()` down in a route for the usual
+   * reason: a route that reads the environment is a route a test can only
+   * exercise by mutating it. `main()` resolves the mode once and hands it over.
+   *
+   * The one behaviour that turns on it today is the editing mode — `own` is
+   * local-only, see `parseDrill`. `deps.auth` being present would have been a
+   * usable proxy for "deployed", but it is a different fact that happens to
+   * correlate, and correlations are how a future local-with-auth run quietly
+   * loses its own editor.
+   */
+  mode?: VoiceMode
+  /**
    * The interviewer transport for a session on `track`.
    *
    * Takes the track because the backend is chosen per track — see
@@ -235,7 +253,21 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
  * and re-runs `assertNoSpoilers` on the paths it derives, so the spoiler gate
  * never rests on this function being right.
  */
-export function parseDrill(body: Record<string, unknown> | null): Drill {
+/**
+ * The editing modes a mode will accept, newest-visitor default first.
+ *
+ * One function so the picker and `parseDrill` cannot drift: a UI offering
+ * `own` on a deployed instance is a UI whose only outcome is a 400, and the way
+ * that happens is two lists maintained separately. The test pins them together.
+ */
+export function editorsFor(mode: VoiceMode): ('browser' | 'own')[] {
+  return mode === 'deployed' ? ['browser'] : ['browser', 'own']
+}
+
+export function parseDrill(
+  body: Record<string, unknown> | null,
+  mode: VoiceMode = 'local',
+): Drill {
   const track = body?.track ?? 'mock'
   if (
     track !== 'mock' &&
@@ -292,17 +324,41 @@ export function parseDrill(body: Record<string, unknown> | null): Drill {
     budgetMs = Math.round(raw) * 60_000
   }
 
-  // Coding track only: where the answer is written. Absent (or an empty/null
-  // value) means the candidate's own editor, the long-standing default — this
-  // does not coerce an unrecognised value, the same style as `competency`
-  // above, since this is the one place client input reaches a filesystem path.
+  // Coding track only: where the answer is written. This does not coerce an
+  // unrecognised value, the same style as `competency` above, since this is the
+  // one place client input reaches a filesystem path.
+  //
+  // **`own` is local-only, and the mode decides — not the client.** `own` means
+  // the candidate edits `problems/<pattern>/<slug>/solution.ts` in a real editor
+  // and the server spawns vitest against that path. Both halves of that are
+  // properties of the machine the candidate is sitting at, and a deployed
+  // instance is not that machine: there is one checkout behind the process and
+  // it is shared by everyone using it, so `own` there does not mean "my editor",
+  // it means "a file several strangers are also editing".
+  //
+  // So the refusal is here rather than in the picker. A UI that stops offering
+  // the choice is a UI that can be bypassed with a hand-typed hash or a `curl`;
+  // this is the code path that makes it unreachable.
   const editor = body?.editor
   if (editor !== undefined && editor !== null && editor !== '') {
     if (track !== 'coding' || (editor !== 'browser' && editor !== 'own')) {
       throw new Error(`Invalid editor mode: ${String(editor)}`)
     }
+    if (editor === 'own' && mode === 'deployed') {
+      throw new Error(
+        'The `own` editor mode is local-only: it edits a solution.ts on the server’s own ' +
+          'disk, which a deployed instance shares between everyone using it. Write this one in ' +
+          'the browser.',
+      )
+    }
     return { track, problem, budgetMs, editor }
   }
+  // Absent means `own` locally — the long-standing default, and the mode the
+  // repo was built around. Deployed has no such default to fall back to, so it
+  // resolves to `browser` explicitly rather than leaving the field unset: an
+  // absent `editor` downstream reads as `own` (see `session-store.ts`), and a
+  // default that means "edit the shared checkout" is the one this must not have.
+  if (mode === 'deployed' && track === 'coding') return { track, problem, budgetMs, editor: 'browser' }
   return { track, problem, budgetMs }
 }
 
@@ -1279,6 +1335,15 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       sendJson(res, 200, {
         problems: coding.map((problem) => problem.slug),
         difficulties: Object.fromEntries(coding.map((problem) => [problem.slug, problem.difficulty])),
+        // Which editing modes this instance will actually accept, so the picker
+        // offers what exists rather than what the code was written against.
+        // `parseDrill` is what enforces it; this is only so the choice does not
+        // appear on screen and then 400 on the way into a drill.
+        //
+        // A list rather than a boolean or the mode itself: the client's job is
+        // to render the options it is given, and it should not be the second
+        // place in the system that knows `deployed` implies browser-only.
+        editors: editorsFor(deps.mode ?? 'local'),
       })
       return
     }
@@ -1423,7 +1488,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // derives, so the spoiler gate never rests on this parse being correct.
       let drill: Drill
       try {
-        drill = parseDrill(await readJsonBody(req))
+        drill = parseDrill(await readJsonBody(req), deps.mode ?? 'local')
       } catch (error) {
         sendJson(res, 400, { error: errorMessage(error) })
         return
@@ -2367,6 +2432,7 @@ async function main(): Promise<void> {
   const tls = readTlsMaterial(root)
   const server = createVoiceServer({
     root,
+    mode,
     createTransport: (track) => streamForBackend(track, (line) => console.log(`${track}: ${line}`)),
     transcriber: whisperTranscriber({ binary: WHISPER_BINARY, model: WHISPER_MODEL }),
     tls,

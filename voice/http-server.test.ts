@@ -4,7 +4,7 @@ import type { Server } from 'node:http'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createVoiceServer, parseDrill, startVoiceServer } from './http-server'
+import { createVoiceServer, editorsFor, parseDrill, startVoiceServer } from './http-server'
 import { readSSE } from './test-helpers/sse'
 import { useCliBackend } from './test-helpers/backend-env'
 
@@ -452,5 +452,85 @@ describe('parseDrill — the editing mode', () => {
   it('rejects an unknown editor mode rather than coercing it', () => {
     expect(() => parseDrill({ track: 'coding', problem: 'valid-palindrome', editor: 'vim' }))
       .toThrow(/editor/i)
+  })
+
+  /**
+   * `own` is local-only.
+   *
+   * It means the candidate edits `problems/<pattern>/<slug>/solution.ts` in a
+   * real editor and the server runs vitest against that path — both properties
+   * of the machine he is sitting at. A deployed instance is not that machine:
+   * one checkout sits behind the process and everyone using it shares it, so
+   * `own` there does not mean "my editor", it means "a file several strangers
+   * are also editing".
+   */
+  describe('deployed mode', () => {
+    it('refuses the own editor', () => {
+      expect(() => parseDrill({ track: 'coding', problem: 'valid-palindrome', editor: 'own' }, 'deployed'))
+        .toThrow(/local-only/i)
+    })
+
+    // The refusal has to survive a hand-typed hash or a curl, which is why it
+    // lives here and not in the picker.
+    it('says what to do instead rather than only refusing', () => {
+      expect(() => parseDrill({ track: 'coding', problem: 'valid-palindrome', editor: 'own' }, 'deployed'))
+        .toThrow(/in the browser/i)
+    })
+
+    /**
+     * The quiet half, and the one that matters more. An absent `editor` reads
+     * as `own` everywhere downstream (`session-store.ts` says so), so a
+     * deployed drill started with no editor field would have defaulted into
+     * exactly the mode the check above refuses.
+     */
+    it('resolves an absent editor to the browser rather than leaving it unset', () => {
+      expect(parseDrill({ track: 'coding', problem: 'valid-palindrome' }, 'deployed').editor)
+        .toBe('browser')
+    })
+
+    it('still accepts the browser editor', () => {
+      expect(parseDrill({ track: 'coding', problem: 'valid-palindrome', editor: 'browser' }, 'deployed'))
+        .toMatchObject({ editor: 'browser' })
+    })
+
+    // Local is the default and stays untouched — no environment, no database,
+    // and the editor mode the repo was built around.
+    it('leaves local mode alone', () => {
+      expect(parseDrill({ track: 'coding', problem: 'valid-palindrome', editor: 'own' }).editor).toBe('own')
+      expect(parseDrill({ track: 'coding', problem: 'valid-palindrome' }).editor).toBeUndefined()
+    })
+
+    // Non-coding tracks never had an editor and must not acquire one.
+    it('does not invent an editor for a track that has none', () => {
+      expect(parseDrill({ track: 'design', problem: 'url-shortener' }, 'deployed').editor).toBeUndefined()
+    })
+  })
+})
+
+/**
+ * The picker and the parser, pinned together.
+ *
+ * These drifted apart once before on a neighbouring pair — `parseDrill`
+ * accepted `assisted` while `/api/problems` did not, and the round was
+ * unreachable from the UI for as long as it had existed. Here the drift would
+ * run the other way: a picker offering `own` on a deployed instance, whose only
+ * possible outcome is a 400 on the way into a drill.
+ */
+describe('editorsFor', () => {
+  it.each(['local', 'deployed'] as const)('offers only what %s accepts', (mode) => {
+    for (const editor of editorsFor(mode)) {
+      expect(() => parseDrill({ track: 'coding', problem: 'valid-palindrome', editor }, mode)).not.toThrow()
+    }
+  })
+
+  it('offers both locally and the browser only when deployed', () => {
+    expect(editorsFor('local')).toEqual(['browser', 'own'])
+    expect(editorsFor('deployed')).toEqual(['browser'])
+  })
+
+  // Whatever the picker defaults to has to be in the list on both.
+  it('always offers the browser', () => {
+    expect(editorsFor('local')[0]).toBe('browser')
+    expect(editorsFor('deployed')[0]).toBe('browser')
   })
 })

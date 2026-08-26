@@ -76,6 +76,15 @@ interface ProblemList {
   titles: Record<string, string>
   /** Slug to whether `local/stories.md` has a story for it. Behavioural only; a competency with none is the gap. */
   hasStory: Record<string, boolean>
+  /**
+   * Which editing modes this instance accepts. Coding track only.
+   *
+   * Sent by the server rather than decided here, because the server is what
+   * enforces it — `own` edits a `solution.ts` on the server's own disk, which a
+   * deployed instance shares between everyone using it. Defaults to both when
+   * absent so a server too old to send the field keeps today's picker.
+   */
+  editors: ('browser' | 'own')[]
   selected: string
   failure: ListFailure
 }
@@ -86,6 +95,10 @@ const EMPTY: ProblemList = {
   difficulties: {},
   titles: {},
   hasStory: {},
+  // Both, so a failed or not-yet-arrived list never renders a *narrower* set of
+  // choices than the server would accept. Offering one that turns out to be
+  // refused costs a 400; hiding one that was available costs a mode silently.
+  editors: ['browser', 'own'],
   selected: '',
   failure: null,
 }
@@ -127,6 +140,7 @@ function useProblems(track: ProblemTrack): ProblemList {
           difficulties?: Record<string, string>
           titles?: Record<string, string>
           hasStory?: Record<string, boolean>
+          editors?: ('browser' | 'own')[]
         }
         const { problems } = body
         if (!live) return
@@ -139,6 +153,7 @@ function useProblems(track: ProblemTrack): ProblemList {
           difficulties,
           titles: body.titles ?? {},
           hasStory: body.hasStory ?? {},
+          editors: body.editors ?? ['browser', 'own'],
           // The behavioural track defaults to no selection, which means the
           // interviewer chooses — being told the competency removes the
           // recognition the question bank opens by teaching. The other tracks
@@ -396,6 +411,10 @@ export function Home({ onChoose }: Props) {
   // modes". Defaults to the browser editor: it is the mode that most resembles
   // an actual interview screen, so it is what a first-time visitor sees.
   const [editor, setEditor] = useState<'browser' | 'own'>('browser')
+  // `browser` is both the default and the only option a deployed instance
+  // accepts, so nothing has to reconcile a stale `own` here when the list
+  // arrives — the state simply never leaves `browser` on a server that never
+  // offers the control that sets it.
 
   // Any list failing to reach the server means the server is not there.
   const offline =
@@ -463,7 +482,17 @@ export function Home({ onChoose }: Props) {
             buttonLabel="Coding drill"
             primary
             onStart={(problem) => onChoose({ view: 'coding', problem, editor })}
-            extra={<EditorChoice value={editor} onChange={setEditor} />}
+            // No control at all when there is nothing to choose between, rather
+            // than a disabled one or a single stuck radio. A one-option choice
+            // reads as a setting that might do something and is the kind of
+            // thing someone clicks at twice before concluding the page is
+            // broken. On a deployed instance the browser editor is simply how
+            // it works, and a picker should not narrate an absent alternative.
+            extra={
+              coding.editors.includes('own') ? (
+                <EditorChoice value={editor} onChange={setEditor} />
+              ) : undefined
+            }
           />
 
           <TrackRow

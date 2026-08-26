@@ -245,6 +245,16 @@ you need once.
   than shipping as an improvement.
 - **Your own editor**: you edit `solution.ts` yourself, against real types,
   isolated by the OS. This is the mode that keeps the file the buffer.
+  **Local only.** `own` means the server edits and runs a `solution.ts` on its
+  own disk, and a deployed instance has exactly one checkout behind it, shared
+  by everyone using it — there `own` does not mean "my editor", it means "a file
+  several strangers are also editing". `parseDrill` refuses it under
+  `VOICE_MODE=deployed` and resolves an absent `editor` to `browser` rather than
+  to the local default, because an absent one reads as `own` everywhere
+  downstream. The picker asks `/api/problems?track=coding` which modes exist and
+  renders no control at all when there is only one; `editorsFor` is the single
+  list both sides read, so the UI cannot offer what the parser would refuse.
+  A picker is not the enforcement — a hand-typed hash or a `curl` skips it.
 
 Either way the button runs that problem's suite server-side and the interviewer
 is told the outcome as a bracketed note it never speaks — `drill.md`'s step 7,
