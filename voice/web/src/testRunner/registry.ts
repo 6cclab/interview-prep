@@ -1,3 +1,4 @@
+import { MatcherFailure } from './expect'
 import type {
   FailedTest,
   RegisteredTest,
@@ -128,6 +129,26 @@ export async function runSuite(
         status: 'failed',
         debugMessage: error instanceof Error ? error.message : String(error),
       })
+      // An error the candidate's own code threw goes into the log, where it is
+      // shown. A matcher failure does not, because its message quotes the
+      // fixture — see `MatcherFailure` and `toFailedTests` for the rule and the
+      // other place it is enforced.
+      //
+      // Appended past `MAX_LOG_LINES` on purpose. The cap exists to stop a
+      // `console.log` inside a scale-test loop producing output at the rate of
+      // the loop; there is at most one of these per test, and it is the single
+      // most useful line in the pane. Dropping the explanation because the code
+      // that failed was also chatty is the wrong trade in every case.
+      if (!(error instanceof MatcherFailure)) {
+        logs.push({
+          test: name,
+          level: 'error',
+          text:
+            error instanceof Error
+              ? `${error.name}: ${error.message}`.slice(0, MAX_LINE_CHARS)
+              : String(error).slice(0, MAX_LINE_CHARS),
+        })
+      }
     } finally {
       // Restored inside the loop, not after it: a test that throws must not
       // leave the next one's output going into a stale capture, and a suite

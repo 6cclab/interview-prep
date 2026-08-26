@@ -97,6 +97,71 @@ describe('a thrown non-assertion error', () => {
     })
     expect(toFailedTests(result)).toEqual([{ suite: 'a bug', title: 'throws before asserting anything' }])
   })
+
+  it('says what it was, in the log, attributed to the test it happened in', async () => {
+    // The regression this guards against has a real name. A buffer said
+    // `this.map.keys()` where the field was `store`; every test called `put`,
+    // `put` threw on its first line, and all ten went red with nothing on
+    // screen to distinguish "you have a typo" from "your algorithm is wrong".
+    // The message was being computed and then dropped.
+    const result = await freshSuite(() => {
+      d('a bug', () => {
+        t('reads through an undefined field', () => {
+          const self = {} as { map?: { keys(): unknown } }
+          self.map!.keys()
+        })
+      })
+    })
+    expect(result.logs).toEqual([
+      {
+        test: 'a bug > reads through an undefined field',
+        level: 'error',
+        text: expect.stringContaining('TypeError'),
+      },
+    ])
+  })
+
+  it('still says nothing about a matcher failure', async () => {
+    // The other direction, and the more important one: a matcher's message
+    // quotes the fixture it compared against, and a fixture is part of the
+    // answer. `drill-tests.ts` states the rule; this is the browser runner's
+    // copy of it. If this test fails, the leak is the defect.
+    const result = await freshSuite(() => {
+      d('wrong', () => {
+        t('returns the wrong number', () => {
+          e(1).toBe(4181)
+        })
+      })
+    })
+    expect(result.logs).toEqual([])
+    expect(JSON.stringify(result.logs)).not.toContain('4181')
+  })
+
+  it('keeps the error even when the same test filled the log', async () => {
+    // The cap is there to survive a `console.log` inside a scale-test loop. It
+    // must not be what decides whether the explanation for the failure is on
+    // screen — a chatty test that then crashes is exactly when the crash
+    // matters most.
+    const result = await freshSuite(() => {
+      d('noisy', () => {
+        t('prints a lot and then throws', () => {
+          for (let i = 0; i < 500; i++) console.log('line', i)
+          throw new RangeError('too far')
+        })
+      })
+    })
+    // Present despite the cap having already stopped this test's own output —
+    // and still sitting with that output rather than at the end of the run,
+    // because `RunOutput` groups by test and a line that drifted out of its
+    // group would be attributed to whatever ran next. (The truncation notice
+    // is what is genuinely last; it belongs to the run, not to a test.)
+    expect(result.logs).toContainEqual({
+      test: 'noisy > prints a lot and then throws',
+      level: 'error',
+      text: 'RangeError: too far',
+    })
+    expect(result.logs.at(-1)?.text).toContain('output stopped after')
+  })
 })
 
 describe('.not', () => {

@@ -14,7 +14,22 @@
  * against the verified surface instead of vitest's full one.
  */
 
-class MatcherFailure extends Error {}
+/**
+ * A matcher said no — as opposed to the candidate's code throwing.
+ *
+ * Exported so `runSuite` can tell the two apart, which matters more than it
+ * looks. A matcher's message quotes the fixture it compared against, and
+ * `voice/drill-tests.ts` is explicit that a fixture's expected values must
+ * never reach the candidate; so this one is swallowed. A `TypeError` from the
+ * buffer quotes nothing but the buffer, and swallowing it too is how
+ * `this.map.keys()` on an undefined field turned into ten unexplained red test
+ * names with no way to tell a typo from a wrong algorithm.
+ *
+ * The distinction is a class check rather than a guess at the message text,
+ * because it has to be exact in both directions: a leaked fixture is a spoiled
+ * problem, and a swallowed `TypeError` is the afternoon this was written after.
+ */
+export class MatcherFailure extends Error {}
 
 function fail(message: string): never {
   throw new MatcherFailure(message)
