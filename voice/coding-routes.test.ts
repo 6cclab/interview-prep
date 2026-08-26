@@ -313,6 +313,112 @@ describe('running tests on a deployed instance', () => {
 })
 
 /**
+ * Body size, per route.
+ *
+ * Every route read its body through one `readJsonBody` whose cap was a single
+ * constant named `MAX_DEVICE_CONFIG_BODY_BYTES` — 4KB, sized for a PATCH
+ * carrying two short strings. Every route added afterwards inherited it
+ * silently. A practice conversation stopped answering on its third question and
+ * any solution over 4KB stopped saving, both reporting something else entirely.
+ *
+ * These tests exist because nothing here ever posted a body of a realistic
+ * size. A limit no test approaches is a limit nobody knows the value of.
+ */
+describe('request bodies at a realistic size', () => {
+  /**
+   * A working buffer, not a stub. `problems/` files run to a few KB and a
+   * candidate mid-rewrite legitimately runs longer — a pasted brute force
+   * sitting above the version being written.
+   */
+  it('saves a solution far larger than a stub', async () => {
+    const { port } = await listen(baseDeps())
+    const current = await (
+      await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`)
+    ).json()
+    const res = await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text: `// ${'x'.repeat(60_000)}\nexport {}`,
+        version: (current as { version: string }).version,
+      }),
+    })
+    expect(res.status).toBe(200)
+  })
+
+  /**
+   * The message matters as much as the status. An oversized save used to answer
+   * "A save needs `text` and `version`" — naming fields the client had in fact
+   * sent — because `readJsonBody` returned null for both "too large" and
+   * "malformed", and the route read the absent fields off an empty object.
+   */
+  it('says a body is too large rather than blaming the fields', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'x'.repeat(2 * 1024 * 1024), version: 'v' }),
+    })
+    expect(res.status).toBe(413)
+    const { error } = (await res.json()) as { error: string }
+    expect(error).toMatch(/larger than/i)
+    // And explicitly not the old answer, which named fields the client sent.
+    expect(error).not.toMatch(/needs/i)
+  })
+
+  // Malformed and oversized are different problems with different answers: one
+  // means "send valid JSON", the other "send less".
+  it('keeps malformed apart from too large', async () => {
+    const { port } = await listen(baseDeps())
+    const res = await fetch(`http://127.0.0.1:${port}/api/coding/${SLUG}/solution`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: '{ this is not json',
+    })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/valid JSON/i)
+  })
+
+  /**
+   * The one the failure was actually reported on. The chat resends the whole
+   * conversation plus the editor buffer every turn, so its body grows with the
+   * session by design — which is precisely why it could not share a limit sized
+   * for a single message. Three turns of a real answer clears 4KB.
+   */
+  it('answers a practice question with several turns of history behind it', async () => {
+    // The tutor prompt off disk, plus the stub — `buildPracticeChatPrompt`
+    // builds from readme + stub + suite, and the shared tree seeds no stub.
+    writeFileSync(join(root, 'prompts/practice-chat.md'), 'TUTOR PROMPT')
+    writeFileSync(join(root, `problems/${PATTERN}/${SLUG}/stub.ts`), 'export {}')
+    const { port } = await listen(
+      baseDeps({
+        createTransport: () =>
+          async function* () {
+            yield 'ok'
+          },
+      }),
+    )
+    const res = await fetch(`http://127.0.0.1:${port}/api/practice/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        problem: SLUG,
+        code: 'export {}',
+        messages: [
+          { role: 'user', content: 'Whats up with my approach?' },
+          { role: 'assistant', content: 'a'.repeat(3000) },
+          { role: 'user', content: 'Consolidated put logic?' },
+          { role: 'assistant', content: 'b'.repeat(3000) },
+          { role: 'user', content: 'How is your put any different to mine?' },
+        ],
+      }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('ok')
+  })
+})
+
+/**
  * `GET /api/instance` — what this instance does, as capabilities.
  *
  * Two clients need it and neither can infer it: the picker, for the editing

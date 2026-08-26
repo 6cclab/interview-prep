@@ -218,19 +218,67 @@ export interface VoiceServerDeps {
 // straight into memory is a trivial way for a single request to exhaust it.
 const MAX_TURN_AUDIO_BYTES = 25 * 1024 * 1024
 
-// A device-config PATCH body is a couple of short string fields — a few
-// hundred bytes at most. 4KB is a wide margin, not a guess, and rejecting
-// anything past it costs nothing a real client would ever hit.
+/**
+ * Per-route body limits.
+ *
+ * **Each caller passes its own, and `readJsonBody` has no default**, because
+ * the default is what broke: the cap was a single constant named
+ * `MAX_DEVICE_CONFIG_BODY_BYTES`, sized for a PATCH carrying two short strings,
+ * and every route added afterwards silently inherited it. A practice
+ * conversation stopped answering on its third question, and any solution over
+ * 4KB stopped saving — both reporting something else entirely. A shared default
+ * cannot be reviewed at the call site; a required argument has to be.
+ */
+// Two short string fields. 4KB is a wide margin, not a guess.
 const MAX_DEVICE_CONFIG_BODY_BYTES = 4 * 1024
+// `{ track, problem, budgetMinutes, editor }` — slugs and small numbers.
+const MAX_SESSION_BODY_BYTES = 4 * 1024
+// A solution file. `problems/` runs to a few KB and a candidate's working
+// buffer legitimately runs longer, with a pasted brute force alongside a
+// rewrite. 1MB is far past anything anyone types and still bounded.
+const MAX_SOLUTION_BODY_BYTES = 1024 * 1024
+// A whole practice conversation plus the editor buffer, resent every turn. This
+// grows with the session by design, which is exactly why it cannot share a
+// limit sized for a single message.
+const MAX_CHAT_BODY_BYTES = 1024 * 1024
+// A verdict: a kind, and a list of failing test names. Large only when a suite
+// fails in its entirety.
+const MAX_VERDICT_BODY_BYTES = 256 * 1024
 
-/** Reads and JSON-parses a small request body. Malformed or oversized input yields `null`. */
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+/**
+ * A body past its route's limit.
+ *
+ * Its own type rather than a `null`, because `null` also means "malformed",
+ * and the two produced actively misleading answers: an oversized solution save
+ * came back as "A save needs `text` and `version`" — a message about fields
+ * the client had in fact sent — and an oversized chat as "invalid request
+ * body". Both read as client bugs. Neither was.
+ */
+export class RequestTooLarge extends Error {}
+
+/**
+ * Reads and JSON-parses a request body, up to `limit` bytes.
+ *
+ * Malformed input still yields `null`. Oversized input throws, so a route can
+ * say so rather than reporting whatever its field validation makes of an empty
+ * object. Reading an unbounded body straight into memory is a trivial way for
+ * one request to exhaust it, which is why there is a limit at all — the fix is
+ * for each limit to fit its route, not for the limit to go away.
+ */
+async function readJsonBody(
+  req: IncomingMessage,
+  limit: number,
+): Promise<Record<string, unknown> | null> {
   const chunks: Buffer[] = []
   let total = 0
   for await (const chunk of req) {
     const buf = chunk as Buffer
     total += buf.length
-    if (total > MAX_DEVICE_CONFIG_BODY_BYTES) return null
+    if (total > limit) {
+      throw new RequestTooLarge(
+        `That request is larger than this route accepts (${Math.round(limit / 1024)}KB).`,
+      )
+    }
     chunks.push(buf)
   }
   try {
@@ -1052,7 +1100,13 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         return
       }
       if (req.method === 'POST') {
-        const body = await readJsonBody(req)
+        let body: Record<string, unknown> | null
+        try {
+          body = await readJsonBody(req, MAX_DEVICE_CONFIG_BODY_BYTES)
+        } catch (error) {
+          sendJson(res, error instanceof RequestTooLarge ? 413 : 400, { error: errorMessage(error) })
+          return
+        }
         if (!body) {
           sendJson(res, 400, { error: 'invalid request body' })
           return
@@ -1116,9 +1170,11 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
     if (req.method === 'POST' && url.pathname === '/api/practice/chat') {
       let body: Record<string, unknown> | null
       try {
-        body = await readJsonBody(req)
+        body = await readJsonBody(req, MAX_CHAT_BODY_BYTES)
       } catch (error) {
-        sendJson(res, 400, { error: errorMessage(error) })
+        // 413 for oversize, 400 for malformed. Different problems with
+        // different answers: one means "send less", the other "send valid JSON".
+        sendJson(res, error instanceof RequestTooLarge ? 413 : 400, { error: errorMessage(error) })
         return
       }
       if (!body) {
@@ -1248,13 +1304,23 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
 
       let body: Record<string, unknown> | null
       try {
-        body = await readJsonBody(req)
+        body = await readJsonBody(req, MAX_SOLUTION_BODY_BYTES)
       } catch (error) {
-        sendJson(res, 400, { error: errorMessage(error) })
+        // 413 for oversize, 400 for malformed. Different problems with
+        // different answers: one means "send less", the other "send valid JSON".
+        sendJson(res, error instanceof RequestTooLarge ? 413 : 400, { error: errorMessage(error) })
         return
       }
-      const text = body?.text
-      const version = body?.version
+      // `body === null` is malformed JSON, not missing fields. Reported apart
+      // because the merged message — "A save needs `text` and `version`" — was
+      // what an oversized save used to answer, naming fields the client had
+      // sent and sending anyone reading it in exactly the wrong direction.
+      if (body === null) {
+        sendJson(res, 400, { error: 'That save was not valid JSON.' })
+        return
+      }
+      const text = body.text
+      const version = body.version
       if (typeof text !== 'string' || typeof version !== 'string') {
         sendJson(res, 400, { error: 'A save needs `text` and `version`.' })
         return
@@ -1526,9 +1592,11 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       // derives, so the spoiler gate never rests on this parse being correct.
       let drill: Drill
       try {
-        drill = parseDrill(await readJsonBody(req), deps.mode ?? 'local')
+        drill = parseDrill(await readJsonBody(req, MAX_SESSION_BODY_BYTES), deps.mode ?? 'local')
       } catch (error) {
-        sendJson(res, 400, { error: errorMessage(error) })
+        // 413 for oversize, 400 for malformed. Different problems with
+        // different answers: one means "send less", the other "send valid JSON".
+        sendJson(res, error instanceof RequestTooLarge ? 413 : 400, { error: errorMessage(error) })
         return
       }
 
@@ -2093,7 +2161,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         }
         let body: Record<string, unknown> | null
         try {
-          body = await readJsonBody(req)
+          body = await readJsonBody(req, MAX_VERDICT_BODY_BYTES)
         } catch (error) {
           sendJson(res, 400, { error: errorMessage(error) })
           return
