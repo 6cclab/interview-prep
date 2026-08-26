@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { computeVerdictInBrowser } from './testRunner/clientVerdict';
 import { Button } from 'brutalkit/button';
 import { useVoiceSession } from './useVoiceSession';
 import { Header } from './components/Header';
@@ -286,6 +287,46 @@ function DrillScreen({
   onToggleTheme,
   onGoHome
 }: DrillScreenProps) {
+  // Where the suite runs. A deployed instance has no vitest to spawn and no
+  // per-person checkout to spawn it against, so the browser runs it and posts
+  // the verdict; a local one keeps doing exactly what it has always done. The
+  // client cannot infer which it is — hence `/api/instance`.
+  //
+  // Starts false and stays false if the request fails, which is the safe
+  // direction: `false` is the mode that works without this having succeeded at
+  // all, and a deployed server answers a verdict-less request with a 400 rather
+  // than running anything.
+  const [runsTestsInBrowser, setRunsTestsInBrowser] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const res = await fetch('/api/instance');
+        if (!res.ok) return;
+        const body = (await res.json()) as { runsTestsInBrowser?: boolean };
+        if (live) setRunsTestsInBrowser(body.runsTestsInBrowser === true);
+      } catch (error) {
+        console.error('voice: /api/instance unreachable', error);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  // The editor buffer, readable from a callback created before `solution`
+  // exists. Assigned during render below, so the getter always sees the text
+  // on screen rather than the first render's empty string.
+  const solutionTextRef = useRef('');
+  const codingSlug = route.view === 'coding' ? route.problem : undefined;
+  const computeVerdict = useMemo(
+    () =>
+      runsTestsInBrowser && codingSlug !== undefined
+        ? () => computeVerdictInBrowser(codingSlug, solutionTextRef.current)
+        : undefined,
+    [runsTestsInBrowser, codingSlug],
+  );
+
   const {
     mode,
     entries,
@@ -325,7 +366,7 @@ function DrillScreen({
     outputDevices,
     selectedOutputId,
     selectOutput
-  } = useVoiceSession();
+  } = useVoiceSession(computeVerdict);
 
   // The drill this screen runs, from the route rather than from a picker: the
   // route is the single source of truth for which track this is, which is what
@@ -349,6 +390,11 @@ function DrillScreen({
   // not of the route, because it is chosen at start (Task 4).
   const editorMode = track.offersEditor ? drill?.editor : undefined;
   const solution = useSolution(problem, editorMode === 'browser');
+  // Assigned during render, not in an effect: `computeVerdict` above may be
+  // invoked between a keystroke and the next commit, and an effect would leave
+  // it running the previous render's text — i.e. grading code the candidate has
+  // already changed, and reporting the verdict as if it were current.
+  solutionTextRef.current = solution.text;
 
   // Which of the three moments the screen is in. Derived, never stored — see
   // `deriveMoment`. It drives the attention model in CSS via a data attribute

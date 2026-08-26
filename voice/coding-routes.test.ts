@@ -158,7 +158,7 @@ describe('the own editor on a deployed instance', () => {
 
   it('tells the picker which modes exist', async () => {
     const { port } = await listen(baseDeps({ mode: 'deployed' }))
-    const body = (await (await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)).json()) as {
+    const body = (await (await fetch(`http://127.0.0.1:${port}/api/instance`)).json()) as {
       editors: string[]
     }
     expect(body.editors).toEqual(['browser'])
@@ -166,7 +166,7 @@ describe('the own editor on a deployed instance', () => {
 
   it('still offers both locally', async () => {
     const { port } = await listen(baseDeps())
-    const body = (await (await fetch(`http://127.0.0.1:${port}/api/problems?track=coding`)).json()) as {
+    const body = (await (await fetch(`http://127.0.0.1:${port}/api/instance`)).json()) as {
       editors: string[]
     }
     expect(body.editors).toEqual(['browser', 'own'])
@@ -183,6 +183,160 @@ describe('the own editor on a deployed instance', () => {
     const res = await startCodingSession(port)
     expect(res.status).toBe(201)
     expect(((await res.json()) as { editor: string }).editor).toBe('browser')
+  })
+})
+
+/**
+ * `POST /api/session/:id/tests` on a deployed instance.
+ *
+ * The server does not run candidate code there. The suite runs in the browser
+ * and the outcome travels with the request, which is forgeable by definition —
+ * that trade is accepted and recorded as `drill_log.verified_by`, because the
+ * only adversary is the candidate deceiving themselves. What is *not* accepted
+ * is the server executing a shared checkout on their behalf.
+ */
+describe('running tests on a deployed instance', () => {
+  async function startedSession(overrides: Partial<VoiceServerDeps> = {}) {
+    const { port } = await listen(baseDeps({ mode: 'deployed', ...overrides }))
+    const res = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'coding', problem: SLUG, editor: 'browser' }),
+    })
+    expect(res.status).toBe(201)
+    return { port, id: ((await res.json()) as { id: string }).id }
+  }
+
+  const ranHere = () => {
+    const calls: string[][] = []
+    return {
+      calls,
+      runner: async (args: string[]) => {
+        calls.push(args)
+      },
+    }
+  }
+
+  it('takes the verdict the browser computed', async () => {
+    const { port, id } = await startedSession()
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/tests`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ verdict: { kind: 'cost-red', failed: ['x — scale > big input'] } }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ kind: 'cost-red', failed: ['x — scale > big input'] })
+  })
+
+  /**
+   * The hole this closes. Falling through to `runDrillTests` when the field is
+   * simply absent would execute whatever is in the container's shared checkout
+   * — the exact thing the branch exists to prevent, reachable by omitting a key.
+   */
+  it('refuses a request with no verdict rather than running the suite itself', async () => {
+    const spy = ranHere()
+    const { port, id } = await startedSession({ runDrillTests: spy.runner })
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/tests`, { method: 'POST' })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/in your browser/i)
+    expect(spy.calls).toEqual([])
+  })
+
+  // `verdictCue` interpolates `failed` straight into the interviewer's prompt,
+  // so an unchecked shape here is a prompt built out of arbitrary posted JSON.
+  it.each([
+    { verdict: { kind: 'nonsense' } },
+    { verdict: { kind: 'correctness-red' } },
+    { verdict: { kind: 'correctness-red', failed: [1, 2] } },
+    { verdict: 'green' },
+    { verdict: null },
+  ])('refuses a malformed verdict: %j', async (body) => {
+    const spy = ranHere()
+    const { port, id } = await startedSession({ runDrillTests: spy.runner })
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/tests`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    expect(res.status).toBe(400)
+    expect(spy.calls).toEqual([])
+  })
+
+  /**
+   * The browser runner covers a coding suite, not the debugging track's two
+   * files. Refusing is the honest answer — the alternative is running the
+   * candidate's code on the server, which is the whole thing being removed.
+   */
+  it('refuses the debugging track rather than running it server-side', async () => {
+    // Seeded here rather than in `seedContext`, so this test cannot quietly
+    // pass by failing to start a session — a silent no-op is exactly the shape
+    // of a green test that verified nothing.
+    const dir = join(root, 'debugging/loyalty-discount')
+    mkdirSync(join(dir, 'src'), { recursive: true })
+    writeFileSync(join(dir, 'README.md'), '# Bug report: loyalty discount\n')
+    writeFileSync(join(dir, 'meta.yaml'), 'title: Loyalty discount\n')
+    writeFileSync(join(dir, 'repro.test.ts'), 'export {}')
+    writeFileSync(join(dir, 'invariant.test.ts'), 'export {}')
+    writeFileSync(join(dir, 'src/discount.ts'), 'export const x = 1')
+    writeFileSync(join(root, 'prompts/debug.md'), 'DEBUG COMMAND')
+
+    const spy = ranHere()
+    const { port } = await listen(baseDeps({ mode: 'deployed', runDebugTests: spy.runner }))
+    const created = await fetch(`http://127.0.0.1:${port}/api/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ track: 'debug', problem: 'loyalty-discount' }),
+    })
+    expect(created.status).toBe(201)
+    const { id } = (await created.json()) as { id: string }
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/tests`, { method: 'POST' })
+    expect(res.status).toBe(400)
+    expect(spy.calls).toEqual([])
+    // The *message*, not just the status. Removing the debug branch still 400s
+    // — the verdict requirement below catches it — so a status-only assertion
+    // passes with the branch deleted and proves nothing about it. What the
+    // branch adds is an answer that names the real situation, instead of asking
+    // for a verdict from a track that has no browser runner to produce one.
+    expect(((await res.json()) as { error: string }).error).toMatch(/debugging track/i)
+  })
+
+  // Local is frozen, not changed. It still spawns vitest, still takes no body,
+  // and still has no reason to take a client's word for an outcome it can
+  // compute itself.
+  it('leaves a local instance running its own suite', async () => {
+    const { port } = await listen(baseDeps())
+    const created = await startCodingSession(port)
+    const { id } = (await created.json()) as { id: string }
+    const res = await fetch(`http://127.0.0.1:${port}/api/session/${id}/tests`, { method: 'POST' })
+    expect(res.status).toBe(200)
+  })
+})
+
+/**
+ * `GET /api/instance` — what this instance does, as capabilities.
+ *
+ * Two clients need it and neither can infer it: the picker, for the editing
+ * modes `parseDrill` will accept, and the drill screen, to know whether it has
+ * to run the suite itself. One route rather than a field on `/api/problems`,
+ * because the drill screen never asks for a problem list — a reload lands
+ * straight on `#/coding/<slug>` — and two routes describing the same instance
+ * are two that can drift.
+ */
+describe('GET /api/instance', () => {
+  it('reports a local instance as running its own tests', async () => {
+    const { port } = await listen(baseDeps())
+    expect(await (await fetch(`http://127.0.0.1:${port}/api/instance`)).json()).toEqual({
+      editors: ['browser', 'own'],
+      runsTestsInBrowser: false,
+    })
+  })
+
+  it('reports a deployed instance as browser-only, both ways', async () => {
+    const { port } = await listen(baseDeps({ mode: 'deployed' }))
+    expect(await (await fetch(`http://127.0.0.1:${port}/api/instance`)).json()).toEqual({
+      editors: ['browser'],
+      runsTestsInBrowser: true,
+    })
   })
 })
 
@@ -248,7 +402,6 @@ describe('GET /api/problems?track=coding', () => {
     expect(await res.json()).toEqual({
       problems: ['celebrity', SLUG],
       difficulties: { celebrity: 'hard', [SLUG]: 'medium' },
-      editors: ['browser', 'own'],
     })
   })
 

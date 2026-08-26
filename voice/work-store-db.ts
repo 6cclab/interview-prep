@@ -201,10 +201,11 @@ export function dbWorkStore(userId: string | null): WorkStore {
             row.solved ? 'solved' : 'unsolved',
             row.hints,
             row.elapsedMs,
-            // Server-side vitest, until the browser runner reports its own
-            // verdicts. Recorded rather than assumed, because a browser verdict
-            // is forgeable and the point is that it is distinguishable.
-            'server',
+            // Recorded rather than assumed, because a browser verdict is
+            // forgeable and the point is that it is distinguishable, not that
+            // it is prevented. Absent means server-side vitest — every caller
+            // that does not set it is a local run, where it is the truth.
+            row.verifiedBy ?? 'server',
             row.note,
           ],
         )

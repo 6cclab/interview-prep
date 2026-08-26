@@ -43,6 +43,7 @@ import { isoDate } from './coached'
 import { fsWorkStore } from './work-store-fs'
 import type { WorkStore } from './work-store'
 import { runDrillTests, verdictCue } from './drill-tests'
+import { parseDrillVerdict, type DrillVerdict } from './drill-verdict'
 import { createInterviewer, type Message, type StreamFn } from './interviewer'
 import { backendSummary, describeBackend, modelFor, streamForBackend, transportLabel } from './backend'
 import { preloadOllama } from './ollama'
@@ -641,6 +642,13 @@ function finishOptions(deps: VoiceServerDeps, stored: StoredSession, elapsedMs: 
               stored.drill.track === 'debug' ? 'debugging' : codingPattern(deps.root, stored.drill.problem),
             hints: stored.hintRung,
             elapsedMs,
+            // Derived from the mode rather than remembered per verdict, because
+            // in deployed mode there is no other possibility: the `/tests` route
+            // refuses to run anything server-side there, so every verdict a
+            // deployed drill was judged against came from the browser. Tracking
+            // it per run would be a second source of truth for a fact the mode
+            // already settles.
+            verifiedBy: (deps.mode ?? 'local') === 'deployed' ? ('browser' as const) : ('server' as const),
           }
         : undefined,
   }
@@ -1275,6 +1283,35 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       return
     }
 
+    /**
+     * What this instance does, as capabilities rather than as a mode name.
+     *
+     * Two clients need it and neither can infer it: the picker, to offer only
+     * the editing modes `parseDrill` will accept, and the drill screen, to know
+     * whether it has to run the suite itself. Its own route rather than a field
+     * on `/api/problems` because the drill screen never asks for a problem list
+     * — a reload lands straight on `#/coding/<slug>` — and because one route
+     * describing the instance beats two that can drift apart.
+     *
+     * Capabilities, not `mode`, deliberately. The client's job is to render what
+     * it is given; making it the second place in the system that knows
+     * `deployed` implies browser-only is how the two get to disagree.
+     *
+     * Unauthenticated-safe by position: it sits below the 401 gate like every
+     * other `/api/` route, so a deployed instance still requires a session for
+     * it. Anonymous sign-in happens on boot, before anything asks.
+     */
+    if (req.method === 'GET' && url.pathname === '/api/instance') {
+      const mode = deps.mode ?? 'local'
+      sendJson(res, 200, {
+        editors: editorsFor(mode),
+        // A deployed instance does not run candidate code — see the `/tests`
+        // route, which refuses a request that arrives without a verdict.
+        runsTestsInBrowser: mode === 'deployed',
+      })
+      return
+    }
+
     // The problem picker for whichever track asked. Names only — see
     // `listDesignProblems`, and `listCodingProblems`, whose whole reason for
     // existing is that a coding problem's *path* names its pattern and so can
@@ -1345,15 +1382,6 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       sendJson(res, 200, {
         problems: coding.map((problem) => problem.slug),
         difficulties: Object.fromEntries(coding.map((problem) => [problem.slug, problem.difficulty])),
-        // Which editing modes this instance will actually accept, so the picker
-        // offers what exists rather than what the code was written against.
-        // `parseDrill` is what enforces it; this is only so the choice does not
-        // appear on screen and then 400 on the way into a drill.
-        //
-        // A list rather than a boolean or the mode itself: the client's job is
-        // to render the options it is given, and it should not be the second
-        // place in the system that knows `deployed` implies browser-only.
-        editors: editorsFor(deps.mode ?? 'local'),
       })
       return
     }
@@ -1768,6 +1796,7 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         sendJson(res, 409, { error: 'a turn is already in progress for this session' })
         return
       }
+
       turnsInFlight.add(id)
       store.touch(id, idleClock())
 
@@ -2036,6 +2065,51 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
         sendJson(res, 409, { error: 'a turn is already in progress for this session' })
         return
       }
+
+      // A deployed instance does not run candidate code. The suite runs in the
+      // browser and the outcome travels with the request; there is no vitest
+      // here to spawn and no per-person checkout to spawn it against.
+      //
+      // **Required, not preferred.** An absent verdict is a 400 rather than a
+      // fall through to `runDrillTests`, which would execute whatever is in the
+      // container's shared checkout — the exact thing this branch exists to
+      // stop, reachable by leaving a field out.
+      //
+      // Confined to `deployed`: a local instance has the checkout, the suite and
+      // a real runner, so it has no reason to take a client's word for the
+      // outcome. Keeping the forgeable path in the one mode that cannot do
+      // better is the whole of the trade — see `verified_by` in `schema.sql`.
+      let supplied: DrillVerdict | null = null
+      if ((deps.mode ?? 'local') === 'deployed') {
+        if (testable === 'debug') {
+          // The browser runner covers a coding suite, not the debugging track's
+          // two files. Refusing is the honest answer: the alternative is running
+          // the candidate's code on the server, which is what this whole branch
+          // exists to prevent.
+          sendJson(res, 400, {
+            error: 'The debugging track cannot run its tests on a deployed instance yet.',
+          })
+          return
+        }
+        let body: Record<string, unknown> | null
+        try {
+          body = await readJsonBody(req)
+        } catch (error) {
+          sendJson(res, 400, { error: errorMessage(error) })
+          return
+        }
+        // Validated rather than trusted onward: `verdictCue` reads `failed`
+        // straight into the interviewer's prompt, so an unchecked shape here is
+        // a prompt built out of arbitrary posted JSON.
+        supplied = parseDrillVerdict(body?.verdict)
+        if (supplied === null) {
+          sendJson(res, 400, {
+            error: 'This instance runs the suite in your browser — the request must carry its verdict.',
+          })
+          return
+        }
+      }
+
       turnsInFlight.add(id)
       store.touch(id, idleClock())
 
@@ -2053,7 +2127,9 @@ export function createVoiceServer(deps: VoiceServerDeps): Server {
       let verdict: DebugVerdict | Awaited<ReturnType<typeof runDrillTests>>
       try {
         verdict =
-          testable === 'debug'
+          supplied !== null
+            ? supplied
+            : testable === 'debug'
             ? await runDebugTests({
                 root: deps.root,
                 exercise: stored.drill.problem!,

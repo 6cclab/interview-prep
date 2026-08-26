@@ -76,15 +76,6 @@ interface ProblemList {
   titles: Record<string, string>
   /** Slug to whether `local/stories.md` has a story for it. Behavioural only; a competency with none is the gap. */
   hasStory: Record<string, boolean>
-  /**
-   * Which editing modes this instance accepts. Coding track only.
-   *
-   * Sent by the server rather than decided here, because the server is what
-   * enforces it — `own` edits a `solution.ts` on the server's own disk, which a
-   * deployed instance shares between everyone using it. Defaults to both when
-   * absent so a server too old to send the field keeps today's picker.
-   */
-  editors: ('browser' | 'own')[]
   selected: string
   failure: ListFailure
 }
@@ -95,10 +86,6 @@ const EMPTY: ProblemList = {
   difficulties: {},
   titles: {},
   hasStory: {},
-  // Both, so a failed or not-yet-arrived list never renders a *narrower* set of
-  // choices than the server would accept. Offering one that turns out to be
-  // refused costs a 400; hiding one that was available costs a mode silently.
-  editors: ['browser', 'own'],
   selected: '',
   failure: null,
 }
@@ -140,7 +127,6 @@ function useProblems(track: ProblemTrack): ProblemList {
           difficulties?: Record<string, string>
           titles?: Record<string, string>
           hasStory?: Record<string, boolean>
-          editors?: ('browser' | 'own')[]
         }
         const { problems } = body
         if (!live) return
@@ -153,7 +139,6 @@ function useProblems(track: ProblemTrack): ProblemList {
           difficulties,
           titles: body.titles ?? {},
           hasStory: body.hasStory ?? {},
-          editors: body.editors ?? ['browser', 'own'],
           // The behavioural track defaults to no selection, which means the
           // interviewer chooses — being told the competency removes the
           // recognition the question bank opens by teaching. The other tracks
@@ -172,6 +157,35 @@ function useProblems(track: ProblemTrack): ProblemList {
   }, [track])
 
   return state
+}
+
+/**
+ * Which editing modes this instance accepts.
+ *
+ * Defaults to both, and stays there if the request fails. A picker that renders
+ * a *narrower* set than the server would accept loses a mode silently; one that
+ * offers a mode that turns out to be refused costs a 400 on the way into a
+ * drill. Of the two, the visible failure is the better one.
+ */
+function useEditors(): ('browser' | 'own')[] {
+  const [editors, setEditors] = useState<('browser' | 'own')[]>(['browser', 'own'])
+  useEffect(() => {
+    let live = true
+    void (async () => {
+      try {
+        const res = await fetch('/api/instance')
+        if (!res.ok) return
+        const body = (await res.json()) as { editors?: ('browser' | 'own')[] }
+        if (live && Array.isArray(body.editors) && body.editors.length > 0) setEditors(body.editors)
+      } catch (error) {
+        console.error('voice: /api/instance unreachable', error)
+      }
+    })()
+    return () => {
+      live = false
+    }
+  }, [])
+  return editors
 }
 
 /**
@@ -407,6 +421,7 @@ export function Home({ onChoose }: Props) {
   const debug = useProblems('debug')
   const assisted = useProblems('assisted')
   const record = useRecord()
+  const editors = useEditors()
   // Where the coding drill's answer gets written — see AGENTS.md, "Two editing
   // modes". Defaults to the browser editor: it is the mode that most resembles
   // an actual interview screen, so it is what a first-time visitor sees.
@@ -489,7 +504,7 @@ export function Home({ onChoose }: Props) {
             // broken. On a deployed instance the browser editor is simply how
             // it works, and a picker should not narrate an absent alternative.
             extra={
-              coding.editors.includes('own') ? (
+              editors.includes('own') ? (
                 <EditorChoice value={editor} onChange={setEditor} />
               ) : undefined
             }

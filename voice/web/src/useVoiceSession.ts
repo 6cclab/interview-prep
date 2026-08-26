@@ -3,6 +3,7 @@ import { createBrowserVoice, platformSpeechEngine, type BrowserVoice } from './b
 import { createStreamedVoice, platformClip, type StreamedVoice } from './streamedVoice'
 import type { AnyVerdict, Drill, Entry, ErrorKind, MicDevice, Mode, OutputDevice, StuckSession } from './types'
 import { endOutcome } from './end-outcome'
+import type { DrillVerdict } from '../../drill-verdict'
 
 export interface VoiceSession {
   mode: Mode
@@ -297,9 +298,20 @@ const MIC_WATCHDOG_MESSAGE =
  */
 const STREAM_FAILURES_BEFORE_REPORTING = 2
 
-export function useVoiceSession(): VoiceSession {
+/**
+ * @param computeVerdict Present only where the suite runs in this browser — a
+ *   deployed instance, on the coding track. Absent leaves `runTests` posting an
+ *   empty body and the server running the suite itself, which is what a local
+ *   instance has always done and still does.
+ */
+export function useVoiceSession(computeVerdict?: () => Promise<DrillVerdict>): VoiceSession {
   const [mode, setMode] = useState<Mode>('idle')
   const [status, setStatus] = useState('Idle.')
+  // Held in a ref because `runTests` is a stable `useCallback` and would
+  // otherwise close over the first render's value — which is `undefined`, since
+  // the instance's capabilities arrive from a fetch after the first paint.
+  const computeVerdictRef = useRef(computeVerdict)
+  computeVerdictRef.current = computeVerdict
   const [entries, setEntries] = useState<Entry[]>([])
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [interviewerSpeaking, setInterviewerSpeaking] = useState(false)
@@ -983,7 +995,19 @@ export function useVoiceSession(): VoiceSession {
     setStatus('Running the tests…')
     void (async () => {
       try {
-        const res = await fetch(`/api/session/${id}/tests`, { method: 'POST' })
+        // On a deployed instance the suite runs here and the outcome travels
+        // with the request — the server has no vitest to spawn and refuses a
+        // request that arrives without one. The interviewer's reaction is the
+        // server's job either way. Read from a ref because this callback is
+        // stable and would otherwise close over the first render's value.
+        const compute = computeVerdictRef.current
+        const verdict = compute ? await compute() : undefined
+        const res = await fetch(`/api/session/${id}/tests`, {
+          method: 'POST',
+          ...(verdict === undefined
+            ? {}
+            : { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ verdict }) }),
+        })
         if (!res.ok) {
           const { error } = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as { error: string }
           setStatus(`Could not run the tests: ${error}`)

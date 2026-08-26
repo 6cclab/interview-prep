@@ -268,9 +268,38 @@ something is opened. Writes are compare-and-set inside one transaction, and a
 lost race reports `stale` rather than silently overwriting — the client keeps
 the typed text and says so.
 
-Either way the button runs that problem's suite server-side and the interviewer
-is told the outcome as a bracketed note it never speaks — `drill.md`'s step 7,
+Locally the button runs that problem's suite server-side and the interviewer is
+told the outcome as a bracketed note it never speaks — `drill.md`'s step 7,
 reassigned, the same way the design track's time check is.
+
+**A deployed instance does not run candidate code.** The suite runs in a Web
+Worker in the browser and the verdict travels with `POST /api/session/:id/tests`,
+which refuses a request that arrives without one rather than falling back to
+vitest — the fallback would execute whatever is in the container's shared
+checkout, reachable by leaving a field out. `parseDrillVerdict` validates the
+shape before it reaches `verdictCue`, which interpolates `failed` into the
+interviewer's prompt. The debugging track is refused there for now: the browser
+runner covers a coding suite, not its two files.
+
+That verdict is forgeable and the trade is accepted — the only adversary is the
+candidate deceiving themselves. What matters is that it is *distinguishable*, so
+`drill_log.verified_by` records `browser` or `server`, and `/status` can weight
+the two differently rather than reading a forged green as a cold solve.
+
+`GET /api/instance` reports what an instance does — `editors` and
+`runsTestsInBrowser` — as capabilities rather than as a mode name. Its own route
+because the drill screen never asks for a problem list (a reload lands straight
+on `#/coding/<slug>`), and because one route describing the instance beats two
+that can drift.
+
+## Local mode is frozen
+
+`VOICE_MODE=local` keeps working exactly as documented above and is what every
+local drill still runs. It is no longer where new work goes: features land on the
+deployed path, and local keeps the behaviour it has. Nothing is being deleted —
+the zero-setup daily loop and the plain-text `local/` record are still the reason
+it exists — but a new capability arriving in one mode and not the other is
+expected rather than a gap to close.
 
 The editor mode is a **start-time choice and is not in the URL**. Reopening a
 live session gets it back from the server's session state; a reparsed hash
