@@ -114,8 +114,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The four actions in this job were the ones the Node 20 deprecation
+      # annotation still named after the `test` job above was bumped. Same
+      # reasoning as the note there: the runner forces them onto Node 24 today
+      # and says so on every run, but that forcing is a grace period, not a
+      # promise — when it ends they stop running rather than warning.
+      #
+      # Three of these are major bumps (v6→v7, v3→v4, v3→v4), so the inputs were
+      # checked rather than assumed. `build-push` and `login` have byte-identical
+      # input sets across the bump. `setup-buildx` v4 drops the deprecated
+      # `config`, `config-inline` and `install` aliases, and this workflow passes
+      # it no inputs at all. `secrets-action` keeps all six used below and adds
+      # two; it stays exactly pinned rather than floating on `v1` because it is
+      # what reads production credentials, and a patch that arrives on its own is
+      # not something to find out about from a failed deploy.
       - name: Fetch secrets from Infisical
-        uses: infisical/secrets-action@v1.0.9
+        uses: infisical/secrets-action@v1.0.17
         with:
           method: 'oidc'
           domain: 'https://infisical.6cclab.dev'
@@ -124,10 +138,10 @@ jobs:
           env-slug: 'dev'
           secret-path: '/deploy'
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -138,7 +152,7 @@ jobs:
       # wrong guess there surfaces as "piper is not on PATH" — which reads as a
       # missing install rather than a wrong architecture.
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/Dockerfile
